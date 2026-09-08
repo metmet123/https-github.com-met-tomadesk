@@ -1,0 +1,45 @@
+# Python 캐시
+__pycache__/
+*.py[cod]
+
+# 임시 파일
+tmp/
+tmp*/
+*.tmp
+*.temp
+
+# 빌드 결과
+build/
+dist/
+
+# 실행파일/배포 결과
+output/
+release/
+
+# 로그
+*.log
+
+# Python 가상환경
+.venv/
+venv/
+env/
+
+# 환경변수 / 비밀정보
+.env
+.env.*
+*.key
+*.pem
+
+# IDE 임시 설정
+.idea/
+
+# 운영체제 임시 파일
+Thumbs.db
+.DS_Store
+
+__pycache__/
+tmp/
+tmpx6rm3gcr/
+output/
+release/
+data/

@@ -1,0 +1,101 @@
+364 INFO: PyInstaller: 6.20.0, contrib hooks: 2026.5
+377 INFO: Python: 3.12.0
+433 INFO: Platform: Windows-11-10.0.22631-SP0
+443 INFO: Python environment: C:\Users\user\AppData\Local\Programs\Python\Python312
+456 INFO: Removing temporary files and cleaning cache in C:\Users\user\AppData\Local\pyinstaller
+495 INFO: Module search paths (PYTHONPATH):
+['D:\\251210-백업\\백업_251121\\폴더 모음\\이현주\\155._codex\\35_단축키 프로그램',
+ 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\python312.zip',
+ 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\DLLs',
+ 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib',
+ 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312',
+ 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages',
+ 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\win32',
+ 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\win32\\lib',
+ 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\Pythonwin',
+ 'D:\\251210-백업\\백업_251121\\폴더 모음\\이현주\\155._codex\\35_단축키 프로그램']
+1534 INFO: Appending 'binaries' from .spec
+1542 INFO: Appending 'datas' from .spec
+1543 INFO: checking Analysis
+1543 INFO: Building Analysis because Analysis-00.toc is non existent
+1544 INFO: Looking for Python shared library...
+1544 INFO: Using Python shared library: C:\Users\user\AppData\Local\Programs\Python\Python312\python312.dll
+1544 INFO: Running Analysis Analysis-00.toc
+1546 INFO: Target bytecode optimization level: 1
+1546 INFO: Initializing module dependency graph...
+1550 INFO: Initializing module graph hook caches...
+1589 INFO: Analyzing modules for base_library.zip ...
+3793 INFO: Processing standard module hook 'hook-heapq.py' from 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+4027 INFO: Processing standard module hook 'hook-encodings.py' from 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+6132 INFO: Processing standard module hook 'hook-pickle.py' from 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+7698 INFO: Caching module dependency graph...
+8133 INFO: Analyzing D:\251210-백업\백업_251121\폴더 모음\이현주\155._codex\35_단축키 프로그램\A_shortcut_launcher.py
+8157 INFO: Processing standard module hook 'hook-sqlite3.py' from 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+8916 INFO: Processing standard module hook 'hook-PyQt6.py' from 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+9779 INFO: Processing standard module hook 'hook-PyQt6.QtWidgets.py' from 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+12917 INFO: Processing standard module hook 'hook-PyQt6.QtCore.py' from 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+18278 INFO: Processing standard module hook 'hook-PyQt6.QtGui.py' from 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+39034 INFO: Processing standard module hook 'hook-_ctypes.py' from 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+39177 INFO: Processing standard module hook 'hook-pythoncom.py' from 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+39415 INFO: Processing standard module hook 'hook-pywintypes.py' from 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+39620 INFO: Processing pre-safe-import-module hook 'hook-win32com.py' from 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\pre_safe_import_module'
+39849 INFO: Processing standard module hook 'hook-win32com.py' from 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+40701 INFO: Processing standard module hook 'hook-openpyxl.py' from 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+41814 INFO: Processing standard module hook 'hook-numpy.py' from 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+42945 INFO: Processing pre-safe-import-module hook 'hook-typing_extensions.py' from 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+42948 INFO: SetuptoolsInfo: initializing cached setuptools info...
+45251 INFO: Processing standard module hook 'hook-multiprocessing.util.py' from 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+45741 INFO: Processing standard module hook 'hook-xml.py' from 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+46803 INFO: Processing standard module hook 'hook-platform.py' from 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+46918 INFO: Processing standard module hook 'hook-sysconfig.py' from 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+48478 INFO: Processing standard module hook 'hook-difflib.py' from 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+48880 INFO: Processing standard module hook 'hook-psutil.py' from 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+49313 INFO: Processing standard module hook 'hook-charset_normalizer.py' from 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+49880 INFO: Processing standard module hook 'hook-lxml.py' from 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+50766 INFO: Processing standard module hook 'hook-lxml.etree.py' from 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+50962 INFO: Processing standard module hook 'hook-xml.etree.cElementTree.py' from 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+51739 INFO: Processing standard module hook 'hook-PIL.py' from 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+51843 INFO: Processing standard module hook 'hook-PIL.Image.py' from 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+52927 INFO: Processing standard module hook 'hook-PIL.ImageFilter.py' from 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+54218 INFO: Processing module hooks (post-graph stage)...
+54524 INFO: Processing standard module hook 'hook-lxml.isoschematron.py' from 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+54982 INFO: Processing standard module hook 'hook-PIL.SpiderImagePlugin.py' from 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+55044 INFO: Processing standard module hook 'hook-lxml.objectify.py' from 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+55055 INFO: Performing binary vs. data reclassification (139 entries)
+55284 INFO: Looking for ctypes DLLs
+55422 INFO: Analyzing run-time hooks ...
+55759 INFO: Including custom run-time hook 'D:\\251210-백업\\백업_251121\\폴더 모음\\이현주\\155._codex\\35_단축키 프로그램\\pyqt6_runtime_hook.py'
+55808 INFO: Including run-time hook 'pyi_rth_inspect.py' from 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+55824 INFO: Including run-time hook 'pyi_rth_pywintypes.py' from 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\rthooks'
+55833 INFO: Including run-time hook 'pyi_rth_pythoncom.py' from 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\rthooks'
+55838 INFO: Including run-time hook 'pyi_rth_pkgutil.py' from 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+55851 INFO: Including run-time hook 'pyi_rth_multiprocessing.py' from 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+55859 INFO: Including run-time hook 'pyi_rth_pyqt6.py' from 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+55865 INFO: Processing pre-find-module-path hook 'hook-_pyi_rth_utils.py' from 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\pre_find_module_path'
+55872 INFO: Processing standard module hook 'hook-_pyi_rth_utils.py' from 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+55897 INFO: Creating base_library.zip...
+56189 INFO: Looking for dynamic libraries
+58419 INFO: Extra DLL search directories (AddDllDirectory): ['C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyQt6\\Qt6\\bin', 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\numpy.libs']
+58419 INFO: Extra DLL search directories (PATH): []
+63024 INFO: Warnings written to D:\251210-백업\백업_251121\폴더 모음\이현주\155._codex\35_단축키 프로그램\.package-build\shortcut_launcher\warn-shortcut_launcher.txt
+63138 INFO: Graph cross-reference written to D:\251210-백업\백업_251121\폴더 모음\이현주\155._codex\35_단축키 프로그램\.package-build\shortcut_launcher\xref-shortcut_launcher.html
+63189 INFO: checking PYZ
+63190 INFO: Building PYZ because PYZ-00.toc is non existent
+63191 INFO: Building PYZ (ZlibArchive) D:\251210-백업\백업_251121\폴더 모음\이현주\155._codex\35_단축키 프로그램\.package-build\shortcut_launcher\PYZ-00.pyz
+67234 INFO: Building PYZ (ZlibArchive) D:\251210-백업\백업_251121\폴더 모음\이현주\155._codex\35_단축키 프로그램\.package-build\shortcut_launcher\PYZ-00.pyz completed successfully.
+67260 INFO: checking PKG
+67261 INFO: Building PKG because PKG-00.toc is non existent
+67261 INFO: Building PKG (CArchive) toma_shortcut_program.pkg
+93882 INFO: Building PKG (CArchive) toma_shortcut_program.pkg completed successfully.
+93894 INFO: Bootloader C:\Users\user\AppData\Local\Programs\Python\Python312\Lib\site-packages\PyInstaller\bootloader\Windows-64bit-intel\runw.exe
+93895 INFO: checking EXE
+93895 INFO: Building EXE because EXE-00.toc is non existent
+93896 INFO: Building EXE from EXE-00.toc
+93898 INFO: Copying bootloader EXE to D:\251210-백업\백업_251121\폴더 모음\이현주\155._codex\35_단축키 프로그램\release\toma_shortcut_program.exe
+93928 INFO: Copying icon to EXE
+93937 INFO: Copying 0 resources to EXE
+93938 INFO: Embedding manifest in EXE
+94284 INFO: Appending PKG archive to EXE
+95378 INFO: Fixing EXE headers
+96710 INFO: Building EXE from EXE-00.toc completed successfully.
+96719 INFO: Build complete! The results are available in: D:\251210-백업\백업_251121\폴더 모음\이현주\155._codex\35_단축키 프로그램\release

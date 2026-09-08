@@ -1,0 +1,647 @@
+{
+  "exported_at": "20260729142705",
+  "tables": {
+    "hotkey_actions": [
+      {
+        "id": 2,
+        "name": "이현주 폴더",
+        "hotkey": "Alt+Shift+1",
+        "action_type": "path",
+        "payload": "{\"path\": \"D:/251210-백업/백업_251121/폴더 모음/이현주/155._codex\"}",
+        "active": 1,
+        "created_at": "20260727111119",
+        "updated_at": "20260729100122"
+      },
+      {
+        "id": 3,
+        "name": "코덱스 폴더",
+        "hotkey": "Alt+Shift+2",
+        "action_type": "path",
+        "payload": "{\"path\": \"D:\\\\251210-백업\\\\백업_251121\\\\폴더 모음\\\\이현주\\\\155._codex\"}",
+        "active": 0,
+        "created_at": "20260727111119",
+        "updated_at": "20260729100108"
+      },
+      {
+        "id": 4,
+        "name": "구글",
+        "hotkey": "Alt+Shift+3",
+        "action_type": "url",
+        "payload": "{\"url\": \"https://www.google.com/\"}",
+        "active": 1,
+        "created_at": "20260727111119",
+        "updated_at": "20260727111119"
+      },
+      {
+        "id": 5,
+        "name": "네이버",
+        "hotkey": "Alt+Shift+4",
+        "action_type": "url",
+        "payload": "{\"url\": \"https://naver.com/\"}",
+        "active": 1,
+        "created_at": "20260727111119",
+        "updated_at": "20260727111119"
+      },
+      {
+        "id": 6,
+        "name": "스크린샷 폴더",
+        "hotkey": "Alt+Shift+S",
+        "action_type": "path",
+        "payload": "{\"path\": \"D:\\\\User\\\\Pictures\\\\Screenshots\\\\\"}",
+        "active": 1,
+        "created_at": "20260727111119",
+        "updated_at": "20260727111119"
+      },
+      {
+        "id": 7,
+        "name": "메모장(메모)",
+        "hotkey": "Alt+Shift+Q",
+        "action_type": "path",
+        "payload": "{\"path\": \"D:\\\\251210-백업\\\\백업_251121\\\\폴더 모음\\\\이현주\\\\★메모★.txt\"}",
+        "active": 1,
+        "created_at": "20260727111119",
+        "updated_at": "20260727111119"
+      },
+      {
+        "id": 8,
+        "name": "메모장(문구 템플릿)",
+        "hotkey": "Alt+Shift+F",
+        "action_type": "path",
+        "payload": "{\"path\": \"D:\\\\251210-백업\\\\백업_251121\\\\폴더 모음\\\\이현주\\\\★템플릿★.txt\"}",
+        "active": 1,
+        "created_at": "20260727111119",
+        "updated_at": "20260727111119"
+      },
+      {
+        "id": 9,
+        "name": "메모장(엑셀 함수 정리)",
+        "hotkey": "Alt+Shift+A",
+        "action_type": "path",
+        "payload": "{\"path\": \"D:\\\\251210-백업\\\\백업_251121\\\\폴더 모음\\\\이현주\\\\200._엑셀,한글\\\\★엑셀 함수.txt\"}",
+        "active": 1,
+        "created_at": "20260727111119",
+        "updated_at": "20260727111119"
+      },
+      {
+        "id": 11,
+        "name": "직원현황 파일",
+        "hotkey": "Alt+Shift+Z",
+        "action_type": "path",
+        "payload": "{\"path\": \"D:\\\\251210-백업\\\\백업_251121\\\\폴더 모음\\\\=====부서====================\\\\510_직원현황\\\\★직원현황(26.2.1.).xlsx\"}",
+        "active": 1,
+        "created_at": "20260727111119",
+        "updated_at": "20260727111119"
+      },
+      {
+        "id": 12,
+        "name": "예산집행관리 파일",
+        "hotkey": "Alt+Shift+X",
+        "action_type": "path",
+        "payload": "{\"path\": \"D:\\\\251210-백업\\\\백업_251121\\\\폴더 모음\\\\=====회계====================\\\\__예산관련\\\\★예산집행관리.xlsx\"}",
+        "active": 1,
+        "created_at": "20260727111119",
+        "updated_at": "20260727111119"
+      },
+      {
+        "id": 13,
+        "name": "2026년 예산 파일",
+        "hotkey": "Alt+Shift+C",
+        "action_type": "path",
+        "payload": "{\"path\": \"D:\\\\251210-백업\\\\백업_251121\\\\폴더 모음\\\\=====회계====================\\\\__예산관련\\\\★2026예산.xlsx\"}",
+        "active": 1,
+        "created_at": "20260727111119",
+        "updated_at": "20260727111119"
+      },
+      {
+        "id": 14,
+        "name": "비번1",
+        "hotkey": "Alt+1",
+        "action_type": "text",
+        "payload": "{\"text\": \"#!13qweewq\", \"press_enter\": true}",
+        "active": 1,
+        "created_at": "20260727111119",
+        "updated_at": "20260727111119"
+      },
+      {
+        "id": 15,
+        "name": "비번2",
+        "hotkey": "Alt+2",
+        "action_type": "text",
+        "payload": "{\"text\": \"!@21qwsaas\", \"press_enter\": true}",
+        "active": 1,
+        "created_at": "20260727111119",
+        "updated_at": "20260727111119"
+      },
+      {
+        "id": 16,
+        "name": "제출요청 템플릿",
+        "hotkey": "Alt+Numpad1",
+        "action_type": "text",
+        "payload": "{\"text\": \"[○○ 제출 요청] 🚩ㅁㅁ 한\\n\\n수고많으십니다.\\n○○ 관련 공문 및 붙임파일 전달드립니다.\\n\\n아래 해당사항 있으신 경우\\n공문 및 붙임파일 등을 참고하시어\\n기한 내 자료 제출 부탁드립니다.\\n\\n*기한 내 미제출 시 해당사항 없음 간주\\n\\n━━━━━━━━━━━━━━━━━━━━━\\n\\n✅ 제출기한:  ㅁㅁ\\n✅ 제출대상\\n✔️ 대상 설명\\n➖ 세부 대상 설명\\n❗1️⃣2️⃣3️⃣\\n\\n━━━━━━━━━━━━━━━━━━━━━\", \"press_enter\": false}",
+        "active": 1,
+        "created_at": "20260727111119",
+        "updated_at": "20260727111119"
+      },
+      {
+        "id": 17,
+        "name": "정보공개 템플릿",
+        "hotkey": "Alt+Numpad2",
+        "action_type": "text",
+        "payload": "{\"text\": \"[정보공개청구 자료 제출 요청]\\n\\n수고많으십니다.\\n정보공개청구 자료 제출 요청드립니다.\\n아래 내용 관련 담당자께서는\\n기한안에 자료 제출 부탁드립니다.\\n\\n✅ 제출기한 :\\n✅ 청구내용\\n➖\\n▷ 세부내용 : 공문 및 청구서 확인 요망\\n\\n※ 기한 내 미제출시 “해당없음”으로 간주\", \"press_enter\": false}",
+        "active": 1,
+        "created_at": "20260727111119",
+        "updated_at": "20260727111119"
+      },
+      {
+        "id": 18,
+        "name": "상시학습 등록 템플릿",
+        "hotkey": "Alt+Numpad4",
+        "action_type": "text",
+        "payload": "{\"text\": \"[상시학습 등록 안내]\\n\\n안녕하세요\\n상시학습 실적 등록 안내드립니다.\\n\\n아래 내용을 참고하시어\\n인사랑에 실적 등록부탁드립니다\\n감사합니다!\\n\\n❗동일교육 이중입력인 경우는 등록 X\\n(같은 직급 내 동일 교육은 한번만 상시학습 인정)\\n\\n❗공문 대호, 교육 시간, 장소, 내용은 꼭 입력 부탁드립니다.\\n\\nㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ\", \"press_enter\": false}",
+        "active": 1,
+        "created_at": "20260727111119",
+        "updated_at": "20260727111119"
+      },
+      {
+        "id": 19,
+        "name": "긴급복지 교육 수료증 제출 요청",
+        "hotkey": "Alt+Numpad5",
+        "action_type": "text",
+        "payload": "{\"text\": \"[긴급복지 신고의무자 교육 수료증 제출 요청]\\n\\n수고많으십니다.\\n긴급복지 신고의무자 교육 수료증 제출 안내드립니다.\\n기한 내 수강 후 수료증 제출 부탁드립니다.\\n\\n📌 수료증 제출 기한: 7.31.\\n\\n✔️ 교육명\\n긴급복지지원 신고의무 교육\\n\\n✔️ 수강 사이트\\n한국보건복지인재원(in.kohi.or.kr)\\n보건복지부 나라배움터(mw.nhi.go.kr)\", \"press_enter\": false}",
+        "active": 1,
+        "created_at": "20260727111119",
+        "updated_at": "20260727111119"
+      },
+      {
+        "id": 20,
+        "name": "붙임과 같이 제출합니다.",
+        "hotkey": "Alt+A",
+        "action_type": "text",
+        "payload": "{\"text\": \"붙임과 같이 제출합니다.\", \"press_enter\": false}",
+        "active": 1,
+        "created_at": "20260727111119",
+        "updated_at": "20260727111119"
+      },
+      {
+        "id": 22,
+        "name": "내부사항",
+        "hotkey": "Alt+D",
+        "action_type": "text",
+        "payload": "{\"text\": \"내부사항\", \"press_enter\": false}",
+        "active": 1,
+        "created_at": "20260727111119",
+        "updated_at": "20260727111119"
+      },
+      {
+        "id": 23,
+        "name": "비공개",
+        "hotkey": "Alt+F",
+        "action_type": "text",
+        "payload": "{\"text\": \"비공개\", \"press_enter\": false}",
+        "active": 1,
+        "created_at": "20260727111119",
+        "updated_at": "20260727111119"
+      },
+      {
+        "id": 24,
+        "name": "수고많으십니다.",
+        "hotkey": "Alt+Z",
+        "action_type": "text",
+        "payload": "{\"text\": \"수고많으십니다.\", \"press_enter\": false}",
+        "active": 1,
+        "created_at": "20260727111119",
+        "updated_at": "20260727111119"
+      },
+      {
+        "id": 25,
+        "name": "쪽지 공람드립니다.",
+        "hotkey": "Alt+X",
+        "action_type": "text",
+        "payload": "{\"text\": \"쪽지 공람드립니다.\", \"press_enter\": false}",
+        "active": 1,
+        "created_at": "20260727111119",
+        "updated_at": "20260727111119"
+      },
+      {
+        "id": 26,
+        "name": "까지 회신 부탁드립니다.",
+        "hotkey": "Alt+V",
+        "action_type": "text",
+        "payload": "{\"text\": \"까지 회신 부탁드립니다.\", \"press_enter\": false}",
+        "active": 1,
+        "created_at": "20260727111119",
+        "updated_at": "20260727111119"
+      },
+      {
+        "id": 27,
+        "name": "파이썬 경로 설정 명령어",
+        "hotkey": "Win+Alt+Numpad1",
+        "action_type": "text",
+        "payload": "{\"text\": \"cd /d \\\"D:\\\\251210-백업\\\\백업_251121\\\\폴더 모음\\\\이현주\\\\150._python\\\\110_pdf&img통합,분할(main)\\\"\", \"press_enter\": false}",
+        "active": 0,
+        "created_at": "20260727111119",
+        "updated_at": "20260729100005"
+      },
+      {
+        "id": 28,
+        "name": "알림노트 코드 열기",
+        "hotkey": "Ctrl+F1",
+        "action_type": "path",
+        "payload": "{\"path\": \"D:\\\\251210-백업\\\\백업_251121\\\\폴더 모음\\\\이현주\\\\120_AutoHotKey\\\\105._알림노트\\\\★알림노트_ver.7.1.ahk\"}",
+        "active": 0,
+        "created_at": "20260727111119",
+        "updated_at": "20260729100320"
+      },
+      {
+        "id": 29,
+        "name": "Q-dir",
+        "hotkey": "Alt+Shift+D",
+        "action_type": "path",
+        "payload": "{\"path\": \"D:/251210-백업/백업_251121/폴더 모음/이현주/130_Q-DIR/★다운로드+제출.qdr\"}",
+        "active": 1,
+        "created_at": "20260727152932",
+        "updated_at": "20260727152935"
+      }
+    ],
+    "history": [
+      {
+        "id": 1,
+        "action_id": 1,
+        "name": "test",
+        "action_type": "text",
+        "result": "실행 완료",
+        "executed_at": "20260727110105"
+      },
+      {
+        "id": 2,
+        "action_id": 1,
+        "name": "test",
+        "action_type": "text",
+        "result": "실행 완료",
+        "executed_at": "20260727110106"
+      },
+      {
+        "id": 3,
+        "action_id": 1,
+        "name": "test",
+        "action_type": "text",
+        "result": "실행 완료",
+        "executed_at": "20260727110437"
+      },
+      {
+        "id": 4,
+        "action_id": 1,
+        "name": "test",
+        "action_type": "text",
+        "result": "실행 완료",
+        "executed_at": "20260727110614"
+      },
+      {
+        "id": 5,
+        "action_id": 1,
+        "name": "test",
+        "action_type": "text",
+        "result": "실행 완료",
+        "executed_at": "20260727110616"
+      },
+      {
+        "id": 6,
+        "action_id": 1,
+        "name": "test",
+        "action_type": "text",
+        "result": "실행 완료",
+        "executed_at": "20260727110626"
+      },
+      {
+        "id": 7,
+        "action_id": 1,
+        "name": "test",
+        "action_type": "text",
+        "result": "실행 완료",
+        "executed_at": "20260727110634"
+      },
+      {
+        "id": 8,
+        "action_id": 2,
+        "name": "이현주 폴더",
+        "action_type": "path",
+        "result": "실행 완료",
+        "executed_at": "20260727111155"
+      },
+      {
+        "id": 9,
+        "action_id": 20,
+        "name": "붙임과 같이 제출합니다.",
+        "action_type": "text",
+        "result": "실행 완료",
+        "executed_at": "20260727111200"
+      },
+      {
+        "id": 10,
+        "action_id": 21,
+        "name": "개인정보",
+        "action_type": "text",
+        "result": "실행 완료",
+        "executed_at": "20260727111205"
+      },
+      {
+        "id": 11,
+        "action_id": 20,
+        "name": "붙임과 같이 제출합니다.",
+        "action_type": "text",
+        "result": "실행 완료",
+        "executed_at": "20260727111215"
+      },
+      {
+        "id": 12,
+        "action_id": 21,
+        "name": "개인정보",
+        "action_type": "text",
+        "result": "실행 완료",
+        "executed_at": "20260727111216"
+      },
+      {
+        "id": 13,
+        "action_id": 20,
+        "name": "붙임과 같이 제출합니다.",
+        "action_type": "text",
+        "result": "실행 완료",
+        "executed_at": "20260727111218"
+      },
+      {
+        "id": 14,
+        "action_id": 22,
+        "name": "내부사항",
+        "action_type": "text",
+        "result": "실행 완료",
+        "executed_at": "20260727111226"
+      },
+      {
+        "id": 15,
+        "action_id": 21,
+        "name": "개인정보",
+        "action_type": "text",
+        "result": "실행 완료",
+        "executed_at": "20260727112416"
+      },
+      {
+        "id": 16,
+        "action_id": 14,
+        "name": "비번1",
+        "action_type": "text",
+        "result": "실행 완료",
+        "executed_at": "20260727132450"
+      },
+      {
+        "id": 17,
+        "action_id": 14,
+        "name": "비번1",
+        "action_type": "text",
+        "result": "실행 완료",
+        "executed_at": "20260727132451"
+      },
+      {
+        "id": 18,
+        "action_id": 21,
+        "name": "개인정보",
+        "action_type": "text",
+        "result": "실행 완료",
+        "executed_at": "20260727132645"
+      },
+      {
+        "id": 19,
+        "action_id": 21,
+        "name": "개인정보",
+        "action_type": "text",
+        "result": "실행 완료",
+        "executed_at": "20260727133313"
+      },
+      {
+        "id": 20,
+        "action_id": 16,
+        "name": "제출요청 템플릿",
+        "action_type": "text",
+        "result": "실행 완료",
+        "executed_at": "20260727135049"
+      },
+      {
+        "id": 21,
+        "action_id": 24,
+        "name": "수고많으십니다.",
+        "action_type": "text",
+        "result": "실행 완료",
+        "executed_at": "20260727135112"
+      },
+      {
+        "id": 22,
+        "action_id": 2,
+        "name": "이현주 폴더",
+        "action_type": "path",
+        "result": "실행 완료",
+        "executed_at": "20260727152752"
+      },
+      {
+        "id": 23,
+        "action_id": 29,
+        "name": "Q-dir",
+        "action_type": "path",
+        "result": "실행 완료",
+        "executed_at": "20260727152938"
+      },
+      {
+        "id": 24,
+        "action_id": 29,
+        "name": "Q-dir",
+        "action_type": "path",
+        "result": "실행 완료",
+        "executed_at": "20260727152943"
+      },
+      {
+        "id": 25,
+        "action_id": 10,
+        "name": "Q-Dir 바로가기",
+        "action_type": "path",
+        "result": "실행 완료",
+        "executed_at": "20260728090644"
+      },
+      {
+        "id": 26,
+        "action_id": 11,
+        "name": "직원현황 파일",
+        "action_type": "path",
+        "result": "실행 완료",
+        "executed_at": "20260728153515"
+      },
+      {
+        "id": 27,
+        "action_id": 14,
+        "name": "비번1",
+        "action_type": "text",
+        "result": "실행 완료",
+        "executed_at": "20260728162128"
+      },
+      {
+        "id": 28,
+        "action_id": 21,
+        "name": "개인정보",
+        "action_type": "text",
+        "result": "실행 완료",
+        "executed_at": "20260728162314"
+      },
+      {
+        "id": 29,
+        "action_id": 21,
+        "name": "개인정보",
+        "action_type": "text",
+        "result": "실행 완료",
+        "executed_at": "20260728164035"
+      },
+      {
+        "id": 30,
+        "action_id": 21,
+        "name": "개인정보",
+        "action_type": "text",
+        "result": "실행 완료",
+        "executed_at": "20260728164038"
+      },
+      {
+        "id": 31,
+        "action_id": 11,
+        "name": "직원현황 파일",
+        "action_type": "path",
+        "result": "실행 완료",
+        "executed_at": "20260728171133"
+      },
+      {
+        "id": 32,
+        "action_id": 14,
+        "name": "비번1",
+        "action_type": "text",
+        "result": "실행 완료",
+        "executed_at": "20260729090243"
+      },
+      {
+        "id": 33,
+        "action_id": 2,
+        "name": "이현주 폴더",
+        "action_type": "path",
+        "result": "실행 완료",
+        "executed_at": "20260729100042"
+      },
+      {
+        "id": 34,
+        "action_id": 2,
+        "name": "이현주 폴더",
+        "action_type": "path",
+        "result": "실행 완료",
+        "executed_at": "20260729100042"
+      },
+      {
+        "id": 35,
+        "action_id": 3,
+        "name": "코덱스 폴더",
+        "action_type": "path",
+        "result": "실행 완료",
+        "executed_at": "20260729100104"
+      },
+      {
+        "id": 36,
+        "action_id": 6,
+        "name": "스크린샷 폴더",
+        "action_type": "path",
+        "result": "실행 완료",
+        "executed_at": "20260729100129"
+      },
+      {
+        "id": 37,
+        "action_id": 7,
+        "name": "메모장(메모)",
+        "action_type": "path",
+        "result": "실행 완료",
+        "executed_at": "20260729100133"
+      },
+      {
+        "id": 38,
+        "action_id": 8,
+        "name": "메모장(문구 템플릿)",
+        "action_type": "path",
+        "result": "실행 완료",
+        "executed_at": "20260729100141"
+      },
+      {
+        "id": 39,
+        "action_id": 8,
+        "name": "메모장(문구 템플릿)",
+        "action_type": "path",
+        "result": "실행 완료",
+        "executed_at": "20260729100152"
+      },
+      {
+        "id": 40,
+        "action_id": 13,
+        "name": "2026년 예산 파일",
+        "action_type": "path",
+        "result": "실행 완료",
+        "executed_at": "20260729100253"
+      },
+      {
+        "id": 41,
+        "action_id": 15,
+        "name": "비번2",
+        "action_type": "text",
+        "result": "실행 완료",
+        "executed_at": "20260729102222"
+      },
+      {
+        "id": 42,
+        "action_id": 15,
+        "name": "비번2",
+        "action_type": "text",
+        "result": "실행 완료",
+        "executed_at": "20260729102225"
+      },
+      {
+        "id": 43,
+        "action_id": 14,
+        "name": "비번1",
+        "action_type": "text",
+        "result": "실행 완료",
+        "executed_at": "20260729102227"
+      }
+    ],
+    "settings": [
+      {
+        "key": "record_stop_hotkey",
+        "value": "Ctrl+Enter"
+      },
+      {
+        "key": "main_window_geometry",
+        "value": "AdnQywADAAD///3bAAAAJQAAA3YAAAP2///92wAAACUAAAN2AAAD9gAAAAAAAAAAB4D///3bAAAAJQAAA3YAAAP2"
+      },
+      {
+        "key": "main_splitter_horizontal_sizes",
+        "value": "830,603"
+      },
+      {
+        "key": "main_splitter_vertical_sizes",
+        "value": "284,352"
+      },
+      {
+        "key": "main_open_hotkey",
+        "value": "Ctrl+Alt+Space"
+      },
+      {
+        "key": "tray_hide_hotkey",
+        "value": "Ctrl+Alt+F11"
+      },
+      {
+        "key": "playback_stop_hotkey",
+        "value": "Ctrl+Esc"
+      },
+      {
+        "key": "startup_mode",
+        "value": "window"
+      }
+    ]
+  }
+}

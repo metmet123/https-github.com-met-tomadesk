@@ -1,0 +1,2877 @@
+{
+  "format": "sqlite-database-bundle",
+  "version": 1,
+  "exported_at": "20260903102332",
+  "databases": {
+    "hotkeys": {
+      "hotkey_actions": [
+        {
+          "id": 2,
+          "name": "이현주 폴더",
+          "hotkey": "Alt+Shift+1",
+          "action_type": "path",
+          "payload": "{\"path\": \"D:/251210-백업/백업_251121/폴더 모음/이현주/155._codex\"}",
+          "active": 1,
+          "created_at": "20260727111119",
+          "updated_at": "20260729100122",
+          "deleted_at": ""
+        },
+        {
+          "id": 4,
+          "name": "구글",
+          "hotkey": "Alt+Shift+3",
+          "action_type": "url",
+          "payload": "{\"url\": \"https://www.google.com/\"}",
+          "active": 1,
+          "created_at": "20260727111119",
+          "updated_at": "20260727111119",
+          "deleted_at": ""
+        },
+        {
+          "id": 5,
+          "name": "네이버",
+          "hotkey": "Alt+Shift+2",
+          "action_type": "url",
+          "payload": "{\"url\": \"https://naver.com/\", \"excluded_apps\": []}",
+          "active": 1,
+          "created_at": "20260727111119",
+          "updated_at": "20260729165732",
+          "deleted_at": ""
+        },
+        {
+          "id": 6,
+          "name": "스크린샷 폴더",
+          "hotkey": "Alt+Shift+S",
+          "action_type": "path",
+          "payload": "{\"path\": \"D:\\\\User\\\\Pictures\\\\Screenshots\\\\\"}",
+          "active": 1,
+          "created_at": "20260727111119",
+          "updated_at": "20260727111119",
+          "deleted_at": ""
+        },
+        {
+          "id": 7,
+          "name": "메모장(메모)",
+          "hotkey": "Alt+Shift+Q",
+          "action_type": "path",
+          "payload": "{\"path\": \"D:\\\\251210-백업\\\\백업_251121\\\\폴더 모음\\\\이현주\\\\★메모★.txt\"}",
+          "active": 1,
+          "created_at": "20260727111119",
+          "updated_at": "20260727111119",
+          "deleted_at": ""
+        },
+        {
+          "id": 8,
+          "name": "메모장(문구 템플릿)",
+          "hotkey": "Alt+Shift+F",
+          "action_type": "path",
+          "payload": "{\"path\": \"D:\\\\251210-백업\\\\백업_251121\\\\폴더 모음\\\\이현주\\\\★템플릿★.txt\"}",
+          "active": 1,
+          "created_at": "20260727111119",
+          "updated_at": "20260727111119",
+          "deleted_at": ""
+        },
+        {
+          "id": 9,
+          "name": "메모장(엑셀 함수 정리)",
+          "hotkey": "Alt+Shift+A",
+          "action_type": "path",
+          "payload": "{\"path\": \"D:\\\\251210-백업\\\\백업_251121\\\\폴더 모음\\\\이현주\\\\200._엑셀,한글\\\\★엑셀 함수.txt\"}",
+          "active": 1,
+          "created_at": "20260727111119",
+          "updated_at": "20260727111119",
+          "deleted_at": ""
+        },
+        {
+          "id": 11,
+          "name": "직원현황 파일",
+          "hotkey": "Alt+Shift+Z",
+          "action_type": "path",
+          "payload": "{\"path\": \"D:\\\\251210-백업\\\\백업_251121\\\\폴더 모음\\\\=====부서====================\\\\510_직원현황\\\\★직원현황(26.2.1.).xlsx\"}",
+          "active": 1,
+          "created_at": "20260727111119",
+          "updated_at": "20260727111119",
+          "deleted_at": ""
+        },
+        {
+          "id": 12,
+          "name": "예산집행관리 파일",
+          "hotkey": "Alt+Shift+X",
+          "action_type": "path",
+          "payload": "{\"path\": \"D:\\\\251210-백업\\\\백업_251121\\\\폴더 모음\\\\=====회계====================\\\\__예산관련\\\\★예산집행관리.xlsx\"}",
+          "active": 1,
+          "created_at": "20260727111119",
+          "updated_at": "20260727111119",
+          "deleted_at": ""
+        },
+        {
+          "id": 13,
+          "name": "2026년 예산 파일",
+          "hotkey": "Alt+Shift+C",
+          "action_type": "path",
+          "payload": "{\"path\": \"D:\\\\251210-백업\\\\백업_251121\\\\폴더 모음\\\\=====회계====================\\\\__예산관련\\\\★2026예산.xlsx\"}",
+          "active": 1,
+          "created_at": "20260727111119",
+          "updated_at": "20260727111119",
+          "deleted_at": ""
+        },
+        {
+          "id": 14,
+          "name": "비번1",
+          "hotkey": "Alt+1",
+          "action_type": "text",
+          "payload": "{\"text\": \"#!13qweewq\", \"press_enter\": true}",
+          "active": 1,
+          "created_at": "20260727111119",
+          "updated_at": "20260727111119",
+          "deleted_at": ""
+        },
+        {
+          "id": 15,
+          "name": "비번2",
+          "hotkey": "Alt+2",
+          "action_type": "text",
+          "payload": "{\"text\": \"!@21qwsaas\", \"press_enter\": true}",
+          "active": 1,
+          "created_at": "20260727111119",
+          "updated_at": "20260727111119",
+          "deleted_at": ""
+        },
+        {
+          "id": 16,
+          "name": "제출요청 템플릿",
+          "hotkey": "Alt+Numpad1",
+          "action_type": "text",
+          "payload": "{\"text\": \"[○○ 제출 요청] 🚩ㅁㅁ 한\\n\\n수고많으십니다.\\n○○ 관련 공문 및 붙임파일 전달드립니다.\\n\\n아래 해당사항 있으신 경우\\n공문 및 붙임파일 등을 참고하시어\\n기한 내 자료 제출 부탁드립니다.\\n\\n*기한 내 미제출 시 해당사항 없음 간주\\n\\n━━━━━━━━━━━━━━━━━━━━━\\n\\n✅ 제출기한:  ㅁㅁ\\n✅ 제출대상\\n✔️ 대상 설명\\n➖ 세부 대상 설명\\n❗1️⃣2️⃣3️⃣\\n\\n━━━━━━━━━━━━━━━━━━━━━\", \"press_enter\": false}",
+          "active": 1,
+          "created_at": "20260727111119",
+          "updated_at": "20260727111119",
+          "deleted_at": ""
+        },
+        {
+          "id": 17,
+          "name": "정보공개 템플릿",
+          "hotkey": "Alt+Numpad2",
+          "action_type": "text",
+          "payload": "{\"text\": \"[정보공개청구 자료 제출 요청]\\n\\n수고많으십니다.\\n정보공개청구 자료 제출 요청드립니다.\\n아래 내용 관련 담당자께서는\\n기한안에 자료 제출 부탁드립니다.\\n\\n✅ 제출기한 :\\n✅ 청구내용\\n➖\\n▷ 세부내용 : 공문 및 청구서 확인 요망\\n\\n※ 기한 내 미제출시 “해당없음”으로 간주\", \"press_enter\": false}",
+          "active": 1,
+          "created_at": "20260727111119",
+          "updated_at": "20260727111119",
+          "deleted_at": ""
+        },
+        {
+          "id": 18,
+          "name": "상시학습 등록 템플릿",
+          "hotkey": "Alt+Numpad4",
+          "action_type": "text",
+          "payload": "{\"text\": \"[상시학습 등록 안내]\\n\\n안녕하세요\\n상시학습 실적 등록 안내드립니다.\\n\\n아래 내용을 참고하시어\\n인사랑에 실적 등록부탁드립니다\\n감사합니다!\\n\\n❗동일교육 이중입력인 경우는 등록 X\\n(같은 직급 내 동일 교육은 한번만 상시학습 인정)\\n\\n❗공문 대호, 교육 시간, 장소, 내용은 꼭 입력 부탁드립니다.\\n\\nㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ\", \"press_enter\": false}",
+          "active": 1,
+          "created_at": "20260727111119",
+          "updated_at": "20260727111119",
+          "deleted_at": ""
+        },
+        {
+          "id": 19,
+          "name": "긴급복지 교육 수료증 제출 요청",
+          "hotkey": "Alt+Numpad5",
+          "action_type": "text",
+          "payload": "{\"text\": \"[긴급복지 신고의무자 교육 수료증 제출 요청]\\n\\n수고많으십니다.\\n긴급복지 신고의무자 교육 수료증 제출 안내드립니다.\\n기한 내 수강 후 수료증 제출 부탁드립니다.\\n\\n📌 수료증 제출 기한: 7.31.\\n\\n✔️ 교육명\\n긴급복지지원 신고의무 교육\\n\\n✔️ 수강 사이트\\n한국보건복지인재원(in.kohi.or.kr)\\n보건복지부 나라배움터(mw.nhi.go.kr)\", \"press_enter\": false}",
+          "active": 1,
+          "created_at": "20260727111119",
+          "updated_at": "20260727111119",
+          "deleted_at": ""
+        },
+        {
+          "id": 20,
+          "name": "붙임과 같이 제출합니다.",
+          "hotkey": "Alt+A",
+          "action_type": "text",
+          "payload": "{\"text\": \"붙임과 같이 제출합니다.\", \"press_enter\": false}",
+          "active": 1,
+          "created_at": "20260727111119",
+          "updated_at": "20260727111119",
+          "deleted_at": ""
+        },
+        {
+          "id": 22,
+          "name": "내부사항",
+          "hotkey": "Alt+D",
+          "action_type": "text",
+          "payload": "{\"text\": \"내부사항\", \"press_enter\": false}",
+          "active": 1,
+          "created_at": "20260727111119",
+          "updated_at": "20260727111119",
+          "deleted_at": ""
+        },
+        {
+          "id": 23,
+          "name": "비공개",
+          "hotkey": "Alt+F",
+          "action_type": "text",
+          "payload": "{\"text\": \"비공개\", \"press_enter\": false}",
+          "active": 1,
+          "created_at": "20260727111119",
+          "updated_at": "20260727111119",
+          "deleted_at": ""
+        },
+        {
+          "id": 24,
+          "name": "수고많으십니다.",
+          "hotkey": "Alt+Z",
+          "action_type": "text",
+          "payload": "{\"text\": \"수고많으십니다.\", \"press_enter\": false}",
+          "active": 0,
+          "created_at": "20260727111119",
+          "updated_at": "20260810162018",
+          "deleted_at": ""
+        },
+        {
+          "id": 25,
+          "name": "쪽지 공람드립니다.",
+          "hotkey": "Alt+X",
+          "action_type": "text",
+          "payload": "{\"text\": \"쪽지 공람드립니다.\", \"press_enter\": false}",
+          "active": 0,
+          "created_at": "20260727111119",
+          "updated_at": "20260810162022",
+          "deleted_at": ""
+        },
+        {
+          "id": 26,
+          "name": "까지 회신 부탁드립니다.",
+          "hotkey": "Alt+V",
+          "action_type": "text",
+          "payload": "{\"text\": \"까지 회신 부탁드립니다.\", \"press_enter\": false}",
+          "active": 1,
+          "created_at": "20260727111119",
+          "updated_at": "20260727111119",
+          "deleted_at": ""
+        },
+        {
+          "id": 27,
+          "name": "파이썬 경로 설정 명령어",
+          "hotkey": "Win+Alt+Numpad1",
+          "action_type": "text",
+          "payload": "{\"text\": \"cd /d \\\"D:\\\\251210-백업\\\\백업_251121\\\\폴더 모음\\\\이현주\\\\150._python\\\\110_pdf&img통합,분할(main)\\\"\", \"press_enter\": false}",
+          "active": 0,
+          "created_at": "20260727111119",
+          "updated_at": "20260729100005",
+          "deleted_at": ""
+        },
+        {
+          "id": 28,
+          "name": "알림노트 코드 열기",
+          "hotkey": "Ctrl+F1",
+          "action_type": "path",
+          "payload": "{\"path\": \"D:\\\\251210-백업\\\\백업_251121\\\\폴더 모음\\\\이현주\\\\120_AutoHotKey\\\\105._알림노트\\\\★알림노트_ver.7.1.ahk\"}",
+          "active": 0,
+          "created_at": "20260727111119",
+          "updated_at": "20260729100320",
+          "deleted_at": ""
+        },
+        {
+          "id": 29,
+          "name": "Q-dir",
+          "hotkey": "Alt+Shift+E",
+          "action_type": "path",
+          "payload": "{\"path\": \"D:/251210-백업/백업_251121/폴더 모음/이현주/130_Q-DIR/★다운로드+제출.qdr\", \"restore_if_minimized\": false, \"excluded_apps\": [{\"name\": \"Hwp.exe\", \"path\": \"C:\\\\Program Files (x86)\\\\Hnc\\\\Office 2022\\\\HOffice120\\\\Bin\\\\Hwp.exe\"}]}",
+          "active": 1,
+          "created_at": "20260727152932",
+          "updated_at": "20260730091148",
+          "deleted_at": ""
+        },
+        {
+          "id": 30,
+          "name": "새 작업",
+          "hotkey": "Ctrl+Alt+F1",
+          "action_type": "macro",
+          "payload": "{\"steps\": [{\"type\": \"click\", \"x\": 2535, \"y\": 233}, {\"type\": \"wait\", \"seconds\": 0.19}, {\"type\": \"click\", \"x\": 2535, \"y\": 233}, {\"type\": \"click\", \"x\": 2535, \"y\": 233}, {\"type\": \"wait\", \"seconds\": 0.28}, {\"type\": \"key\", \"key\": \"Ctrl+C\", \"vk\": 67, \"modifier_vks\": [17]}, {\"type\": \"wait\", \"seconds\": 0.25}, {\"type\": \"click\", \"x\": 1469, \"y\": 778}, {\"type\": \"wait\", \"seconds\": 0.22}, {\"type\": \"key\", \"key\": \"Ctrl+V\", \"vk\": 86, \"modifier_vks\": [17]}, {\"type\": \"wait\", \"seconds\": 1.34}, {\"type\": \"key\", \"key\": \"Tab\", \"vk\": 9}, {\"type\": \"wait\", \"seconds\": 0.25}, {\"type\": \"click\", \"x\": 2653, \"y\": 240}, {\"type\": \"click\", \"x\": 2653, \"y\": 240}, {\"type\": \"click\", \"x\": 2653, \"y\": 240}, {\"type\": \"wait\", \"seconds\": 0.28}, {\"type\": \"key\", \"key\": \"Ctrl+C\", \"vk\": 67, \"modifier_vks\": [17]}, {\"type\": \"wait\", \"seconds\": 0.28}, {\"type\": \"click\", \"x\": 1718, \"y\": 796}, {\"type\": \"wait\", \"seconds\": 0.25}, {\"type\": \"key\", \"key\": \"Ctrl+V\", \"vk\": 86, \"modifier_vks\": [17]}, {\"type\": \"wait\", \"seconds\": 0.45}, {\"type\": \"key\", \"key\": \"Tab\", \"vk\": 9}, {\"type\": \"wait\", \"seconds\": 0.62}, {\"type\": \"click\", \"x\": 3072, \"y\": 243}, {\"type\": \"wait\", \"seconds\": 0.16}, {\"type\": \"click\", \"x\": 3072, \"y\": 243}, {\"type\": \"click\", \"x\": 3072, \"y\": 243}, {\"type\": \"wait\", \"seconds\": 0.36}, {\"type\": \"key\", \"key\": \"Ctrl+C\", \"vk\": 67, \"modifier_vks\": [17]}, {\"type\": \"wait\", \"seconds\": 0.44}, {\"type\": \"click\", \"x\": 1560, \"y\": 783}, {\"type\": \"wait\", \"seconds\": 0.36}, {\"type\": \"key\", \"key\": \"Ctrl+V\", \"vk\": 86, \"modifier_vks\": [17]}, {\"type\": \"wait\", \"seconds\": 0.44}, {\"type\": \"key\", \"key\": \"Tab\", \"vk\": 9}, {\"type\": \"wait\", \"seconds\": 0.99}, {\"type\": \"click\", \"x\": 3225, \"y\": 242}, {\"type\": \"click\", \"x\": 3225, \"y\": 242}, {\"type\": \"click\", \"x\": 3225, \"y\": 242}, {\"type\": \"wait\", \"seconds\": 0.34}, {\"type\": \"key\", \"key\": \"Ctrl+C\", \"vk\": 67, \"modifier_vks\": [17]}, {\"type\": \"wait\", \"seconds\": 0.25}, {\"type\": \"click\", \"x\": 1508, \"y\": 767}, {\"type\": \"wait\", \"seconds\": 0.47}, {\"type\": \"key\", \"key\": \"Ctrl+V\", \"vk\": 86, \"modifier_vks\": [17]}, {\"type\": \"wait\", \"seconds\": 0.33}, {\"type\": \"key\", \"key\": \"Tab\", \"vk\": 9}, {\"type\": \"wait\", \"seconds\": 0.84}, {\"type\": \"click\", \"x\": 3424, \"y\": 245}, {\"type\": \"wait\", \"seconds\": 0.2}, {\"type\": \"click\", \"x\": 3423, \"y\": 243}, {\"type\": \"click\", \"x\": 3423, \"y\": 243}, {\"type\": \"wait\", \"seconds\": 0.44}, {\"type\": \"key\", \"key\": \"Ctrl+C\", \"vk\": 67, \"modifier_vks\": [17]}, {\"type\": \"wait\", \"seconds\": 0.25}, {\"type\": \"click\", \"x\": 1506, \"y\": 846}, {\"type\": \"wait\", \"seconds\": 0.33}, {\"type\": \"key\", \"key\": \"Ctrl+V\", \"vk\": 86, \"modifier_vks\": [17]}], \"timing_mode\": \"scaled\", \"playback_speed\": 10.0, \"excluded_apps\": []}",
+          "active": 1,
+          "created_at": "20260729143419",
+          "updated_at": "20260729144332",
+          "deleted_at": ""
+        },
+        {
+          "id": 31,
+          "name": "새 작업",
+          "hotkey": "Ctrl+Win+Z",
+          "action_type": "macro",
+          "payload": "{\"steps\": [{\"type\": \"click\", \"x\": 977, \"y\": 710}, {\"type\": \"wait\", \"seconds\": 0.33}, {\"type\": \"wheel\", \"delta\": 120, \"axis\": \"vertical\", \"x\": 992, \"y\": 538}, {\"type\": \"wheel\", \"delta\": 120, \"axis\": \"vertical\", \"x\": 992, \"y\": 538}, {\"type\": \"wheel\", \"delta\": 120, \"axis\": \"vertical\", \"x\": 992, \"y\": 538}, {\"type\": \"wheel\", \"delta\": 120, \"axis\": \"vertical\", \"x\": 992, \"y\": 538}, {\"type\": \"wheel\", \"delta\": 120, \"axis\": \"vertical\", \"x\": 992, \"y\": 538}, {\"type\": \"wheel\", \"delta\": 120, \"axis\": \"vertical\", \"x\": 992, \"y\": 538}, {\"type\": \"wheel\", \"delta\": 120, \"axis\": \"vertical\", \"x\": 992, \"y\": 538}, {\"type\": \"wait\", \"seconds\": 0.17}, {\"type\": \"wheel\", \"delta\": 120, \"axis\": \"vertical\", \"x\": 992, \"y\": 538}, {\"type\": \"wheel\", \"delta\": 120, \"axis\": \"vertical\", \"x\": 992, \"y\": 538}, {\"type\": \"wheel\", \"delta\": 120, \"axis\": \"vertical\", \"x\": 992, \"y\": 538}, {\"type\": \"wheel\", \"delta\": 120, \"axis\": \"vertical\", \"x\": 992, \"y\": 538}, {\"type\": \"wheel\", \"delta\": 120, \"axis\": \"vertical\", \"x\": 992, \"y\": 538}, {\"type\": \"wheel\", \"delta\": 120, \"axis\": \"vertical\", \"x\": 992, \"y\": 537}, {\"type\": \"wait\", \"seconds\": 0.58}, {\"type\": \"click\", \"x\": 985, \"y\": 445}, {\"type\": \"wait\", \"seconds\": 0.92}, {\"type\": \"click\", \"x\": 934, \"y\": 773}], \"timing_mode\": \"scaled\", \"playback_speed\": 8.84, \"excluded_apps\": []}",
+          "active": 1,
+          "created_at": "20260730103954",
+          "updated_at": "20260730104119",
+          "deleted_at": ""
+        },
+        {
+          "id": 32,
+          "name": "쪽지 예약시간 변경",
+          "hotkey": "Ctrl+Shift+1",
+          "action_type": "macro",
+          "payload": "{\"steps\": [{\"type\": \"click\", \"x\": 820, \"y\": 699}, {\"type\": \"wait\", \"seconds\": 0.67}, {\"type\": \"click\", \"x\": 834, \"y\": 738}, {\"type\": \"wait\", \"seconds\": 0.39}, {\"type\": \"click\", \"x\": 893, \"y\": 708}, {\"type\": \"wait\", \"seconds\": 0.72}, {\"type\": \"click\", \"x\": 902, \"y\": 671}, {\"type\": \"wait\", \"seconds\": 0.88}, {\"type\": \"click\", \"x\": 982, \"y\": 711}, {\"type\": \"wait\", \"seconds\": 1.09}, {\"type\": \"click\", \"x\": 1002, \"y\": 450}, {\"type\": \"wait\", \"seconds\": 0.78}, {\"type\": \"click\", \"x\": 967, \"y\": 763}], \"timing_mode\": \"scaled\", \"playback_speed\": 8.54, \"repeat_count\": 1, \"excluded_apps\": []}",
+          "active": 1,
+          "created_at": "20260901135147",
+          "updated_at": "20260901135221",
+          "deleted_at": ""
+        }
+      ],
+      "history": [
+        {
+          "id": 1,
+          "action_id": 1,
+          "name": "test",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260727110105"
+        },
+        {
+          "id": 2,
+          "action_id": 1,
+          "name": "test",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260727110106"
+        },
+        {
+          "id": 3,
+          "action_id": 1,
+          "name": "test",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260727110437"
+        },
+        {
+          "id": 4,
+          "action_id": 1,
+          "name": "test",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260727110614"
+        },
+        {
+          "id": 5,
+          "action_id": 1,
+          "name": "test",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260727110616"
+        },
+        {
+          "id": 6,
+          "action_id": 1,
+          "name": "test",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260727110626"
+        },
+        {
+          "id": 7,
+          "action_id": 1,
+          "name": "test",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260727110634"
+        },
+        {
+          "id": 8,
+          "action_id": 2,
+          "name": "이현주 폴더",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260727111155"
+        },
+        {
+          "id": 9,
+          "action_id": 20,
+          "name": "붙임과 같이 제출합니다.",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260727111200"
+        },
+        {
+          "id": 10,
+          "action_id": 21,
+          "name": "개인정보",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260727111205"
+        },
+        {
+          "id": 11,
+          "action_id": 20,
+          "name": "붙임과 같이 제출합니다.",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260727111215"
+        },
+        {
+          "id": 12,
+          "action_id": 21,
+          "name": "개인정보",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260727111216"
+        },
+        {
+          "id": 13,
+          "action_id": 20,
+          "name": "붙임과 같이 제출합니다.",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260727111218"
+        },
+        {
+          "id": 14,
+          "action_id": 22,
+          "name": "내부사항",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260727111226"
+        },
+        {
+          "id": 15,
+          "action_id": 21,
+          "name": "개인정보",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260727112416"
+        },
+        {
+          "id": 16,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260727132450"
+        },
+        {
+          "id": 17,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260727132451"
+        },
+        {
+          "id": 18,
+          "action_id": 21,
+          "name": "개인정보",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260727132645"
+        },
+        {
+          "id": 19,
+          "action_id": 21,
+          "name": "개인정보",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260727133313"
+        },
+        {
+          "id": 20,
+          "action_id": 16,
+          "name": "제출요청 템플릿",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260727135049"
+        },
+        {
+          "id": 21,
+          "action_id": 24,
+          "name": "수고많으십니다.",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260727135112"
+        },
+        {
+          "id": 22,
+          "action_id": 2,
+          "name": "이현주 폴더",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260727152752"
+        },
+        {
+          "id": 23,
+          "action_id": 29,
+          "name": "Q-dir",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260727152938"
+        },
+        {
+          "id": 24,
+          "action_id": 29,
+          "name": "Q-dir",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260727152943"
+        },
+        {
+          "id": 25,
+          "action_id": 10,
+          "name": "Q-Dir 바로가기",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260728090644"
+        },
+        {
+          "id": 26,
+          "action_id": 11,
+          "name": "직원현황 파일",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260728153515"
+        },
+        {
+          "id": 27,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260728162128"
+        },
+        {
+          "id": 28,
+          "action_id": 21,
+          "name": "개인정보",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260728162314"
+        },
+        {
+          "id": 29,
+          "action_id": 21,
+          "name": "개인정보",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260728164035"
+        },
+        {
+          "id": 30,
+          "action_id": 21,
+          "name": "개인정보",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260728164038"
+        },
+        {
+          "id": 31,
+          "action_id": 11,
+          "name": "직원현황 파일",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260728171133"
+        },
+        {
+          "id": 32,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260729090243"
+        },
+        {
+          "id": 33,
+          "action_id": 2,
+          "name": "이현주 폴더",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260729100042"
+        },
+        {
+          "id": 34,
+          "action_id": 2,
+          "name": "이현주 폴더",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260729100042"
+        },
+        {
+          "id": 35,
+          "action_id": 3,
+          "name": "코덱스 폴더",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260729100104"
+        },
+        {
+          "id": 36,
+          "action_id": 6,
+          "name": "스크린샷 폴더",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260729100129"
+        },
+        {
+          "id": 37,
+          "action_id": 7,
+          "name": "메모장(메모)",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260729100133"
+        },
+        {
+          "id": 38,
+          "action_id": 8,
+          "name": "메모장(문구 템플릿)",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260729100141"
+        },
+        {
+          "id": 39,
+          "action_id": 8,
+          "name": "메모장(문구 템플릿)",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260729100152"
+        },
+        {
+          "id": 40,
+          "action_id": 13,
+          "name": "2026년 예산 파일",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260729100253"
+        },
+        {
+          "id": 41,
+          "action_id": 15,
+          "name": "비번2",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260729102222"
+        },
+        {
+          "id": 42,
+          "action_id": 15,
+          "name": "비번2",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260729102225"
+        },
+        {
+          "id": 43,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260729102227"
+        },
+        {
+          "id": 44,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260729143227"
+        },
+        {
+          "id": 45,
+          "action_id": 30,
+          "name": "새 작업",
+          "action_type": "macro",
+          "result": "실행 완료",
+          "executed_at": "20260729143716"
+        },
+        {
+          "id": 46,
+          "action_id": 30,
+          "name": "새 작업",
+          "action_type": "macro",
+          "result": "실행 완료",
+          "executed_at": "20260729143935"
+        },
+        {
+          "id": 47,
+          "action_id": 30,
+          "name": "새 작업",
+          "action_type": "macro",
+          "result": "실행 완료",
+          "executed_at": "20260729144139"
+        },
+        {
+          "id": 48,
+          "action_id": 29,
+          "name": "Q-dir",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260729144731"
+        },
+        {
+          "id": 49,
+          "action_id": 30,
+          "name": "새 작업",
+          "action_type": "macro",
+          "result": "실행 완료",
+          "executed_at": "20260729154518"
+        },
+        {
+          "id": 50,
+          "action_id": 30,
+          "name": "새 작업",
+          "action_type": "macro",
+          "result": "실행 완료",
+          "executed_at": "20260729154526"
+        },
+        {
+          "id": 51,
+          "action_id": 30,
+          "name": "새 작업",
+          "action_type": "macro",
+          "result": "실행 완료",
+          "executed_at": "20260729154611"
+        },
+        {
+          "id": 52,
+          "action_id": 30,
+          "name": "새 작업",
+          "action_type": "macro",
+          "result": "실행 완료",
+          "executed_at": "20260729154621"
+        },
+        {
+          "id": 53,
+          "action_id": 30,
+          "name": "새 작업",
+          "action_type": "macro",
+          "result": "실행 완료",
+          "executed_at": "20260729154631"
+        },
+        {
+          "id": 54,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260729155354"
+        },
+        {
+          "id": 55,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260729155426"
+        },
+        {
+          "id": 56,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260729162959"
+        },
+        {
+          "id": 57,
+          "action_id": 22,
+          "name": "내부사항",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260729164822"
+        },
+        {
+          "id": 58,
+          "action_id": 2,
+          "name": "이현주 폴더",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260729165700"
+        },
+        {
+          "id": 59,
+          "action_id": 5,
+          "name": "네이버",
+          "action_type": "url",
+          "result": "실행 완료",
+          "executed_at": "20260729165820"
+        },
+        {
+          "id": 60,
+          "action_id": 29,
+          "name": "Q-dir",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260729170226"
+        },
+        {
+          "id": 61,
+          "action_id": 29,
+          "name": "Q-dir",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260729173831"
+        },
+        {
+          "id": 62,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260729174205"
+        },
+        {
+          "id": 63,
+          "action_id": 15,
+          "name": "비번2",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260729174205"
+        },
+        {
+          "id": 64,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260729175635"
+        },
+        {
+          "id": 65,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260729180141"
+        },
+        {
+          "id": 66,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260730085302"
+        },
+        {
+          "id": 67,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260730085304"
+        },
+        {
+          "id": 68,
+          "action_id": 29,
+          "name": "Q-dir",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260730091145"
+        },
+        {
+          "id": 69,
+          "action_id": 29,
+          "name": "Q-dir",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260730092014"
+        },
+        {
+          "id": 70,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260730092054"
+        },
+        {
+          "id": 71,
+          "action_id": 15,
+          "name": "비번2",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260730092055"
+        },
+        {
+          "id": 72,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260730094239"
+        },
+        {
+          "id": 73,
+          "action_id": 11,
+          "name": "직원현황 파일",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260730095117"
+        },
+        {
+          "id": 74,
+          "action_id": 15,
+          "name": "비번2",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260730102650"
+        },
+        {
+          "id": 75,
+          "action_id": 31,
+          "name": "새 작업",
+          "action_type": "macro",
+          "result": "실행 완료",
+          "executed_at": "20260730104003"
+        },
+        {
+          "id": 76,
+          "action_id": 31,
+          "name": "새 작업",
+          "action_type": "macro",
+          "result": "실행 완료",
+          "executed_at": "20260730104005"
+        },
+        {
+          "id": 77,
+          "action_id": 31,
+          "name": "새 작업",
+          "action_type": "macro",
+          "result": "실행 완료",
+          "executed_at": "20260730104032"
+        },
+        {
+          "id": 78,
+          "action_id": 31,
+          "name": "새 작업",
+          "action_type": "macro",
+          "result": "실행 완료",
+          "executed_at": "20260730104135"
+        },
+        {
+          "id": 79,
+          "action_id": 31,
+          "name": "새 작업",
+          "action_type": "macro",
+          "result": "실행 완료",
+          "executed_at": "20260730104156"
+        },
+        {
+          "id": 80,
+          "action_id": 31,
+          "name": "새 작업",
+          "action_type": "macro",
+          "result": "실행 완료",
+          "executed_at": "20260730104207"
+        },
+        {
+          "id": 81,
+          "action_id": 31,
+          "name": "새 작업",
+          "action_type": "macro",
+          "result": "실행 완료",
+          "executed_at": "20260730104216"
+        },
+        {
+          "id": 82,
+          "action_id": 31,
+          "name": "새 작업",
+          "action_type": "macro",
+          "result": "실행 완료",
+          "executed_at": "20260730104228"
+        },
+        {
+          "id": 83,
+          "action_id": 31,
+          "name": "새 작업",
+          "action_type": "macro",
+          "result": "실행 완료",
+          "executed_at": "20260730104244"
+        },
+        {
+          "id": 84,
+          "action_id": 31,
+          "name": "새 작업",
+          "action_type": "macro",
+          "result": "실행 완료",
+          "executed_at": "20260730104254"
+        },
+        {
+          "id": 85,
+          "action_id": 31,
+          "name": "새 작업",
+          "action_type": "macro",
+          "result": "실행 완료",
+          "executed_at": "20260730104304"
+        },
+        {
+          "id": 86,
+          "action_id": 31,
+          "name": "새 작업",
+          "action_type": "macro",
+          "result": "실행 완료",
+          "executed_at": "20260730104315"
+        },
+        {
+          "id": 87,
+          "action_id": 31,
+          "name": "새 작업",
+          "action_type": "macro",
+          "result": "실행 완료",
+          "executed_at": "20260730104323"
+        },
+        {
+          "id": 88,
+          "action_id": 31,
+          "name": "새 작업",
+          "action_type": "macro",
+          "result": "실행 완료",
+          "executed_at": "20260730104331"
+        },
+        {
+          "id": 89,
+          "action_id": 31,
+          "name": "새 작업",
+          "action_type": "macro",
+          "result": "실행 완료",
+          "executed_at": "20260730104341"
+        },
+        {
+          "id": 90,
+          "action_id": 31,
+          "name": "새 작업",
+          "action_type": "macro",
+          "result": "실행 완료",
+          "executed_at": "20260730104448"
+        },
+        {
+          "id": 91,
+          "action_id": 31,
+          "name": "새 작업",
+          "action_type": "macro",
+          "result": "실행 완료",
+          "executed_at": "20260730104458"
+        },
+        {
+          "id": 92,
+          "action_id": 31,
+          "name": "새 작업",
+          "action_type": "macro",
+          "result": "실행 완료",
+          "executed_at": "20260730104511"
+        },
+        {
+          "id": 93,
+          "action_id": 31,
+          "name": "새 작업",
+          "action_type": "macro",
+          "result": "실행 완료",
+          "executed_at": "20260730104522"
+        },
+        {
+          "id": 94,
+          "action_id": 31,
+          "name": "새 작업",
+          "action_type": "macro",
+          "result": "실행 완료",
+          "executed_at": "20260730104531"
+        },
+        {
+          "id": 95,
+          "action_id": 31,
+          "name": "새 작업",
+          "action_type": "macro",
+          "result": "실행 완료",
+          "executed_at": "20260730104542"
+        },
+        {
+          "id": 96,
+          "action_id": 31,
+          "name": "새 작업",
+          "action_type": "macro",
+          "result": "실행 완료",
+          "executed_at": "20260730104637"
+        },
+        {
+          "id": 97,
+          "action_id": 31,
+          "name": "새 작업",
+          "action_type": "macro",
+          "result": "실행 완료",
+          "executed_at": "20260730104726"
+        },
+        {
+          "id": 98,
+          "action_id": 31,
+          "name": "새 작업",
+          "action_type": "macro",
+          "result": "실행 완료",
+          "executed_at": "20260730104740"
+        },
+        {
+          "id": 99,
+          "action_id": 2,
+          "name": "이현주 폴더",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260730105949"
+        },
+        {
+          "id": 100,
+          "action_id": 29,
+          "name": "Q-dir",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260805092358"
+        },
+        {
+          "id": 101,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260805094441"
+        },
+        {
+          "id": 102,
+          "action_id": 29,
+          "name": "Q-dir",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260805100246"
+        },
+        {
+          "id": 103,
+          "action_id": 11,
+          "name": "직원현황 파일",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260805100322"
+        },
+        {
+          "id": 104,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260805102311"
+        },
+        {
+          "id": 105,
+          "action_id": 11,
+          "name": "직원현황 파일",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260805102837"
+        },
+        {
+          "id": 106,
+          "action_id": 11,
+          "name": "직원현황 파일",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260805102842"
+        },
+        {
+          "id": 107,
+          "action_id": 29,
+          "name": "Q-dir",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260805113825"
+        },
+        {
+          "id": 108,
+          "action_id": 11,
+          "name": "직원현황 파일",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260805123524"
+        },
+        {
+          "id": 109,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260805123721"
+        },
+        {
+          "id": 110,
+          "action_id": 12,
+          "name": "예산집행관리 파일",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260807113418"
+        },
+        {
+          "id": 111,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260807130853"
+        },
+        {
+          "id": 112,
+          "action_id": 29,
+          "name": "Q-dir",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260807131822"
+        },
+        {
+          "id": 113,
+          "action_id": 15,
+          "name": "비번2",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260807141142"
+        },
+        {
+          "id": 114,
+          "action_id": 15,
+          "name": "비번2",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260807141144"
+        },
+        {
+          "id": 115,
+          "action_id": 15,
+          "name": "비번2",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260807141355"
+        },
+        {
+          "id": 116,
+          "action_id": 15,
+          "name": "비번2",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260807141400"
+        },
+        {
+          "id": 117,
+          "action_id": 12,
+          "name": "예산집행관리 파일",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260807142704"
+        },
+        {
+          "id": 118,
+          "action_id": 23,
+          "name": "비공개",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260807150137"
+        },
+        {
+          "id": 119,
+          "action_id": 23,
+          "name": "비공개",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260807150439"
+        },
+        {
+          "id": 120,
+          "action_id": 22,
+          "name": "내부사항",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260807152103"
+        },
+        {
+          "id": 121,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260807162604"
+        },
+        {
+          "id": 122,
+          "action_id": 29,
+          "name": "Q-dir",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260807162630"
+        },
+        {
+          "id": 123,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260807165603"
+        },
+        {
+          "id": 124,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260807171106"
+        },
+        {
+          "id": 125,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260807171109"
+        },
+        {
+          "id": 126,
+          "action_id": 20,
+          "name": "붙임과 같이 제출합니다.",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260807173652"
+        },
+        {
+          "id": 127,
+          "action_id": 22,
+          "name": "내부사항",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260807173725"
+        },
+        {
+          "id": 128,
+          "action_id": 23,
+          "name": "비공개",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260807173736"
+        },
+        {
+          "id": 129,
+          "action_id": 15,
+          "name": "비번2",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260810092346"
+        },
+        {
+          "id": 130,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260810112922"
+        },
+        {
+          "id": 131,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260810130338"
+        },
+        {
+          "id": 132,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260810135001"
+        },
+        {
+          "id": 133,
+          "action_id": 15,
+          "name": "비번2",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260810151704"
+        },
+        {
+          "id": 134,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260810152635"
+        },
+        {
+          "id": 135,
+          "action_id": 20,
+          "name": "붙임과 같이 제출합니다.",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260810153204"
+        },
+        {
+          "id": 136,
+          "action_id": 23,
+          "name": "비공개",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260810153235"
+        },
+        {
+          "id": 137,
+          "action_id": 22,
+          "name": "내부사항",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260810153236"
+        },
+        {
+          "id": 138,
+          "action_id": 22,
+          "name": "내부사항",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260810153237"
+        },
+        {
+          "id": 139,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260810155400"
+        },
+        {
+          "id": 140,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260810155443"
+        },
+        {
+          "id": 141,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260810161930"
+        },
+        {
+          "id": 142,
+          "action_id": 15,
+          "name": "비번2",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260810161931"
+        },
+        {
+          "id": 143,
+          "action_id": 24,
+          "name": "수고많으십니다.",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260810161955"
+        },
+        {
+          "id": 144,
+          "action_id": 25,
+          "name": "쪽지 공람드립니다.",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260810161956"
+        },
+        {
+          "id": 145,
+          "action_id": 25,
+          "name": "쪽지 공람드립니다.",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260810162020"
+        },
+        {
+          "id": 146,
+          "action_id": 29,
+          "name": "Q-dir",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260810163013"
+        },
+        {
+          "id": 147,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260810163038"
+        },
+        {
+          "id": 148,
+          "action_id": 15,
+          "name": "비번2",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260810163040"
+        },
+        {
+          "id": 149,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260811085920"
+        },
+        {
+          "id": 150,
+          "action_id": 15,
+          "name": "비번2",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260811085922"
+        },
+        {
+          "id": 151,
+          "action_id": 29,
+          "name": "Q-dir",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260811085956"
+        },
+        {
+          "id": 152,
+          "action_id": 12,
+          "name": "예산집행관리 파일",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260811090141"
+        },
+        {
+          "id": 153,
+          "action_id": 11,
+          "name": "직원현황 파일",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260811090209"
+        },
+        {
+          "id": 154,
+          "action_id": 5,
+          "name": "네이버",
+          "action_type": "url",
+          "result": "실행 완료",
+          "executed_at": "20260815090458"
+        },
+        {
+          "id": 155,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260828090337"
+        },
+        {
+          "id": 156,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260828090339"
+        },
+        {
+          "id": 157,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260828090340"
+        },
+        {
+          "id": 158,
+          "action_id": 15,
+          "name": "비번2",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260828092633"
+        },
+        {
+          "id": 159,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260828130804"
+        },
+        {
+          "id": 160,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260828133919"
+        },
+        {
+          "id": 161,
+          "action_id": 20,
+          "name": "붙임과 같이 제출합니다.",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260828140818"
+        },
+        {
+          "id": 162,
+          "action_id": 22,
+          "name": "내부사항",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260828140848"
+        },
+        {
+          "id": 163,
+          "action_id": 19,
+          "name": "긴급복지 교육 수료증 제출 요청",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260828141149"
+        },
+        {
+          "id": 164,
+          "action_id": 20,
+          "name": "붙임과 같이 제출합니다.",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260828145005"
+        },
+        {
+          "id": 165,
+          "action_id": 20,
+          "name": "붙임과 같이 제출합니다.",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260828145100"
+        },
+        {
+          "id": 166,
+          "action_id": 22,
+          "name": "내부사항",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260828145124"
+        },
+        {
+          "id": 167,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260831095323"
+        },
+        {
+          "id": 168,
+          "action_id": 15,
+          "name": "비번2",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260831095328"
+        },
+        {
+          "id": 169,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260831095535"
+        },
+        {
+          "id": 170,
+          "action_id": 29,
+          "name": "Q-dir",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260831100222"
+        },
+        {
+          "id": 171,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260831101309"
+        },
+        {
+          "id": 172,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260831101426"
+        },
+        {
+          "id": 173,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260831101427"
+        },
+        {
+          "id": 174,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260831111613"
+        },
+        {
+          "id": 175,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260831111632"
+        },
+        {
+          "id": 176,
+          "action_id": 20,
+          "name": "붙임과 같이 제출합니다.",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260831112028"
+        },
+        {
+          "id": 177,
+          "action_id": 22,
+          "name": "내부사항",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260831112111"
+        },
+        {
+          "id": 178,
+          "action_id": 23,
+          "name": "비공개",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260831112118"
+        },
+        {
+          "id": 179,
+          "action_id": 22,
+          "name": "내부사항",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260831112920"
+        },
+        {
+          "id": 180,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260831113801"
+        },
+        {
+          "id": 181,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260831130057"
+        },
+        {
+          "id": 182,
+          "action_id": 20,
+          "name": "붙임과 같이 제출합니다.",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260831133225"
+        },
+        {
+          "id": 183,
+          "action_id": 22,
+          "name": "내부사항",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260831133253"
+        },
+        {
+          "id": 184,
+          "action_id": 22,
+          "name": "내부사항",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260831141520"
+        },
+        {
+          "id": 185,
+          "action_id": 20,
+          "name": "붙임과 같이 제출합니다.",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260831144134"
+        },
+        {
+          "id": 186,
+          "action_id": 22,
+          "name": "내부사항",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260831144224"
+        },
+        {
+          "id": 187,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260831152757"
+        },
+        {
+          "id": 188,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260831152758"
+        },
+        {
+          "id": 189,
+          "action_id": 22,
+          "name": "내부사항",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260831153018"
+        },
+        {
+          "id": 190,
+          "action_id": 12,
+          "name": "예산집행관리 파일",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260831160004"
+        },
+        {
+          "id": 191,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260831160115"
+        },
+        {
+          "id": 192,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260831160117"
+        },
+        {
+          "id": 193,
+          "action_id": 15,
+          "name": "비번2",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260831160119"
+        },
+        {
+          "id": 194,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260831160125"
+        },
+        {
+          "id": 195,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260831160159"
+        },
+        {
+          "id": 196,
+          "action_id": 15,
+          "name": "비번2",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260901090250"
+        },
+        {
+          "id": 197,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260901090252"
+        },
+        {
+          "id": 198,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260901090302"
+        },
+        {
+          "id": 199,
+          "action_id": 15,
+          "name": "비번2",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260901090304"
+        },
+        {
+          "id": 200,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260901090305"
+        },
+        {
+          "id": 201,
+          "action_id": 29,
+          "name": "Q-dir",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260901091629"
+        },
+        {
+          "id": 202,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260901092303"
+        },
+        {
+          "id": 203,
+          "action_id": 11,
+          "name": "직원현황 파일",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260901102710"
+        },
+        {
+          "id": 204,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260901131641"
+        },
+        {
+          "id": 205,
+          "action_id": 15,
+          "name": "비번2",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260901132517"
+        },
+        {
+          "id": 206,
+          "action_id": 32,
+          "name": "쪽지 예약시간 변경",
+          "action_type": "macro",
+          "result": "실행 완료 · 1회 반복",
+          "executed_at": "20260901135213"
+        },
+        {
+          "id": 207,
+          "action_id": 32,
+          "name": "쪽지 예약시간 변경",
+          "action_type": "macro",
+          "result": "실행 완료 · 1회 반복",
+          "executed_at": "20260901135319"
+        },
+        {
+          "id": 208,
+          "action_id": 32,
+          "name": "쪽지 예약시간 변경",
+          "action_type": "macro",
+          "result": "실행 완료 · 1회 반복",
+          "executed_at": "20260901135339"
+        },
+        {
+          "id": 209,
+          "action_id": 32,
+          "name": "쪽지 예약시간 변경",
+          "action_type": "macro",
+          "result": "실행 완료 · 1회 반복",
+          "executed_at": "20260901135409"
+        },
+        {
+          "id": 210,
+          "action_id": 32,
+          "name": "쪽지 예약시간 변경",
+          "action_type": "macro",
+          "result": "실행 완료 · 1회 반복",
+          "executed_at": "20260901135427"
+        },
+        {
+          "id": 211,
+          "action_id": 32,
+          "name": "쪽지 예약시간 변경",
+          "action_type": "macro",
+          "result": "실행 완료 · 1회 반복",
+          "executed_at": "20260901135442"
+        },
+        {
+          "id": 212,
+          "action_id": 32,
+          "name": "쪽지 예약시간 변경",
+          "action_type": "macro",
+          "result": "실행 완료 · 1회 반복",
+          "executed_at": "20260901135507"
+        },
+        {
+          "id": 213,
+          "action_id": 32,
+          "name": "쪽지 예약시간 변경",
+          "action_type": "macro",
+          "result": "실행 완료 · 1회 반복",
+          "executed_at": "20260901135530"
+        },
+        {
+          "id": 214,
+          "action_id": 32,
+          "name": "쪽지 예약시간 변경",
+          "action_type": "macro",
+          "result": "실행 완료 · 1회 반복",
+          "executed_at": "20260901135546"
+        },
+        {
+          "id": 215,
+          "action_id": 32,
+          "name": "쪽지 예약시간 변경",
+          "action_type": "macro",
+          "result": "실행 완료 · 1회 반복",
+          "executed_at": "20260901135604"
+        },
+        {
+          "id": 216,
+          "action_id": 32,
+          "name": "쪽지 예약시간 변경",
+          "action_type": "macro",
+          "result": "실행 완료 · 1회 반복",
+          "executed_at": "20260901135621"
+        },
+        {
+          "id": 217,
+          "action_id": 32,
+          "name": "쪽지 예약시간 변경",
+          "action_type": "macro",
+          "result": "실행 완료 · 1회 반복",
+          "executed_at": "20260901135635"
+        },
+        {
+          "id": 218,
+          "action_id": 32,
+          "name": "쪽지 예약시간 변경",
+          "action_type": "macro",
+          "result": "실행 완료 · 1회 반복",
+          "executed_at": "20260901135650"
+        },
+        {
+          "id": 219,
+          "action_id": 32,
+          "name": "쪽지 예약시간 변경",
+          "action_type": "macro",
+          "result": "실행 완료 · 1회 반복",
+          "executed_at": "20260901135708"
+        },
+        {
+          "id": 220,
+          "action_id": 32,
+          "name": "쪽지 예약시간 변경",
+          "action_type": "macro",
+          "result": "실행 완료 · 1회 반복",
+          "executed_at": "20260901135737"
+        },
+        {
+          "id": 221,
+          "action_id": 32,
+          "name": "쪽지 예약시간 변경",
+          "action_type": "macro",
+          "result": "실행 완료 · 1회 반복",
+          "executed_at": "20260901135755"
+        },
+        {
+          "id": 222,
+          "action_id": 32,
+          "name": "쪽지 예약시간 변경",
+          "action_type": "macro",
+          "result": "실행 완료 · 1회 반복",
+          "executed_at": "20260901135811"
+        },
+        {
+          "id": 223,
+          "action_id": 32,
+          "name": "쪽지 예약시간 변경",
+          "action_type": "macro",
+          "result": "실행 완료 · 1회 반복",
+          "executed_at": "20260901135835"
+        },
+        {
+          "id": 224,
+          "action_id": 32,
+          "name": "쪽지 예약시간 변경",
+          "action_type": "macro",
+          "result": "실행 완료 · 1회 반복",
+          "executed_at": "20260901135853"
+        },
+        {
+          "id": 225,
+          "action_id": 32,
+          "name": "쪽지 예약시간 변경",
+          "action_type": "macro",
+          "result": "실행 완료 · 1회 반복",
+          "executed_at": "20260901135907"
+        },
+        {
+          "id": 226,
+          "action_id": 32,
+          "name": "쪽지 예약시간 변경",
+          "action_type": "macro",
+          "result": "실행 완료 · 1회 반복",
+          "executed_at": "20260901135930"
+        },
+        {
+          "id": 227,
+          "action_id": 20,
+          "name": "붙임과 같이 제출합니다.",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260901145518"
+        },
+        {
+          "id": 228,
+          "action_id": 22,
+          "name": "내부사항",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260901145547"
+        },
+        {
+          "id": 229,
+          "action_id": 29,
+          "name": "Q-dir",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260901150018"
+        },
+        {
+          "id": 230,
+          "action_id": 20,
+          "name": "붙임과 같이 제출합니다.",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260901151241"
+        },
+        {
+          "id": 231,
+          "action_id": 22,
+          "name": "내부사항",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260901151302"
+        },
+        {
+          "id": 232,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260901152341"
+        },
+        {
+          "id": 233,
+          "action_id": 29,
+          "name": "Q-dir",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260901152614"
+        },
+        {
+          "id": 234,
+          "action_id": 22,
+          "name": "내부사항",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260901153018"
+        },
+        {
+          "id": 235,
+          "action_id": 15,
+          "name": "비번2",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260902090115"
+        },
+        {
+          "id": 236,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260902090121"
+        },
+        {
+          "id": 237,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260902090135"
+        },
+        {
+          "id": 238,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260902090137"
+        },
+        {
+          "id": 239,
+          "action_id": 29,
+          "name": "Q-dir",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260902090203"
+        },
+        {
+          "id": 240,
+          "action_id": 12,
+          "name": "예산집행관리 파일",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260902095315"
+        },
+        {
+          "id": 241,
+          "action_id": 12,
+          "name": "예산집행관리 파일",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260902095323"
+        },
+        {
+          "id": 242,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260902100614"
+        },
+        {
+          "id": 243,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260902105437"
+        },
+        {
+          "id": 244,
+          "action_id": 29,
+          "name": "Q-dir",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260902132130"
+        },
+        {
+          "id": 245,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260902132248"
+        },
+        {
+          "id": 246,
+          "action_id": 12,
+          "name": "예산집행관리 파일",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260902133143"
+        },
+        {
+          "id": 247,
+          "action_id": 22,
+          "name": "내부사항",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260902143835"
+        },
+        {
+          "id": 248,
+          "action_id": 15,
+          "name": "비번2",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260903085903"
+        },
+        {
+          "id": 249,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260903085904"
+        },
+        {
+          "id": 250,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260903091102"
+        },
+        {
+          "id": 251,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260903091103"
+        },
+        {
+          "id": 252,
+          "action_id": 29,
+          "name": "Q-dir",
+          "action_type": "path",
+          "result": "실행 완료",
+          "executed_at": "20260903092532"
+        },
+        {
+          "id": 253,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260903093026"
+        },
+        {
+          "id": 254,
+          "action_id": 23,
+          "name": "비공개",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260903094957"
+        },
+        {
+          "id": 255,
+          "action_id": 23,
+          "name": "비공개",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260903095124"
+        },
+        {
+          "id": 256,
+          "action_id": 14,
+          "name": "비번1",
+          "action_type": "text",
+          "result": "실행 완료",
+          "executed_at": "20260903100015"
+        }
+      ],
+      "settings": [
+        {
+          "key": "record_stop_hotkey",
+          "value": "Ctrl+Enter"
+        },
+        {
+          "key": "main_window_geometry",
+          "value": "AdnQywADAAAAAAEyAAAAGgAABv0AAAOhAAABMgAAABoAAAb9AAADoQAAAAAAAAAAB4AAAAEyAAAAGgAABv0AAAOh"
+        },
+        {
+          "key": "main_splitter_horizontal_sizes",
+          "value": "597,1037"
+        },
+        {
+          "key": "main_splitter_vertical_sizes",
+          "value": "284,352"
+        },
+        {
+          "key": "main_open_hotkey",
+          "value": "Ctrl+Alt+Space"
+        },
+        {
+          "key": "tray_hide_hotkey",
+          "value": "Ctrl+Alt+F11"
+        },
+        {
+          "key": "playback_stop_hotkey",
+          "value": "Ctrl+Esc"
+        },
+        {
+          "key": "startup_mode",
+          "value": "window"
+        },
+        {
+          "key": "main_table_column_widths",
+          "value": "[38, 46, 66, 107, 132, 150]"
+        },
+        {
+          "key": "main_table_column_ratios",
+          "value": "[0.22555269922879176, 0.27825192802056553, 0.31619537275064263, 0.18]"
+        },
+        {
+          "key": "main_splitter_horizontal_ratio",
+          "value": "0.409858"
+        },
+        {
+          "key": "exit_hotkey",
+          "value": "Ctrl+Alt+Esc"
+        },
+        {
+          "key": "quick_memo_hotkey",
+          "value": "Ctrl+Alt+N"
+        },
+        {
+          "key": "today_view_hotkey",
+          "value": "Ctrl+Alt+C"
+        },
+        {
+          "key": "memo_search_hotkey",
+          "value": "Ctrl+Alt+M"
+        },
+        {
+          "key": "new_memo_hotkey",
+          "value": "Win+Alt+N"
+        },
+        {
+          "key": "start_guide_seen",
+          "value": "true"
+        },
+        {
+          "key": "show_start_guide_on_launch",
+          "value": "false"
+        },
+        {
+          "key": "main_splitter_vertical_ratio",
+          "value": "0.619684"
+        },
+        {
+          "key": "action_table_column_ratio_version",
+          "value": "2"
+        }
+      ]
+    },
+    "alert_notes": {
+      "notes": [
+        {
+          "id": 26,
+          "title": "새 메모",
+          "content": "",
+          "postit": 0,
+          "always_on_top": 1,
+          "color": "vanilla",
+          "opacity": 100,
+          "input_locked": 0,
+          "created_at": "202608260203",
+          "updated_at": "202608281439",
+          "hotkey": "Ctrl+Alt+1",
+          "hotkey_action": "open",
+          "postit_visible": 0,
+          "postit_startup": 0,
+          "postit_display_mode": "normal",
+          "background_transparency": 0,
+          "d_day_at": "",
+          "d_day_label": "",
+          "d_day_alert": 0,
+          "deleted_at": "202608281439",
+          "d_day_done_at": "",
+          "monthly_rule": "",
+          "monthly_shown_for": ""
+        },
+        {
+          "id": 27,
+          "title": "새 메모",
+          "content": "",
+          "postit": 0,
+          "always_on_top": 1,
+          "color": "vanilla",
+          "opacity": 100,
+          "input_locked": 0,
+          "created_at": "202608260204",
+          "updated_at": "202608281439",
+          "hotkey": "",
+          "hotkey_action": "open",
+          "postit_visible": 0,
+          "postit_startup": 0,
+          "postit_display_mode": "normal",
+          "background_transparency": 0,
+          "d_day_at": "",
+          "d_day_label": "",
+          "d_day_alert": 0,
+          "deleted_at": "202608281439",
+          "d_day_done_at": "",
+          "monthly_rule": "",
+          "monthly_shown_for": ""
+        },
+        {
+          "id": 28,
+          "title": "새 메모",
+          "content": "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n<html><head><meta name=\"qrichtext\" content=\"1\" /><meta charset=\"utf-8\" /><style type=\"text/css\">\np, li { white-space: pre-wrap; }\nhr { height: 1px; border-width: 0; }\nli.unchecked::marker { content: \"\\2610\"; }\nli.checked::marker { content: \"\\2612\"; }\n</style></head><body style=\" font-family:'Malgun Gothic'; font-size:10.5pt; font-weight:400; font-style:normal;\">\n<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\">SDGA</p></body></html>",
+          "postit": 0,
+          "always_on_top": 1,
+          "color": "vanilla",
+          "opacity": 100,
+          "input_locked": 0,
+          "created_at": "202608260257",
+          "updated_at": "202608281439",
+          "hotkey": "",
+          "hotkey_action": "open",
+          "postit_visible": 0,
+          "postit_startup": 0,
+          "postit_display_mode": "normal",
+          "background_transparency": 0,
+          "d_day_at": "",
+          "d_day_label": "",
+          "d_day_alert": 0,
+          "deleted_at": "202608281439",
+          "d_day_done_at": "",
+          "monthly_rule": "",
+          "monthly_shown_for": ""
+        },
+        {
+          "id": 29,
+          "title": "새 메모",
+          "content": "",
+          "postit": 0,
+          "always_on_top": 1,
+          "color": "vanilla",
+          "opacity": 100,
+          "input_locked": 0,
+          "created_at": "202608260300",
+          "updated_at": "202608281439",
+          "hotkey": "",
+          "hotkey_action": "open",
+          "postit_visible": 0,
+          "postit_startup": 0,
+          "postit_display_mode": "normal",
+          "background_transparency": 0,
+          "d_day_at": "",
+          "d_day_label": "",
+          "d_day_alert": 0,
+          "deleted_at": "202608281439",
+          "d_day_done_at": "",
+          "monthly_rule": "",
+          "monthly_shown_for": ""
+        },
+        {
+          "id": 30,
+          "title": "작업 2",
+          "content": "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n<html><head><meta name=\"qrichtext\" content=\"1\" /><meta charset=\"utf-8\" /><style type=\"text/css\">\np, li { white-space: pre-wrap; }\nhr { height: 1px; border-width: 0; }\nli.unchecked::marker { content: \"\\2610\"; }\nli.checked::marker { content: \"\\2612\"; }\n</style></head><body style=\" font-family:'Malgun Gothic'; font-size:10.5pt; font-weight:400; font-style:normal;\">\n<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; line-height:140%;\"><span style=\" font-family:'Segoe UI Variable','Malgun Gothic'; font-size:14px;\">[D-day 추가 창 개선]</span></p>\n<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; line-height:140%;\"><span style=\" font-family:'Segoe UI Variable','Malgun Gothic'; font-size:14px;\">D-day 입력 방식 등 시중 D-day 앱 참고하여 개선방안 반영</span></p>\n<p style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; line-height:140%; font-family:'Segoe UI Variable','Malgun Gothic'; font-size:14px;\"><br /></p>\n<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; line-height:140%;\"><span style=\" font-family:'Segoe UI Variable','Malgun Gothic'; font-size:14px;\">[일정 표시 포스트잇 기능 추가]</span></p>\n<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; line-height:140%;\"><span style=\" font-family:'Segoe UI Variable','Malgun Gothic'; font-size:14px;\">1. 상단에 &quot;&lt; &quot; &quot;오늘&quot; &quot;&gt;&quot; 버튼 추가. (&lt; 클릭시 하루 전/&gt;클릭 시 하루 후 일정 표시/반복 클릭 가능)</span></p>\n<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; line-height:140%;\"><span style=\" font-family:'Segoe UI Variable','Malgun Gothic'; font-size:14px;\">2. D-day 설정된 일정 등 표시(편의성 등 고려하여 추후 변동가능: 해당 일자의 메모 알림 내역/할일만 따로 보는 설정 등)</span></p>\n<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; line-height:140%;\"><span style=\" font-family:'Segoe UI Variable','Malgun Gothic'; font-size:14px;\">-&gt;체크박스 형태로, 체크시 완료(삭선표시 or 휴지통이동 : 설정창에서 선택 가능)</span></p>\n<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; line-height:140%;\"><span style=\" font-family:'Segoe UI Variable','Malgun Gothic'; font-size:14px;\">3. 설정탭에 단독 단축키 지정 기능 추가</span></p>\n<p style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; line-height:140%; font-family:'Segoe UI Variable','Malgun Gothic'; font-size:14px;\"><br /></p>\n<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; line-height:140%;\"><span style=\" font-family:'Segoe UI Variable','Malgun Gothic'; font-size:14px;\">[단축키/반복작업 탭 공간 활용]</span></p>\n<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; line-height:140%;\"><span style=\" font-family:'Segoe UI Variable','Malgun Gothic'; font-size:14px;\">작업편집 구역이 불필요하게 가로로 넓음.</span></p>\n<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; line-height:140%;\"><span style=\" font-family:'Segoe UI Variable','Malgun Gothic'; font-size:14px;\">메모/일정 탭 처럼 조절가능한 구분선 하나를 추가하고</span></p>\n<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; line-height:140%;\"><span style=\" font-family:'Segoe UI Variable','Malgun Gothic'; font-size:14px;\">해당 공간을 다른 작업을 할 수 있도록 활용. (어떻게 활용할지는 미정)</span></p>\n<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; line-height:140%;\"><span style=\" font-family:'Segoe UI Variable','Malgun Gothic'; font-size:14px;\"> * 현재 후보(더 좋은 추천안이 있으면 해당 안 적용 가능)</span></p>\n<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; line-height:140%;\"><span style=\" font-family:'Segoe UI Variable','Malgun Gothic'; font-size:14px;\">    상단: D-day 표시 패널(시간 표시 x)</span></p>\n<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; line-height:140%;\"><span style=\" font-family:'Segoe UI Variable','Malgun Gothic'; font-size:14px;\">    하단: 당일 할일 패널(시간 표시)</span></p></body></html>",
+          "postit": 0,
+          "always_on_top": 0,
+          "color": "vanilla",
+          "opacity": 100,
+          "input_locked": 0,
+          "created_at": "202608281439",
+          "updated_at": "202609021633",
+          "hotkey": "Ctrl+Alt+1",
+          "hotkey_action": "postit",
+          "postit_visible": 0,
+          "postit_startup": 0,
+          "postit_display_mode": "normal",
+          "background_transparency": 0,
+          "d_day_at": "202608311444",
+          "d_day_label": "test",
+          "d_day_alert": 0,
+          "deleted_at": "",
+          "d_day_done_at": "",
+          "monthly_rule": "",
+          "monthly_shown_for": ""
+        },
+        {
+          "id": 31,
+          "title": "새 메모",
+          "content": "",
+          "postit": 0,
+          "always_on_top": 1,
+          "color": "vanilla",
+          "opacity": 100,
+          "input_locked": 0,
+          "created_at": "202609011611",
+          "updated_at": "202609021632",
+          "hotkey": "",
+          "hotkey_action": "open",
+          "postit_visible": 0,
+          "postit_startup": 0,
+          "postit_display_mode": "normal",
+          "background_transparency": 0,
+          "d_day_at": "",
+          "d_day_label": "",
+          "d_day_alert": 0,
+          "deleted_at": "202609021632",
+          "d_day_done_at": "",
+          "monthly_rule": "",
+          "monthly_shown_for": ""
+        },
+        {
+          "id": 32,
+          "title": "작업목록",
+          "content": "",
+          "postit": 0,
+          "always_on_top": 1,
+          "color": "vanilla",
+          "opacity": 100,
+          "input_locked": 0,
+          "created_at": "202609021108",
+          "updated_at": "202609031009",
+          "hotkey": "",
+          "hotkey_action": "open",
+          "postit_visible": 0,
+          "postit_startup": 0,
+          "postit_display_mode": "normal",
+          "background_transparency": 0,
+          "d_day_at": "",
+          "d_day_label": "",
+          "d_day_alert": 0,
+          "deleted_at": "",
+          "d_day_done_at": "",
+          "monthly_rule": "",
+          "monthly_shown_for": ""
+        }
+      ],
+      "note_attachments": [
+        {
+          "id": 2,
+          "note_id": 31,
+          "mime_type": "image/png",
+          "data_base64": "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",
+          "width": 628,
+          "height": 37,
+          "created_at": "202609021024"
+        },
+        {
+          "id": 3,
+          "note_id": 31,
+          "mime_type": "image/png",
+          "data_base64": "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",
+          "width": 366,
+          "height": 749,
+          "created_at": "202609021032"
+        }
+      ],
+      "reminder_series": [],
+      "reminders": [
+        {
+          "id": 5,
+          "note_id": 27,
+          "due_at": "202608260215",
+          "memo": "새 메모",
+          "status": "completed",
+          "created_at": "202608260205",
+          "series_id": null,
+          "occurrence_kind": "regular",
+          "scheduled_at": "202608260215"
+        },
+        {
+          "id": 6,
+          "note_id": 26,
+          "due_at": "202608290349",
+          "memo": "새 메모",
+          "status": "pending",
+          "created_at": "202608281439",
+          "series_id": null,
+          "occurrence_kind": "regular",
+          "scheduled_at": "202608290349"
+        },
+        {
+          "id": 7,
+          "note_id": 31,
+          "due_at": "202609011618",
+          "memo": "새 메모",
+          "status": "completed",
+          "created_at": "202609011613",
+          "series_id": null,
+          "occurrence_kind": "regular",
+          "scheduled_at": "202609011618"
+        }
+      ],
+      "reminder_history": [
+        {
+          "id": 1,
+          "note_id": null,
+          "memo": "test",
+          "fired_at": "202608101734",
+          "action": "completed",
+          "series_id": null,
+          "repeat_summary": "반복 없음",
+          "occurrence_kind": "regular"
+        },
+        {
+          "id": 2,
+          "note_id": 27,
+          "memo": "새 메모",
+          "fired_at": "202608260215",
+          "action": "completed",
+          "series_id": null,
+          "repeat_summary": "반복 없음",
+          "occurrence_kind": "regular"
+        },
+        {
+          "id": 3,
+          "note_id": 31,
+          "memo": "새 메모",
+          "fired_at": "202609011618",
+          "action": "completed",
+          "series_id": null,
+          "repeat_summary": "반복 없음",
+          "occurrence_kind": "regular"
+        }
+      ],
+      "settings": [
+        {
+          "key": "postit_geometry_1",
+          "value": "AdnQywADAAAAAAXOAAABqAAABwwAAALJAAAFzgAAAagAAAcMAAACyQAAAAAAAAAAB4AAAAXOAAABqAAABwwAAALJ"
+        },
+        {
+          "key": "calendar_view_mode",
+          "value": "week"
+        },
+        {
+          "key": "text_format_preset_1",
+          "value": "{\"family\": \"맑은 고딕\", \"size\": 10.0, \"color\": \"#000000\", \"bold\": true, \"italic\": false, \"underline\": false, \"strike\": false}"
+        },
+        {
+          "key": "standalone_memo_editor_geometry",
+          "value": "AdnQywADAAAAAAKoAAAADQAABNcAAAMNAAACqAAAACwAAATXAAADDQAAAAAAAAAAB4AAAAKoAAAALAAABNcAAAMN"
+        },
+        {
+          "key": "postit_geometry_13",
+          "value": "AdnQywADAAAAAALTAAAAZgAABHkAAAHUAAAC0wAAAGYAAAR5AAAB1AAAAAAAAAAABQAAAALTAAAAZgAABHkAAAHU"
+        },
+        {
+          "key": "postit_geometry_15",
+          "value": "AdnQywADAAAAAAHlAAAA0wAAAx4AAAGPAAAB5QAAANMAAAMeAAABjwAAAAAAAAAABQAAAAHlAAAA0wAAAx4AAAGP"
+        },
+        {
+          "key": "postit_geometry_16",
+          "value": "AdnQywADAAAAAAHjAAAA7wAAAxwAAAHoAAAB4wAAAO8AAAMcAAAB6AAAAAAAAAAABQAAAAHjAAAA7wAAAxwAAAHo"
+        },
+        {
+          "key": "memo_reminder_collapsed",
+          "value": "true"
+        },
+        {
+          "key": "memo_editor_splitter_horizontal_ratios",
+          "value": "[0.378912, 0.377551, 0.243537]"
+        },
+        {
+          "key": "toma_pet_alert_enabled",
+          "value": "true"
+        },
+        {
+          "key": "toma_pet_persistent_enabled",
+          "value": "false"
+        },
+        {
+          "key": "toma_pet_position",
+          "value": "82,592"
+        },
+        {
+          "key": "postit_geometry_24",
+          "value": "AdnQywADAAAAAAYhAAAA3AAAB1sAAAHVAAAGIQAAANwAAAdbAAAB1QAAAAAAAAAAB4AAAAYhAAAA3AAAB1sAAAHV"
+        },
+        {
+          "key": "postit_geometry_25",
+          "value": "AdnQywADAAAAAAY+AAAA+AAAB3cAAAHxAAAGPgAAAPgAAAd3AAAB8QAAAAAAAAAAB4AAAAY+AAAA+AAAB3cAAAHx"
+        },
+        {
+          "key": "memo_auto_save_enabled",
+          "value": "true"
+        },
+        {
+          "key": "postit_geometry_30",
+          "value": "AdnQywADAAAAAAXpAAABjgAAByIAAAKHAAAF6QAAAY4AAAciAAAChwAAAAAAAAAAB4AAAAXpAAABjgAAByIAAAKH"
+        },
+        {
+          "key": "memo_list_column_ratios",
+          "value": "[0.07846410684474124, 0.07679465776293823, 0.11686143572621036, 0.16026711185308848, 0.19365609348914858, 0.14524207011686144, 0.2287145242070117]"
+        },
+        {
+          "key": "memo_list_column_ratios_v2",
+          "value": "[0.060240963855421686, 0.21686746987951808, 0.3232931726907631, 0.20281124497991967, 0.19678714859437751]"
+        }
+      ],
+      "schedule_items": [
+        {
+          "id": 23,
+          "title": "새 메모",
+          "details": "새 메모",
+          "item_type": "event",
+          "note_id": 26,
+          "start_at": "202608290349",
+          "end_at": "202608290419",
+          "all_day": 0,
+          "category": "sky",
+          "priority": 0,
+          "status": "pending",
+          "recurrence_rule": "{}",
+          "hotkey": "",
+          "hotkey_action": "open",
+          "source_reminder_id": 6,
+          "created_at": "202608281439",
+          "updated_at": "202608281439",
+          "deleted_at": "202608281439"
+        },
+        {
+          "id": 24,
+          "title": "새 일정",
+          "details": "test",
+          "item_type": "event",
+          "note_id": null,
+          "start_at": "202607311100",
+          "end_at": "202607311300",
+          "all_day": 0,
+          "category": "sky",
+          "priority": 0,
+          "status": "pending",
+          "recurrence_rule": "{\"frequency\": \"none\", \"interval\": 1, \"weekdays\": [], \"until\": \"\", \"count\": 0}",
+          "hotkey": "",
+          "hotkey_action": "open",
+          "source_reminder_id": null,
+          "created_at": "202608281445",
+          "updated_at": "202608281445",
+          "deleted_at": ""
+        },
+        {
+          "id": 25,
+          "title": "teste",
+          "details": "",
+          "item_type": "task",
+          "note_id": null,
+          "start_at": "202609090415",
+          "end_at": "202709090502",
+          "all_day": 0,
+          "category": "sky",
+          "priority": 0,
+          "status": "pending",
+          "recurrence_rule": "{\"frequency\": \"none\", \"interval\": 1, \"weekdays\": [], \"until\": \"\", \"count\": 0}",
+          "hotkey": "",
+          "hotkey_action": "open",
+          "source_reminder_id": null,
+          "created_at": "202609011612",
+          "updated_at": "202609011612",
+          "deleted_at": ""
+        },
+        {
+          "id": 27,
+          "title": "test",
+          "details": "",
+          "item_type": "event",
+          "note_id": null,
+          "start_at": "202609021200",
+          "end_at": "202609021300",
+          "all_day": 0,
+          "category": "sky",
+          "priority": 0,
+          "status": "pending",
+          "recurrence_rule": "{\"frequency\": \"none\", \"interval\": 1, \"weekdays\": [], \"until\": \"\", \"count\": 0}",
+          "hotkey": "",
+          "hotkey_action": "open",
+          "source_reminder_id": null,
+          "created_at": "202609020941",
+          "updated_at": "202609020941",
+          "deleted_at": ""
+        }
+      ],
+      "schedule_notifications": [],
+      "schedule_notification_log": [],
+      "schedule_occurrence_exceptions": []
+    }
+  }
+}
