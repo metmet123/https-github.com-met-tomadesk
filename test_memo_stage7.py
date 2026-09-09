@@ -125,7 +125,8 @@ class NoteLinkTest(unittest.TestCase):
 
     def test_the_menu_offers_it(self):
         menu = build_insert_menu(self.editor)
-        labels = [action.text() for action in menu.actions() if action.isEnabled()]
+        panel = menu.actions()[0].defaultWidget()
+        labels = [panel.feature_list.item(row).text() for row in range(panel.feature_list.count())]
         self.assertTrue(any("메모 링크" in label for label in labels), labels)
         menu.deleteLater()
 

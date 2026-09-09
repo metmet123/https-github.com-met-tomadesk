@@ -109,15 +109,16 @@ def item_label(item) -> str:
     return f"{item[0]}   {item[1]}"
 
 
-def item_tooltip(item) -> str:
+def item_tooltip(item, typing_override: str | None = None) -> str:
     """마우스를 올렸을 때 뜰 설명.  무엇인지 먼저, 어떻게 부르는지 그다음."""
     lines = [f"<b>{item[1]}</b>", item[4]]
     ways = []
     if item[5]:
         ways.append(item[5])
-    if item[6]:
-        ways.append(f"줄 앞에서 {item[6].strip()} 다음 스페이스"
-                    if item[6].endswith(" ") else f"줄 앞에서 {item[6]}")
+    typing = item[6] if typing_override is None else typing_override
+    if typing:
+        ways.append(f"줄 앞에서 {typing.strip()} 다음 스페이스"
+                    if typing.endswith(" ") else f"줄 앞에서 {typing}")
     if ways:
         lines.append("<span style='color:#64748b'>" + "  ·  ".join(ways) + "</span>")
     return "<div style='white-space:pre'>" + "<br>".join(lines) + "</div>"
@@ -155,21 +156,7 @@ def build_insert_menu(editor, parent=None) -> QMenu:
     from .insert_panel import InsertPanel
     panel_action = QWidgetAction(menu)
     panel_action.setDefaultWidget(InsertPanel(editor, menu))
-    # Keep the long-standing QAction inspection contract for tests and assistive
-    # tooling while the visible surface is now the richer two-tab panel.
-    items = list(available_items(editor))
-    if items:
-        panel_action.setText(item_label(items[0][0]))
-        panel_action.setToolTip(item_tooltip(items[0][0]))
     menu.addAction(panel_action)
-    for item, handler in items[1:]:
-        action = menu.addAction(item_label(item))
-        action.setToolTip(item_tooltip(item))
-        action.setVisible(False)
-        if handler is None:
-            action.setEnabled(False)
-        else:
-            action.triggered.connect(lambda _checked=False, call=handler: call())
     return menu
 
 

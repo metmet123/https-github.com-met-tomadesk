@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import sys
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 
@@ -160,6 +161,73 @@ def _configured_path(value) -> Path | None:
 
 def same_path(left: Path, right: Path) -> bool:
     return os.path.normcase(str(left.resolve())) == os.path.normcase(str(right.resolve()))
+
+
+def next_numbered_database_path(database_path: Path) -> Path:
+    """Return the first free ``name2.db``-style path beside a database."""
+    database = Path(database_path)
+    index = 2
+    while True:
+        candidate = database.with_name(f"{database.stem}{index}{database.suffix}")
+        if not candidate.exists():
+            return candidate
+        index += 1
+
+
+def copy_databases_preserving_existing(
+    destination_dir: Path,
+    writers: Mapping[str, Callable[[Path], object]],
+    finalize: Callable[[], object] | None = None,
+) -> list[Path]:
+    """Write current databases while retaining destination DBs under numbered names.
+
+    Existing canonical files are moved first (``hotkeys.db`` -> ``hotkeys2.db``).
+    If any writer or the optional finalizer fails, newly written canonical files are
+    removed and the preserved files are restored to their original names.
+    """
+    destination = Path(destination_dir)
+    destination.mkdir(parents=True, exist_ok=True)
+    targets = [(destination / name, writer) for name, writer in writers.items()]
+    for target, _writer in targets:
+        if target.exists() and not target.is_file():
+            raise IsADirectoryError(f"대상 데이터베이스 경로가 파일이 아닙니다: {target}")
+
+    preserved: list[tuple[Path, Path]] = []
+    try:
+        for target, _writer in targets:
+            if target.exists():
+                numbered = next_numbered_database_path(target)
+                target.replace(numbered)
+                preserved.append((target, numbered))
+
+        for target, writer in targets:
+            writer(target)
+            if not target.is_file():
+                raise OSError(f"현재 데이터베이스를 만들지 못했습니다: {target}")
+
+        if finalize is not None:
+            finalize()
+    except Exception:
+        rollback_errors: list[str] = []
+        for target, _writer in targets:
+            try:
+                if target.exists():
+                    if target.is_file():
+                        target.unlink()
+                    else:
+                        rollback_errors.append(f"새 DB 경로 정리 실패: {target}")
+            except OSError as exc:
+                rollback_errors.append(str(exc))
+        for original, numbered in reversed(preserved):
+            try:
+                if numbered.exists() and not original.exists():
+                    numbered.replace(original)
+            except OSError as exc:
+                rollback_errors.append(str(exc))
+        if rollback_errors:
+            raise OSError("데이터 폴더 변경 복구 중 오류: " + "; ".join(rollback_errors))
+        raise
+    return [numbered for _original, numbered in preserved]
 
 
 def merge_storage_files(source_dir: Path, destination_dir: Path) -> int:

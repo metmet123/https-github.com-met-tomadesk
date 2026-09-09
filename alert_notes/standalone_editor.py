@@ -41,6 +41,7 @@ class StandaloneMemoEditorWindow(QMainWindow):
         self.editor.delete_requested.connect(self._delete)
         self.editor.reminder_save_requested.connect(self._save_reminder)
         self.editor.reminder_clear_requested.connect(self._clear_reminder)
+        self.owner._connect_editor_io(self.editor)
         self.editor.deadline_requested.connect(
             lambda: self.owner.edit_deadline(self.note_id, self)
         )

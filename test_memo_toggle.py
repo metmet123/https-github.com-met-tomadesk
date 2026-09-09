@@ -5,7 +5,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import unittest
 
-from PyQt6.QtCore import QEvent, QPointF, Qt
+from PyQt6.QtCore import QEvent, QMimeData, QPointF, Qt
 from PyQt6.QtGui import QKeyEvent, QMouseEvent, QTextCursor
 from PyQt6.QtWidgets import QApplication
 
@@ -239,6 +239,116 @@ class EmptyToggleHintTest(unittest.TestCase):
         self.assertIsNotNone(self.editor._lone_empty_child(toggle))
         self.assertFalse(self.editor.document().isModified(), "메모를 열자마자 수정 상태가 되면 안 됩니다")
 
+    def _paste_into_hint(self, source):
+        toggle = self._make_toggle()
+        hint = self.editor._lone_empty_child(toggle)
+        self.editor.setTextCursor(QTextCursor(hint))
+        self.editor.insertFromMimeData(source)
+        self.app.processEvents()
+        return toggle
+
+    def test_multiline_plain_text_paste_stays_inside_the_toggle(self):
+        source = QMimeData()
+        source.setText("첫 문단\n둘째 문단\n셋째 문단")
+        toggle = self._paste_into_hint(source)
+        children = list(self.editor._toggle_children(toggle))
+        self.assertEqual([block.text() for block in children], ["첫 문단", "둘째 문단", "셋째 문단"])
+        self.assertTrue(all(
+            block.blockFormat().indent() == toggle.blockFormat().indent() + 1
+            for block in children
+        ))
+
+    def test_html_paste_keeps_every_paragraph_inside_and_preserves_bold(self):
+        source = QMimeData()
+        source.setHtml("<p><b>첫 문단</b></p><p>둘째 문단</p>")
+        toggle = self._paste_into_hint(source)
+        children = list(self.editor._toggle_children(toggle))
+        self.assertEqual([block.text() for block in children], ["첫 문단", "둘째 문단"])
+        self.assertTrue(all(
+            block.blockFormat().indent() == toggle.blockFormat().indent() + 1
+            for block in children
+        ))
+        first_character = QTextCursor(children[0])
+        first_character.movePosition(QTextCursor.MoveOperation.StartOfBlock)
+        first_character.movePosition(
+            QTextCursor.MoveOperation.NextCharacter, QTextCursor.MoveMode.KeepAnchor,
+        )
+        self.assertGreaterEqual(first_character.charFormat().fontWeight(), 700)
+
+    def test_html_paste_drops_the_generated_leading_blank(self):
+        source = QMimeData()
+        source.setHtml("<p><br></p><ul><li>첫 항목</li><li>둘째 항목</li></ul>")
+        toggle = self._paste_into_hint(source)
+        self.assertEqual(
+            [block.text() for block in self.editor._toggle_children(toggle)],
+            ["첫 항목", "둘째 항목"],
+        )
+
+    def test_one_ctrl_z_undoes_the_paste_and_its_indent_fix_together(self):
+        source = QMimeData()
+        source.setText("첫 문단\n둘째 문단")
+        toggle = self._paste_into_hint(source)
+        press(
+            self.editor, Qt.Key.Key_Z, "z", Qt.KeyboardModifier.ControlModifier,
+        )
+        self.app.processEvents()
+        self.assertEqual(toggle.text(), f"{TOGGLE_OPEN_PREFIX}테스트")
+        self.assertIsNotNone(self.editor._lone_empty_child(toggle))
+        self.assertNotIn("첫 문단", self.editor.toPlainText())
+        self.assertNotIn("둘째 문단", self.editor.toPlainText())
+
+    def test_backspace_removes_an_empty_child_before_filled_children(self):
+        toggle = self._make_toggle()
+        empty = self.editor._lone_empty_child(toggle)
+        cursor = QTextCursor(empty)
+        cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+        cursor.insertBlock()
+        fmt = cursor.blockFormat()
+        fmt.setIndent(toggle.blockFormat().indent() + 1)
+        cursor.setBlockFormat(fmt)
+        cursor.insertText("붙여넣은 내용")
+        self.editor.setTextCursor(QTextCursor(empty))
+        press(self.editor, Qt.Key.Key_Backspace)
+        self.assertEqual(
+            [block.text() for block in self.editor._toggle_children(toggle)],
+            ["붙여넣은 내용"],
+        )
+
+    def test_backspace_on_the_empty_hint_turns_the_toggle_back_to_a_paragraph(self):
+        toggle = self._make_toggle()
+        self.editor.setTextCursor(QTextCursor(self.editor._lone_empty_child(toggle)))
+        press(self.editor, Qt.Key.Key_Backspace)
+        self.assertEqual([block.text() for block in self.editor._iter_blocks()], ["테스트"])
+
+    def test_delete_on_the_empty_hint_turns_the_toggle_back_to_a_paragraph(self):
+        toggle = self._make_toggle()
+        self.editor.setTextCursor(QTextCursor(self.editor._lone_empty_child(toggle)))
+        press(self.editor, Qt.Key.Key_Delete)
+        self.assertEqual([block.text() for block in self.editor._iter_blocks()], ["테스트"])
+
+    def test_backspace_removes_an_outside_blank_after_an_empty_toggle(self):
+        toggle = self._make_toggle()
+        hint = self.editor._lone_empty_child(toggle)
+        cursor = QTextCursor(hint)
+        cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+        cursor.insertBlock()
+        outside = cursor.block()
+        fmt = outside.blockFormat()
+        fmt.setIndent(toggle.blockFormat().indent())
+        cursor.setBlockFormat(fmt)
+        cursor.insertBlock()
+        cursor.insertText("다음 문단")
+        self.assertEqual(
+            [(block.text(), block.blockFormat().indent()) for block in self.editor._iter_blocks()],
+            [(f"{TOGGLE_OPEN_PREFIX}테스트", 0), ("", 1), ("", 0), ("다음 문단", 0)],
+        )
+        self.editor.setTextCursor(QTextCursor(outside))
+        press(self.editor, Qt.Key.Key_Backspace)
+        self.assertEqual(
+            [(block.text(), block.blockFormat().indent()) for block in self.editor._iter_blocks()],
+            [(f"{TOGGLE_OPEN_PREFIX}테스트", 0), ("", 1), ("다음 문단", 0)],
+        )
+
 
 class WritingOutsideAToggleTest(unittest.TestCase):
     """토글 밑 빈 곳을 누르면 토글 밖에 글을 쓸 수 있어야 한다."""
@@ -338,10 +448,13 @@ class PostitToggleTest(unittest.TestCase):
         self.temp.cleanup()
 
     def _insert(self, name: str):
-        return next(
-            action for action in self.window.format_bar.insert_button.menu().actions()
-            if name in action.text()
+        panel = self.window.format_bar.insert_button.menu().actions()[0].defaultWidget()
+        item = next(
+            panel.feature_list.item(row)
+            for row in range(panel.feature_list.count())
+            if name in panel.feature_list.item(row).text()
         )
+        panel._run_item(item)
 
     def test_the_format_bar_has_an_insert_button_without_an_on_off_state(self):
         button = self.window.format_bar.insert_button
@@ -350,18 +463,18 @@ class PostitToggleTest(unittest.TestCase):
 
     def test_the_menu_makes_a_toggle_in_the_postit(self):
         self.window.memo.textCursor().insertText("준비물")
-        self._insert("토글").trigger()
+        self._insert("토글")
         self.assertTrue(self.window.memo.current_block_is_toggle())
 
     def test_the_button_stays_unpressed_while_the_cursor_sits_on_a_toggle(self):
         self.window.memo.textCursor().insertText("준비물")
-        self._insert("토글").trigger()
+        self._insert("토글")
         self.window._sync_format_buttons(self.window.memo.currentCharFormat())
         self.assertFalse(self.window.format_bar.insert_button.isChecked())
 
     def test_an_empty_postit_toggle_shows_the_hint_too(self):
         self.window.memo.textCursor().insertText("준비물")
-        self._insert("토글").trigger()
+        self._insert("토글")
         self.assertEqual(
             [toggle.text() for toggle, _child in self.window.memo._empty_toggle_blocks()],
             [f"{TOGGLE_OPEN_PREFIX}준비물"],
@@ -449,16 +562,17 @@ class ToolbarToggleTest(unittest.TestCase):
         editor.show()
         toolbar = TextFormatToolbar(editor, store)
         editor.textCursor().insertText("준비물")
-        actions = toolbar.insert_button.menu().actions()
-        labels = [action.text() for action in actions]
+        panel = toolbar.insert_button.menu().actions()[0].defaultWidget()
+        items = [panel.feature_list.item(row) for row in range(panel.feature_list.count())]
+        labels = [item.text() for item in items]
         self.assertFalse(toolbar.insert_button.isCheckable(), "켜짐/꺼짐 표시가 남습니다")
         self.assertTrue(any("토글" in label for label in labels), labels)
         self.assertTrue(any("페이지" in label for label in labels), labels)
-        next(action for action in actions if "토글" in action.text()).trigger()
+        panel._run_item(next(item for item in items if "토글" in item.text()))
         self.assertTrue(editor.current_block_is_toggle())
         # 아직 만들지 않은 기능은 눌러도 아무 일이 없도록 흐리게 둔다.
-        page = next(action for action in actions if "페이지" in action.text())
-        self.assertEqual(page.isEnabled(), hasattr(editor, "insert_page_link"))
+        page = next(item for item in items if "페이지" in item.text())
+        self.assertEqual(bool(page.flags() & Qt.ItemFlag.ItemIsEnabled), hasattr(editor, "insert_page_link"))
         destroy_widget(toolbar, self.app)
         destroy_widget(editor, self.app)
         store.close()

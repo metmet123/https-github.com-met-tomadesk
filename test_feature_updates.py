@@ -1034,6 +1034,67 @@ class FeatureUpdateTest(unittest.TestCase):
         self.assertEqual((destination / "backup_이전1.json").read_text(encoding="utf-8"), "old")
         self.assertFalse((destination / "backup_이전2.json").exists())
 
+    def test_database_collision_uses_next_free_number_for_each_database(self):
+        destination = Path(self.temp_dir.name) / "numbered-data"
+        destination.mkdir()
+        (destination / "hotkeys.db").write_bytes(b"old-hotkeys")
+        (destination / "hotkeys2.db").write_bytes(b"older-hotkeys")
+        (destination / "alert_notes.db").write_bytes(b"old-notes")
+
+        preserved = storage_config.copy_databases_preserving_existing(
+            destination,
+            {
+                "hotkeys.db": lambda path: path.write_bytes(b"current-hotkeys"),
+                "alert_notes.db": lambda path: path.write_bytes(b"current-notes"),
+            },
+        )
+
+        self.assertEqual([path.name for path in preserved], ["hotkeys3.db", "alert_notes2.db"])
+        self.assertEqual((destination / "hotkeys.db").read_bytes(), b"current-hotkeys")
+        self.assertEqual((destination / "hotkeys2.db").read_bytes(), b"older-hotkeys")
+        self.assertEqual((destination / "hotkeys3.db").read_bytes(), b"old-hotkeys")
+        self.assertEqual((destination / "alert_notes.db").read_bytes(), b"current-notes")
+        self.assertEqual((destination / "alert_notes2.db").read_bytes(), b"old-notes")
+
+    def test_database_copy_failure_restores_original_names(self):
+        destination = Path(self.temp_dir.name) / "rollback-data"
+        destination.mkdir()
+        (destination / "hotkeys.db").write_bytes(b"old-hotkeys")
+        (destination / "alert_notes.db").write_bytes(b"old-notes")
+
+        def fail_after_partial_write(path):
+            path.write_bytes(b"partial-notes")
+            raise OSError("copy failed")
+
+        with self.assertRaisesRegex(OSError, "copy failed"):
+            storage_config.copy_databases_preserving_existing(
+                destination,
+                {
+                    "hotkeys.db": lambda path: path.write_bytes(b"current-hotkeys"),
+                    "alert_notes.db": fail_after_partial_write,
+                },
+            )
+
+        self.assertEqual((destination / "hotkeys.db").read_bytes(), b"old-hotkeys")
+        self.assertEqual((destination / "alert_notes.db").read_bytes(), b"old-notes")
+        self.assertFalse((destination / "hotkeys2.db").exists())
+        self.assertFalse((destination / "alert_notes2.db").exists())
+
+    def test_storage_path_save_failure_rolls_back_database_replacement(self):
+        destination = Path(self.temp_dir.name) / "finalize-rollback-data"
+        destination.mkdir()
+        (destination / "hotkeys.db").write_bytes(b"old-hotkeys")
+
+        with self.assertRaisesRegex(OSError, "config failed"):
+            storage_config.copy_databases_preserving_existing(
+                destination,
+                {"hotkeys.db": lambda path: path.write_bytes(b"current-hotkeys")},
+                finalize=MagicMock(side_effect=OSError("config failed")),
+            )
+
+        self.assertEqual((destination / "hotkeys.db").read_bytes(), b"old-hotkeys")
+        self.assertFalse((destination / "hotkeys2.db").exists())
+
     def test_store_database_backup_opens_at_new_location(self):
         self.store.save_action({
             "name": "이동 작업", "hotkey": "Ctrl+Alt+9", "action_type": "text",
@@ -1047,10 +1108,12 @@ class FeatureUpdateTest(unittest.TestCase):
         finally:
             moved.close()
 
-    def test_existing_database_is_not_overwritten_by_path_change(self):
+    def test_existing_database_is_numbered_before_path_change(self):
         new_data = Path(self.temp_dir.name) / "existing-data"
         new_data.mkdir()
         (new_data / "hotkeys.db").write_bytes(b"existing")
+        (new_data / "hotkeys2.db").write_bytes(b"existing-numbered")
+        (new_data / "alert_notes.db").write_bytes(b"existing-notes")
         values = {
             main_window.EXIT_HOTKEY_SETTING: self.window.exit_hotkey,
             main_window.MAIN_OPEN_HOTKEY_SETTING: self.window.main_open_hotkey,
@@ -1060,16 +1123,30 @@ class FeatureUpdateTest(unittest.TestCase):
             "startup_mode": self.window.startup_mode,
             "data_dir": new_data,
         }
+        application = MagicMock()
         with (
             patch.object(main_window, "SettingsDialog") as dialog_class,
+            patch.object(main_window, "save_storage_paths") as save_paths,
+            patch.object(main_window.QMessageBox, "information") as information,
             patch.object(main_window.QMessageBox, "warning") as warning,
-            patch.object(self.store, "backup_database") as backup_database,
+            patch.object(main_window.QApplication, "instance", return_value=application),
         ):
             accept_settings(dialog_class, values)
             self.window.show_settings()
-        warning.assert_called_once()
-        backup_database.assert_not_called()
-        self.assertEqual((new_data / "hotkeys.db").read_bytes(), b"existing")
+        warning.assert_not_called()
+        save_paths.assert_called_once_with(new_data)
+        information.assert_called_once()
+        self.assertIn("hotkeys3.db", information.call_args.args[2])
+        self.assertIn("alert_notes2.db", information.call_args.args[2])
+        self.assertEqual((new_data / "hotkeys2.db").read_bytes(), b"existing-numbered")
+        self.assertEqual((new_data / "hotkeys3.db").read_bytes(), b"existing")
+        self.assertEqual((new_data / "alert_notes2.db").read_bytes(), b"existing-notes")
+        moved = Store(new_data / "hotkeys.db")
+        try:
+            self.assertEqual(moved.actions(), self.store.actions())
+        finally:
+            moved.close()
+        application.quit.assert_called_once()
 
     def test_empty_data_folder_is_copied_and_restart_is_requested(self):
         new_data = Path(self.temp_dir.name) / "empty-data"

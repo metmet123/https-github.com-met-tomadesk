@@ -33,7 +33,7 @@ def html_from_plain_text(content: str) -> str:
     return escape(str(content or "")).replace("\n", "<br>")
 
 
-def sanitize_rich_html(content: str) -> str:
+def sanitize_rich_html(content: str, remove_external_images: bool = False) -> str:
     """Keep common memo formatting while removing active or embedded web content."""
     html = str(content or "")
     html = re.sub(
@@ -42,4 +42,9 @@ def sanitize_rich_html(content: str) -> str:
     )
     html = re.sub(r"\s+on[a-z]+\s*=\s*(['\"]).*?\1", "", html, flags=re.IGNORECASE | re.DOTALL)
     html = re.sub(r"(?:javascript|vbscript)\s*:", "", html, flags=re.IGNORECASE)
+    if remove_external_images:
+        html = re.sub(
+            r"<\s*img\b[^>]*\bsrc\s*=\s*(?:(['\"])(?:https?:)?//.*?\1|(?:https?:)?//[^\s>]+)[^>]*>",
+            "", html, flags=re.IGNORECASE | re.DOTALL,
+        )
     return html

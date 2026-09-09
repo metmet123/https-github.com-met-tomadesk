@@ -1,41 +1,82 @@
-"""Two-tab insert menu with persistent order and typing-trigger settings."""
+"""Insert menu with persistent feature, typing, and document-import settings."""
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QTimer, Qt
+from PyQt6.QtCore import QTimer, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QAbstractItemView, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget,
-    QListWidgetItem, QMessageBox, QPushButton, QScrollArea, QTabWidget, QVBoxLayout,
+    QAbstractItemView, QComboBox, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget,
+    QListWidgetItem, QMenu, QPushButton, QScrollArea, QTabWidget, QVBoxLayout,
     QWidget,
 )
 
 from .insert_menu import PENDING_SUFFIX, item_label, item_tooltip
 from .insert_preferences import default_order, default_triggers, get_insert_preferences
+from .structured_import import (
+    STRATEGIES, import_strategy, save_import_strategies,
+)
 
 
 class LongPressOrderList(QListWidget):
     """Enable drag only after a deliberate 350 ms press."""
 
+    reorder_completed = pyqtSignal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
         self.setDefaultDropAction(Qt.DropAction.MoveAction)
-        self.setDragEnabled(False)
         self.setAccessibleName("기능 순서")
+        self._source_row = -1
+        self._target_row = -1
+        self._armed = False
+        self._drag_click = False
         self._arm = QTimer(self)
         self._arm.setSingleShot(True)
         self._arm.setInterval(350)
-        self._arm.timeout.connect(lambda: self.setDragEnabled(True))
+        self._arm.timeout.connect(self._arm_reorder)
+
+    def _arm_reorder(self) -> None:
+        self._armed = self._source_row >= 0
+        self._target_row = self._source_row
 
     def mousePressEvent(self, event):
-        self.setDragEnabled(False)
-        self._arm.start()
         super().mousePressEvent(event)
+        self._source_row = self.indexAt(event.position().toPoint()).row()
+        self._target_row = self._source_row
+        self._armed = False
+        self._drag_click = False
+        self._arm.start()
+
+    def mouseMoveEvent(self, event):
+        if self._armed:
+            row = self.indexAt(event.position().toPoint()).row()
+            if row >= 0:
+                self._target_row = row
+                self.setCurrentRow(row)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
         self._arm.stop()
-        super().mouseReleaseEvent(event)
-        self.setDragEnabled(False)
+        source, target = self._source_row, self._target_row
+        if self._armed and source >= 0 and target >= 0 and source != target:
+            item = self.takeItem(source)
+            self.insertItem(target, item)
+            self.setCurrentRow(target)
+            self._drag_click = True
+            self.reorder_completed.emit()
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
+        self._source_row = -1
+        self._target_row = -1
+        self._armed = False
+
+    def take_drag_click(self) -> bool:
+        value = self._drag_click
+        self._drag_click = False
+        return value
 
 
 class InsertPanel(QWidget):
@@ -53,6 +94,7 @@ class InsertPanel(QWidget):
         root.addWidget(self.tabs)
         self._build_features_tab()
         self._build_settings_tab()
+        self._build_import_tab()
         self.preferences.changed.connect(self.reload)
         self.reload()
 
@@ -65,8 +107,8 @@ class InsertPanel(QWidget):
         self.feature_list = LongPressOrderList()
         self.feature_list.setObjectName("insertFeatureList")
         self.feature_list.setMinimumHeight(330)
-        self.feature_list.itemClicked.connect(self._run_item)
-        self.feature_list.model().rowsMoved.connect(lambda *_args: self._save_order())
+        self.feature_list.itemClicked.connect(self._run_clicked_item)
+        self.feature_list.reorder_completed.connect(self._save_order)
         layout.addWidget(self.feature_list)
         actions = QHBoxLayout()
         self.up_button = QPushButton("위로")
@@ -112,6 +154,63 @@ class InsertPanel(QWidget):
         layout.addLayout(buttons)
         self.tabs.addTab(page, "설정")
 
+    def _build_import_tab(self) -> None:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        explanation = QLabel(
+            "GPT·Claude 응답이나 문서의 제목을 메모 토글로 바꾸는 기준입니다. "
+            "목록·표·인용문·코드와 글자 서식은 그대로 가져옵니다."
+        )
+        explanation.setWordWrap(True)
+        explanation.setObjectName("insertPanelHint")
+        layout.addWidget(explanation)
+        form = QFormLayout()
+        self.clipboard_import_combo = QComboBox()
+        self.file_import_combo = QComboBox()
+        for value, label in STRATEGIES.items():
+            self.clipboard_import_combo.addItem(label, value)
+            self.file_import_combo.addItem(label, value)
+        form.addRow("클립보드", self.clipboard_import_combo)
+        form.addRow("문서 파일", self.file_import_combo)
+        layout.addLayout(form)
+        layout.addStretch(1)
+        actions = QHBoxLayout()
+        reset = QPushButton("가져오기 기본값")
+        save = QPushButton("저장")
+        reset.clicked.connect(self._reset_import_settings)
+        save.clicked.connect(self._save_import_settings)
+        actions.addWidget(reset)
+        actions.addStretch(1)
+        actions.addWidget(save)
+        layout.addLayout(actions)
+        self.tabs.addTab(page, "가져오기")
+        self._load_import_settings()
+
+    def _load_import_settings(self) -> None:
+        store = getattr(self.editor, "store", None)
+        for combo, kind in (
+            (self.clipboard_import_combo, "clipboard"),
+            (self.file_import_combo, "file"),
+        ):
+            index = combo.findData(import_strategy(store, kind))
+            combo.setCurrentIndex(max(0, index))
+
+    def _save_import_settings(self) -> None:
+        save_import_strategies(
+            getattr(self.editor, "store", None),
+            str(self.clipboard_import_combo.currentData()),
+            str(self.file_import_combo.currentData()),
+        )
+
+    def _reset_import_settings(self) -> None:
+        self.clipboard_import_combo.setCurrentIndex(
+            max(0, self.clipboard_import_combo.findData("top_two_toggles"))
+        )
+        self.file_import_combo.setCurrentIndex(
+            max(0, self.file_import_combo.findData("preserve"))
+        )
+        self._save_import_settings()
+
     def reload(self) -> None:
         selected = self._selected_id()
         self.feature_list.blockSignals(True)
@@ -120,7 +219,8 @@ class InsertPanel(QWidget):
             row = QListWidgetItem(item_label(item))
             row.setData(Qt.ItemDataRole.UserRole, item.item_id or item.method)
             row.setData(Qt.ItemDataRole.UserRole + 1, item.method)
-            row.setToolTip(item_tooltip(item))
+            trigger = self.preferences.triggers.get(item.item_id or item.method, item.typing)
+            row.setToolTip(item_tooltip(item, trigger))
             handler = getattr(self.editor, item.method, None)
             if not callable(handler):
                 row.setText(item_label(item) + PENDING_SUFFIX)
@@ -149,6 +249,19 @@ class InsertPanel(QWidget):
         handler = getattr(self.editor, str(item.data(Qt.ItemDataRole.UserRole + 1)), None)
         if callable(handler):
             handler()
+            menu = self.parent()
+            if isinstance(menu, QMenu):
+                menu.close()
+
+    def _run_clicked_item(self, item) -> None:
+        if not self.feature_list.take_drag_click():
+            self._run_item(item)
+            menu = self.parent()
+            if isinstance(menu, QMenu):
+                menu.close()
+            menu = self.parentWidget()
+            if menu is not None:
+                menu.hide()
 
     def _current_order(self) -> list[str]:
         return [
@@ -196,7 +309,13 @@ class InsertPanel(QWidget):
     def _save_triggers(self) -> None:
         if not self._validate_edits():
             return
-        errors = self.preferences.save(self.preferences.order, self._values())
+        self.preferences.save(self.preferences.order, self._values())
+
+    def _reset_trigger_edits(self) -> None:
+        defaults = default_triggers()
+        for item_id, edit in self.trigger_edits.items():
+            edit.setText(defaults.get(item_id, ""))
+        self._validate_edits()
         if not errors:
             self.error_label.setText("저장했습니다. 열려 있는 편집기에 바로 적용됩니다.")
             self.error_label.setProperty("success", True)

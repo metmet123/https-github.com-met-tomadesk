@@ -104,6 +104,7 @@ class RichMemoTextEdit(QTextEdit):
     page_open_requested = pyqtSignal(int)
     page_renamed = pyqtSignal(int)
     page_removed = pyqtSignal(int)
+    structured_files_dropped = pyqtSignal(object)
 
     def __init__(self, store=None, parent=None):
         super().__init__(parent)
@@ -121,6 +122,7 @@ class RichMemoTextEdit(QTextEdit):
         self._known_pages: set[int] = set()
         # `/` 를 쳤을 때 뜨는 삽입 메뉴.  쓸 때 만든다.
         self._insert_popup = None
+        self._typing_transaction = False
         # 끌고 있는 줄과 놓을 자리.
         self._drag_source: int | None = None
         self._drop_at = None
@@ -304,6 +306,88 @@ class RichMemoTextEdit(QTextEdit):
 
     def content(self) -> str:
         return editor_content(self)
+
+    def insert_structured_html(self, html: str, toggle_heading_levels=()) -> None:
+        """Insert one sanitized external document as one undoable native edit."""
+        source = QTextDocument()
+        self._configure_document(source)
+        source.setHtml(sanitize_rich_html(html, remove_external_images=True))
+        toggle_levels = {int(value) for value in toggle_heading_levels}
+        from .structured_import import DETAIL_END_MARKER, DETAIL_START_MARKER
+
+        stack: list[tuple[str, int]] = []
+        marker_blocks = []
+        block = source.begin()
+        while block.isValid():
+            text = block.text()
+            if text.startswith(DETAIL_END_MARKER):
+                while stack:
+                    kind, _value = stack.pop()
+                    if kind == "details":
+                        break
+                marker_blocks.append(block)
+                block = block.next()
+                continue
+            level = int(block.blockFormat().headingLevel())
+            if level:
+                while stack and stack[-1][0] == "heading" and stack[-1][1] >= level:
+                    stack.pop()
+            is_details = text.startswith(DETAIL_START_MARKER)
+            is_toggle = is_details or level in toggle_levels
+            block_cursor = QTextCursor(block)
+            block_format = block.blockFormat()
+            block_format.setIndent(max(0, block_format.indent()) + len(stack))
+            if level:
+                own_level = min(4, max(1, level))
+                point_size, spacing, top, bottom = HEADING_STYLES[own_level]
+                block_format.setTopMargin(top)
+                block_format.setBottomMargin(bottom)
+                block_format.setProperty(HEADING_LEVEL_PROPERTY, own_level)
+                block_cursor.setBlockFormat(block_format)
+                styled = QTextCursor(block)
+                styled.movePosition(
+                    QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor,
+                )
+                char_format = QTextCharFormat()
+                char_format.setFontWeight(QFont.Weight.Bold)
+                char_format.setFontPointSize(point_size)
+                char_format.setFontLetterSpacingType(QFont.SpacingType.AbsoluteSpacing)
+                char_format.setFontLetterSpacing(spacing)
+                styled.mergeCharFormat(char_format)
+            else:
+                block_cursor.setBlockFormat(block_format)
+            if is_toggle:
+                marker = QTextCursor(block)
+                marker.movePosition(QTextCursor.MoveOperation.StartOfBlock)
+                if is_details:
+                    marker.movePosition(
+                        QTextCursor.MoveOperation.NextCharacter,
+                        QTextCursor.MoveMode.KeepAnchor, len(DETAIL_START_MARKER),
+                    )
+                marker.insertText(TOGGLE_OPEN_PREFIX)
+                stack.append(("details", 0) if is_details else ("heading", level))
+            block = block.next()
+        for marker_block in reversed(marker_blocks):
+            marker = QTextCursor(marker_block)
+            marker.movePosition(
+                QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor,
+            )
+            marker.removeSelectedText()
+
+        cursor = self.textCursor()
+        transaction = QTextCursor(cursor)
+        transaction.beginEditBlock()
+        try:
+            def insert_document() -> None:
+                cursor.insertHtml(source.toHtml())
+                self.setTextCursor(cursor)
+
+            self._paste_into_lone_empty_toggle(insert_document)
+        finally:
+            transaction.endEditBlock()
+        self._structure_dirty = True
+        self._refresh_structure()
+        self.setFocus()
 
     def mark_document_saved(self, content: str | None = None) -> None:
         resolved = self.content() if content is None else str(content)
@@ -587,6 +671,92 @@ class RichMemoTextEdit(QTextEdit):
             return children[0]
         return None
 
+    def _parent_toggle(self, child):
+        """들여쓴 줄을 직접 품은 가장 가까운 토글을 찾는다."""
+        if not child.isValid():
+            return None
+        depth = self._block_indent(child)
+        if depth <= 0:
+            return None
+        probe = child.previous()
+        while probe.isValid():
+            if self._block_indent(probe) < depth:
+                return probe if self._is_toggle_block(probe) else None
+            probe = probe.previous()
+        return None
+
+    def _toggle_for_lone_empty_child(self, child):
+        """안내 줄이라면 그 줄을 가진 토글을 돌려준다."""
+        if not child.isValid() or child.text().strip():
+            return None
+        toggle = self._parent_toggle(child)
+        empty = self._lone_empty_child(toggle) if toggle is not None else None
+        if empty is not None and empty.position() == child.position():
+            return toggle
+        return None
+
+    @staticmethod
+    def _delete_empty_block(block) -> None:
+        """빈 문단 하나와 그 문단 구분자만 제거한다."""
+        if not block.isValid() or block.text().strip():
+            return
+        cursor = QTextCursor(block)
+        cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock)
+        following = block.next()
+        if following.isValid():
+            cursor.setPosition(following.position(), QTextCursor.MoveMode.KeepAnchor)
+            cursor.removeSelectedText()
+            return
+        cursor.deletePreviousChar()
+
+    def _keep_pasted_blocks_inside_toggle(self, toggle, start: int, end: int) -> None:
+        """빈 안내 줄에 붙인 문단들을 토글의 첫 깊이 안으로 넣는다."""
+        if end <= start or not toggle.isValid():
+            return
+        document = self.document()
+        first = document.findBlock(start)
+        last = document.findBlock(max(start, end - 1))
+        if not first.isValid() or not last.isValid():
+            return
+        minimum_depth = self._block_indent(toggle) + 1
+        pasted = []
+        block = first
+        while block.isValid():
+            pasted.append(block)
+            if block.position() == last.position():
+                break
+            block = block.next()
+        for block in pasted:
+            if self._block_indent(block) < minimum_depth:
+                block_cursor = QTextCursor(block)
+                fmt = block.blockFormat()
+                fmt.setIndent(minimum_depth)
+                block_cursor.setBlockFormat(fmt)
+        if pasted and not pasted[0].text().strip() and any(
+            block.text().strip() for block in pasted[1:]
+        ):
+            self._delete_empty_block(pasted[0])
+        self._refresh_toggle_visibility()
+
+    def _paste_into_lone_empty_toggle(self, insert) -> None:
+        """안내 줄에서 붙여넣으면 새 문단도 모두 해당 토글의 자식으로 둔다."""
+        cursor = self.textCursor()
+        toggle = (
+            None if cursor.hasSelection()
+            else self._toggle_for_lone_empty_child(cursor.block())
+        )
+        if toggle is None:
+            insert()
+            return
+        start = cursor.position()
+        transaction = QTextCursor(cursor)
+        transaction.beginEditBlock()
+        try:
+            insert()
+            self._keep_pasted_blocks_inside_toggle(toggle, start, self.textCursor().position())
+        finally:
+            transaction.endEditBlock()
+
     def _empty_toggle_blocks(self, blocks=None):
         """펼쳐져 있는데 안이 빈 토글과 그 빈 줄을 짝지어 돌려준다."""
         for block in (self._iter_blocks() if blocks is None else blocks):
@@ -685,7 +855,9 @@ class RichMemoTextEdit(QTextEdit):
                     continue
                 eaten = len(pattern) - 1
             wipe = QTextCursor(block)
-            wipe.beginEditBlock()
+            # The marker characters were the immediately preceding edit. Join
+            # them so one Ctrl+Z restores the state before the whole shortcut.
+            wipe.joinPreviousEditBlock()
             try:
                 if eaten:
                     wipe.movePosition(QTextCursor.MoveOperation.StartOfBlock)
@@ -695,8 +867,10 @@ class RichMemoTextEdit(QTextEdit):
                     )
                     wipe.removeSelectedText()
                     self.setTextCursor(wipe)
+                self._typing_transaction = True
                 handler()
             finally:
+                self._typing_transaction = False
                 wipe.endEditBlock()
             return True
         return False
@@ -720,7 +894,8 @@ class RichMemoTextEdit(QTextEdit):
         point_size, spacing, top, bottom = HEADING_STYLES[level]
         original = self.textCursor()
         transaction = QTextCursor(original)
-        transaction.beginEditBlock()
+        if not self._typing_transaction:
+            transaction.beginEditBlock()
         try:
             for block in list(self._selected_blocks()):
                 block_cursor = QTextCursor(block)
@@ -738,7 +913,8 @@ class RichMemoTextEdit(QTextEdit):
                 char_format.setFontLetterSpacing(spacing)
                 block_cursor.setCharFormat(char_format)
         finally:
-            transaction.endEditBlock()
+            if not self._typing_transaction:
+                transaction.endEditBlock()
         self.setTextCursor(original)
         self.setFocus()
 
@@ -778,9 +954,16 @@ class RichMemoTextEdit(QTextEdit):
     @staticmethod
     def heading_level(block) -> int:
         try:
-            return int(block.blockFormat().property(HEADING_LEVEL_PROPERTY) or 0)
+            level = int(block.blockFormat().property(HEADING_LEVEL_PROPERTY) or 0)
         except (TypeError, ValueError):
-            return 0
+            level = 0
+        if level in HEADING_STYLES:
+            return level
+        size = block.charFormat().fontPointSize()
+        for candidate, (point_size, _spacing, top, _bottom) in HEADING_STYLES.items():
+            if abs(size - point_size) < 0.1 and abs(block.blockFormat().topMargin() - top) < 0.1:
+                return candidate
+        return 0
 
     def _convert_to_toggle(self, block) -> None:
         """줄 맨 앞의 '>' 한 글자를 토글 표시로 바꾼다."""
@@ -1177,7 +1360,8 @@ class RichMemoTextEdit(QTextEdit):
         popup.clear()
         for item, handler in matches:
             entry = QListWidgetItem(item_label(item))
-            entry.setToolTip(item_tooltip(item))
+            trigger = self.insert_preferences.triggers.get(item.item_id or item.method, item.typing)
+            entry.setToolTip(item_tooltip(item, trigger))
             entry.setData(Qt.ItemDataRole.UserRole, item[2])
             popup.addItem(entry)
         popup.setCurrentRow(0)
@@ -2056,10 +2240,19 @@ class RichMemoTextEdit(QTextEdit):
             if url.isLocalFile() and Path(url.toLocalFile()).suffix.casefold() in {".png", ".jpg", ".jpeg", ".webp"}:
                 if self.insert_image_file(Path(url.toLocalFile())):
                     return
-        if source.hasHtml():
-            self.textCursor().insertHtml(sanitize_rich_html(source.html()))
+        document_paths = [
+            Path(url.toLocalFile()) for url in source.urls() if url.isLocalFile()
+            and Path(url.toLocalFile()).suffix.casefold() in {".md", ".markdown", ".html", ".htm", ".txt"}
+        ] if source.hasUrls() else []
+        if document_paths:
+            self.structured_files_dropped.emit(document_paths)
             return
-        super().insertFromMimeData(source)
+        if source.hasHtml():
+            self._paste_into_lone_empty_toggle(
+                lambda: self.textCursor().insertHtml(sanitize_rich_html(source.html()))
+            )
+            return
+        self._paste_into_lone_empty_toggle(lambda: super(RichMemoTextEdit, self).insertFromMimeData(source))
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if self.insert_popup_visible():
@@ -2161,6 +2354,33 @@ class RichMemoTextEdit(QTextEdit):
             if event.key() == Qt.Key.Key_Space and offset <= 1:
                 self.fold_toggle(block)
                 return
+        if not cursor.hasSelection() and not block.text().strip() and event.key() in {
+            Qt.Key.Key_Backspace, Qt.Key.Key_Delete,
+        }:
+            parent_toggle = self._parent_toggle(block)
+            if parent_toggle is not None:
+                if len(list(self._toggle_children(parent_toggle))) == 1:
+                    self._remove_toggle_prefix(parent_toggle)
+                else:
+                    restore_at = parent_toggle.position() + parent_toggle.length() - 1
+                    self._delete_empty_block(block)
+                    restored = QTextCursor(self.document())
+                    restored.setPosition(restore_at)
+                    self.setTextCursor(restored)
+                return
+            if event.key() == Qt.Key.Key_Backspace:
+                previous = block.previous()
+                preceding_toggle = self._toggle_for_lone_empty_child(previous)
+                if (
+                    preceding_toggle is not None
+                    and self._block_indent(block) <= self._block_indent(preceding_toggle)
+                ):
+                    restore_at = previous.position()
+                    self._delete_empty_block(block)
+                    restored = QTextCursor(self.document())
+                    restored.setPosition(restore_at)
+                    self.setTextCursor(restored)
+                    return
         if not cursor.hasSelection() and event.key() == Qt.Key.Key_Backspace and offset <= 2:
             if self.is_quote_block(block):
                 self.make_quote()
@@ -2209,7 +2429,7 @@ class RichMemoTextEdit(QTextEdit):
     def paste_as_plain_text(self) -> None:
         text = QApplication.clipboard().text()
         if text:
-            self.textCursor().insertText(text)
+            self._paste_into_lone_empty_toggle(lambda: self.textCursor().insertText(text))
 
     def _place_caret_outside_toggles(self) -> bool:
         """마지막 줄 아래 빈 곳을 누르면 토글 밖에서 이어 쓰게 한다.

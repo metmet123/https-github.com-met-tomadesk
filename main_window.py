@@ -62,7 +62,12 @@ from macro_timing_editor import TimingEditorDialog
 from select_all_header import SelectAllHeader
 from settings_dialog import DEADLINE_OPTIONS, SettingsDialog
 from store import COLUMNS as HOTKEY_COLUMNS, TABLES as HOTKEY_TABLES, Store
-from storage_config import merge_storage_files, same_path, save_storage_paths
+from storage_config import (
+    copy_databases_preserving_existing,
+    merge_storage_files,
+    same_path,
+    save_storage_paths,
+)
 from ui_feedback import apply_status, parse_splitter_sizes
 from ui_polish import (
     ActiveStateItem,
@@ -1553,16 +1558,6 @@ class MainWindow(QMainWindow):
         values = dialog.values()
         new_data_dir = Path(values["data_dir"])
         data_changed = not same_path(new_data_dir, self.store.data_dir)
-        destination_db = new_data_dir / "hotkeys.db"
-        destination_notes_db = new_data_dir / "alert_notes.db"
-        if data_changed and (destination_db.exists() or destination_notes_db.exists()):
-            QMessageBox.warning(
-                self,
-                "데이터 폴더 변경",
-                "선택한 데이터 폴더에 이미 hotkeys.db 또는 alert_notes.db가 있습니다.\n"
-                "기존 데이터를 덮어쓰지 않도록 빈 폴더를 선택하거나 JSON 복원을 이용해 주세요.",
-            )
-            return
         self.exit_hotkey = values.get(EXIT_HOTKEY_SETTING, self.exit_hotkey)
         values[EXIT_HOTKEY_SETTING] = self.exit_hotkey
         self.main_open_hotkey = values[MAIN_OPEN_HOTKEY_SETTING]
@@ -1622,11 +1617,19 @@ class MainWindow(QMainWindow):
             reset_position=values.get("reset_toma_pet_position", False),
         )
         try:
+            preserved_databases: list[Path] = []
             if data_changed:
-                self.store.backup_database(destination_db)
-                self.note_store.backup_database(destination_notes_db)
                 merge_storage_files(self.store.data_dir, new_data_dir)
-            save_storage_paths(new_data_dir)
+                preserved_databases = copy_databases_preserving_existing(
+                    new_data_dir,
+                    {
+                        "hotkeys.db": self.store.backup_database,
+                        "alert_notes.db": self.note_store.backup_database,
+                    },
+                    finalize=lambda: save_storage_paths(new_data_dir),
+                )
+            else:
+                save_storage_paths(new_data_dir)
             self.store.backup_dir = new_data_dir
         except OSError as exc:
             QMessageBox.warning(self, "저장 위치 변경 실패", str(exc))
@@ -1634,10 +1637,15 @@ class MainWindow(QMainWindow):
         self.runner.set_stop_hotkey(self.playback_stop_hotkey)
         self._update_stop_hotkey_labels()
         if data_changed:
+            preserved_message = ""
+            if preserved_databases:
+                preserved_names = ", ".join(path.name for path in preserved_databases)
+                preserved_message = f"\n기존 DB 보존: {preserved_names}\n"
             QMessageBox.information(
                 self,
                 "데이터 폴더 변경 완료",
                 f"현재 데이터를 새 폴더로 복사했습니다.\n{new_data_dir}\n\n"
+                f"{preserved_message}"
                 "프로그램을 종료합니다. 다시 실행하면 새 위치가 적용됩니다.",
             )
             QApplication.instance().quit()

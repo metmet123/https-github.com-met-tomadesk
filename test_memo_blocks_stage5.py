@@ -159,9 +159,11 @@ class SlashMenuTest(unittest.TestCase):
         self._type("/")
         from_slash = {label.split("   ")[-1] for label in self.editor.insert_popup_items()}
         menu = build_insert_menu(self.editor)
+        panel = menu.actions()[0].defaultWidget()
         from_button = {
-            action.text().split("   ")[-1] for action in menu.actions()
-            if action.isEnabled()
+            panel.feature_list.item(row).text().replace(PENDING_SUFFIX, "").split("   ")[-1]
+            for row in range(panel.feature_list.count())
+            if panel.feature_list.item(row).flags() & Qt.ItemFlag.ItemIsEnabled
         }
         self.assertEqual(from_slash, from_button)
         menu.deleteLater()
@@ -659,12 +661,14 @@ class InsertItemsTest(unittest.TestCase):
         try:
             self.assertTrue(menu.toolTipsVisible())
             names = {item.name: item for item in INSERT_ITEMS}
-            for action in menu.actions():
-                name = action.text().replace(PENDING_SUFFIX, "").split()[-1]
+            panel = menu.actions()[0].defaultWidget()
+            for row in range(panel.feature_list.count()):
+                entry = panel.feature_list.item(row)
+                name = entry.text().replace(PENDING_SUFFIX, "").split()[-1]
                 item = names.get(name)
                 if item is None:
                     continue
-                self.assertIn(item.hint, action.toolTip(), name)
+                self.assertIn(item.hint, entry.toolTip(), name)
         finally:
             menu.deleteLater()
             destroy_widget(editor, app)

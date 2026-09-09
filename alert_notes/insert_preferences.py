@@ -54,14 +54,18 @@ def normalize_triggers(value) -> dict[str, str]:
 
 def validate_triggers(triggers: dict[str, str]) -> dict[str, str]:
     errors: dict[str, str] = {}
-    seen: dict[str, str] = {}
+    seen: dict[str, str] = {
+        alias.casefold(): item_id
+        for item_id, aliases in FIXED_ALIASES.items()
+        for alias in aliases
+    }
     for item_id, raw in triggers.items():
         trigger = str(raw)
         if not trigger.strip():
             errors[item_id] = "줄앞 입력은 비워 둘 수 없습니다."
             continue
         folded = trigger.casefold()
-        if folded in seen:
+        if folded in seen and seen[folded] != item_id:
             errors[item_id] = "다른 기능과 같은 줄앞 입력입니다."
             errors.setdefault(seen[folded], "다른 기능과 같은 줄앞 입력입니다.")
         else:

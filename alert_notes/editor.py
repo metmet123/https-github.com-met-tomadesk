@@ -7,7 +7,7 @@ from PyQt6.QtCore import QEvent, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QAbstractButton, QAbstractSpinBox, QButtonGroup, QCheckBox, QComboBox, QFrame, QGridLayout,
-    QHBoxLayout, QLabel, QLayout, QLineEdit, QMessageBox, QPushButton, QSizePolicy, QSpinBox,
+    QHBoxLayout, QLabel, QLayout, QLineEdit, QMenu, QMessageBox, QPushButton, QSizePolicy, QSpinBox,
     QRadioButton, QStyle, QStyleOptionSpinBox, QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -56,6 +56,10 @@ class MemoEditor(QWidget):
     page_removed = pyqtSignal(int)
     fullscreen_requested = pyqtSignal()
     sidebar_requested = pyqtSignal()
+    structured_clipboard_requested = pyqtSignal(object)
+    structured_files_requested = pyqtSignal(object)
+    memo_backup_requested = pyqtSignal(object)
+    memo_restore_requested = pyqtSignal(object)
 
     # 목록을 숨겨 넓어져도 보조 줄까지 늘일 이유는 없다.  이 폭에서 멈추고
     # 왼쪽에 붙는다.  본문만 남은 자리를 다 쓴다.
@@ -101,6 +105,9 @@ class MemoEditor(QWidget):
         self.content_edit.page_created.connect(self.page_created)
         self.content_edit.page_open_requested.connect(self.note_open_requested)
         self.content_edit.page_removed.connect(self.page_removed)
+        self.content_edit.structured_files_dropped.connect(
+            lambda paths: self.structured_files_requested.emit((self, paths))
+        )
         for checkbox in (self.always_top_check, self.postit_check, self.lock_check, self.hotkey_enabled):
             checkbox.toggled.connect(self._queue_save)
         self.opacity_combo.currentIndexChanged.connect(self._queue_save)
@@ -166,6 +173,27 @@ class MemoEditor(QWidget):
         self.sidebar_button.setToolTip("메모 목록을 접습니다")
         self.sidebar_button.setFixedWidth(30)
         self.sidebar_button.clicked.connect(self.sidebar_requested)
+        self.import_backup_button = QToolButton()
+        self.import_backup_button.setObjectName("compactUtilityButton")
+        self.import_backup_button.setText("가져오기·백업")
+        self.import_backup_button.setAccessibleName("메모 가져오기와 백업")
+        self.import_backup_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        io_menu = QMenu(self.import_backup_button)
+        io_menu.addAction("클립보드 구조 가져오기").triggered.connect(
+            lambda: self.structured_clipboard_requested.emit(self)
+        )
+        io_menu.addAction("파일 가져오기").triggered.connect(
+            lambda: self.structured_files_requested.emit((self, None))
+        )
+        io_menu.addSeparator()
+        io_menu.addAction("전체 메모 백업").triggered.connect(
+            lambda: self.memo_backup_requested.emit(self)
+        )
+        io_menu.addAction("전체 메모 복원").triggered.connect(
+            lambda: self.memo_restore_requested.emit(self)
+        )
+        self.import_backup_button.setMenu(io_menu)
+        title_row.addWidget(self.import_backup_button)
         title_row.addWidget(self.sidebar_button)
         title_row.addWidget(self.fullscreen_button)
         root.addLayout(title_row)

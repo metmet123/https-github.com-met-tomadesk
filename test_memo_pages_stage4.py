@@ -583,8 +583,13 @@ class InsertMenuPageTest(unittest.TestCase):
 
     def test_the_page_item_is_no_longer_pending(self):
         menu = build_insert_menu(self.editor)
-        page = next(action for action in menu.actions() if "페이지" in action.text())
-        self.assertTrue(page.isEnabled(), "페이지 추가가 아직 흐리게 남아 있습니다")
+        panel = menu.actions()[0].defaultWidget()
+        page = next(
+            panel.feature_list.item(row)
+            for row in range(panel.feature_list.count())
+            if "페이지" in panel.feature_list.item(row).text()
+        )
+        self.assertTrue(page.flags() & Qt.ItemFlag.ItemIsEnabled, "페이지 추가가 아직 흐리게 남아 있습니다")
         self.assertNotIn("준비 중", page.text())
         menu.deleteLater()
 

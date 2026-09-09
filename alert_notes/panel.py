@@ -1,11 +1,13 @@
 import json
+from datetime import datetime
+from pathlib import Path
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QShortcut
 from datetime import date, datetime, timedelta
 
 from PyQt6.QtWidgets import (
-    QFileDialog, QFrame, QLabel, QMessageBox, QScrollArea, QSizePolicy, QSplitter,
+    QApplication, QFileDialog, QFrame, QLabel, QMessageBox, QScrollArea, QSizePolicy, QSplitter,
     QTabWidget, QVBoxLayout, QWidget,
 )
 
@@ -31,6 +33,14 @@ from .standalone_editor import StandaloneMemoEditorWindow
 from .text_format_toolbar import TextFormatToolbar
 from .today_summary import TodaySummaryPanel
 from .panel_reminder_actions import PanelReminderActionsMixin
+from .memo_archive import (
+    export_memo_archive, inspect_memo_archive, restore_memo_archive,
+)
+from .rich_memo_edit import RichMemoTextEdit
+from .structured_import import (
+    MAX_IMPORT_FILES, SUPPORTED_IMPORT_SUFFIXES, heading_levels_for_strategy,
+    import_strategy, load_clipboard, load_import_file, unique_title,
+)
 
 
 class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
@@ -154,6 +164,7 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         self.editor.reminder_clear_requested.connect(self.clear_reminder)
         self.editor.deadline_requested.connect(lambda: self.edit_deadline(self.current_id, self.editor))
         self.editor.monthly_requested.connect(lambda: self.edit_monthly_rule(self.current_id, self.editor))
+        self._connect_editor_io(self.editor)
         self.calendar.note_open_requested.connect(self.show_note)
         self.calendar.note_created.connect(self._calendar_note_created)
         self.calendar.schedule_changed.connect(self.shortcuts_changed)
@@ -167,6 +178,188 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         self.summary.note_open_requested.connect(self.show_note)
         self.summary.schedule_open_requested.connect(self.show_schedule)
         self.schedule_postit.changed.connect(self._schedule_postit_changed)
+
+    def _connect_editor_io(self, editor: MemoEditor) -> None:
+        editor.structured_clipboard_requested.connect(self.import_structured_clipboard)
+        editor.structured_files_requested.connect(self.import_structured_files)
+        editor.memo_backup_requested.connect(self.export_all_memos)
+        editor.memo_restore_requested.connect(self.restore_all_memos)
+
+    def import_structured_clipboard(self, editor=None) -> None:
+        target = editor if isinstance(editor, MemoEditor) else self.editor
+        try:
+            document = load_clipboard(QApplication.clipboard().mimeData())
+            self._insert_import_document(target, document, "clipboard")
+        except Exception as exc:
+            QMessageBox.warning(target, "클립보드 구조 가져오기", str(exc))
+
+    def import_structured_files(self, request=None) -> None:
+        editor, supplied = self.editor, None
+        if isinstance(request, tuple) and len(request) == 2:
+            editor, supplied = request
+        if supplied is None:
+            filters = "문서 (*.md *.markdown *.html *.htm *.txt)"
+            chosen, _ = QFileDialog.getOpenFileNames(
+                editor, "문서 가져오기", str(Path.home()), filters,
+            )
+            paths = [Path(value) for value in chosen]
+        else:
+            paths = [Path(value) for value in supplied]
+        if not paths:
+            return
+        if len(paths) > MAX_IMPORT_FILES:
+            QMessageBox.warning(editor, "문서 가져오기", "한 번에 최대 50개까지 가져올 수 있습니다.")
+            return
+        unsupported = [path.name for path in paths if path.suffix.casefold() not in SUPPORTED_IMPORT_SUFFIXES]
+        if unsupported:
+            QMessageBox.warning(editor, "문서 가져오기", f"지원하지 않는 파일입니다: {unsupported[0]}")
+            return
+        try:
+            documents = [load_import_file(path) for path in paths]
+        except Exception as exc:
+            QMessageBox.warning(editor, "문서 가져오기", str(exc))
+            return
+        if len(documents) == 1:
+            self._insert_import_document(editor, documents[0], "file")
+            return
+        preview = "\n".join(
+            f"• {item.source_name} ({paths[index].suffix.lstrip('.').upper()}) → {item.title}"
+            for index, item in enumerate(documents[:8])
+        )
+        if len(documents) > 8:
+            preview += f"\n• 외 {len(documents) - 8}개"
+        if QMessageBox.question(
+            editor, "여러 문서 가져오기 확인",
+            f"파일 {len(documents)}개를 각각 새 메모로 만듭니다.\n\n{preview}\n\n가져올까요?",
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        created = []
+        for document in documents:
+            converter = RichMemoTextEdit()
+            converter.insert_structured_html(
+                document.html,
+                heading_levels_for_strategy(
+                    document.html, import_strategy(self.store, "file"),
+                ),
+            )
+            title = unique_title(self.store, document.title)
+            created.append(self.store.create_note(title, converter.content()))
+            converter.deleteLater()
+        self.current_id = created[-1]
+        self.list_panel.search.clear()
+        self.refresh()
+        self.show_note(created[-1])
+        self._status(f"문서 {len(created)}개를 새 메모로 가져왔습니다.", "success")
+
+    def _insert_import_document(self, editor: MemoEditor, document, source_kind: str) -> None:
+        if editor.note_id is None:
+            note_id = self.store.create_note(unique_title(self.store, document.title), "")
+            self.current_id = note_id
+            editor.set_note(self.store.note(note_id))
+        levels = heading_levels_for_strategy(
+            document.html, import_strategy(self.store, source_kind),
+        )
+        editor.content_edit.insert_structured_html(document.html, levels)
+        editor.flush_pending_save()
+        self.current_id = editor.note_id
+        self.refresh()
+        self._status("문서 구조를 현재 커서 위치에 가져왔습니다.", "success")
+
+    def export_all_memos(self, editor=None) -> None:
+        source = editor if isinstance(editor, MemoEditor) else self.editor
+        source.flush_pending_save()
+        default = Path(self.store.path).parent / f"memo_backup_{datetime.now():%Y%m%d_%H%M%S}.tomamemo"
+        chosen, _ = QFileDialog.getSaveFileName(
+            source, "전체 메모 백업", str(default), "TomaDesk 메모 백업 (*.tomamemo)",
+        )
+        if not chosen:
+            return
+        try:
+            output = export_memo_archive(self.store, Path(chosen))
+        except Exception as exc:
+            QMessageBox.warning(source, "전체 메모 백업 실패", str(exc))
+            return
+        QMessageBox.information(source, "전체 메모 백업 완료", str(output))
+
+    def restore_all_memos(self, editor=None, supplied_path=None) -> None:
+        source = editor if isinstance(editor, MemoEditor) else self.editor
+        source.flush_pending_save()
+        chosen = str(supplied_path or "")
+        if not chosen:
+            chosen, _ = QFileDialog.getOpenFileName(
+                source, "전체 메모 복원", str(Path(self.store.path).parent),
+                "TomaDesk 메모 백업 (*.tomamemo)",
+            )
+        if not chosen:
+            return
+        try:
+            preview = inspect_memo_archive(Path(chosen))
+        except Exception as exc:
+            QMessageBox.warning(source, "전체 메모 복원 실패", str(exc))
+            return
+        dialog = QMessageBox(source)
+        dialog.setWindowTitle("전체 메모 복원")
+        dialog.setIcon(QMessageBox.Icon.Question)
+        dialog.setText(
+            f"백업 시각: {preview.exported_at}\n"
+            f"일반 메모 {preview.active_notes}개 · 휴지통 {preview.trashed_notes}개\n"
+            f"첨부 {preview.attachments}개 · 알림 {preview.reminders}개\n\n"
+            "복원 직전 현재 메모는 안전 백업으로 저장됩니다."
+        )
+        merge = dialog.addButton("기존 메모 유지하고 병합", QMessageBox.ButtonRole.AcceptRole)
+        replace = dialog.addButton("현재 메모 전체 교체", QMessageBox.ButtonRole.DestructiveRole)
+        dialog.addButton(QMessageBox.StandardButton.Cancel)
+        dialog.setDefaultButton(merge)
+        dialog.exec()
+        clicked = dialog.clickedButton()
+        if clicked not in {merge, replace}:
+            return
+        mode = "merge" if clicked is merge else "replace"
+        backup_dir = Path(self.store.path).parent
+        safety = self._available_backup_path(
+            backup_dir / f"before_memo_restore_{datetime.now():%Y%m%d_%H%M%S}.tomamemo"
+        )
+        safety_created = False
+        try:
+            export_memo_archive(self.store, safety)
+            safety_created = True
+            result = restore_memo_archive(
+                self.store, Path(chosen), mode, self.hotkey_validator,
+            )
+        except Exception as exc:
+            suffix = f"\n\n안전 백업: {safety}" if safety_created else ""
+            QMessageBox.warning(source, "전체 메모 복원 실패", f"{exc}{suffix}")
+            return
+        self._refresh_after_memo_restore()
+        extra = f"\n충돌한 메모 단축키 {result.cleared_hotkeys}개를 해제했습니다." if result.cleared_hotkeys else ""
+        QMessageBox.information(
+            source, "전체 메모 복원 완료",
+            f"메모 {result.notes}개, 첨부 {result.attachments}개, 알림 {result.reminders}개를 복원했습니다."
+            f"{extra}\n안전 백업: {safety}",
+        )
+
+    @staticmethod
+    def _available_backup_path(path: Path) -> Path:
+        if not path.exists():
+            return path
+        index = 2
+        while True:
+            candidate = path.with_name(f"{path.stem} ({index}){path.suffix}")
+            if not candidate.exists():
+                return candidate
+            index += 1
+
+    def _refresh_after_memo_restore(self) -> None:
+        for note_id in list(self.postits):
+            self._close_postit(note_id)
+        if self.standalone_window is not None:
+            self.standalone_window.note_id = None
+            self.standalone_window.hide()
+        self.current_id = None
+        self.list_panel.search.clear()
+        self.refresh()
+        self.restore_postits()
+        self.shortcuts_changed.emit()
 
     def _schedule_postit_changed(self) -> None:
         self.refresh()
