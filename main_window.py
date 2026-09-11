@@ -69,6 +69,7 @@ from storage_config import (
     save_storage_paths,
 )
 from ui_feedback import apply_status, parse_splitter_sizes
+from user_manual import UserManualDialog
 from ui_polish import (
     ActiveStateItem,
     RegistrationDotDelegate,
@@ -178,62 +179,6 @@ class ToggleSwitch(QCheckBox):
         painter.setFont(self.font())
         label_rect = QRectF(4 * self._scale, 0, width / 2, height) if active else QRectF(width / 2 - 2 * self._scale, 0, width / 2, height)
         painter.drawText(label_rect, Qt.AlignmentFlag.AlignCenter, "ON" if active else "OFF")
-
-
-class HelpDialog(QDialog):
-    def __init__(self, parent=None, hotkeys: dict[str, str] | None = None):
-        super().__init__(parent)
-        keys = hotkeys or {}
-        record_stop = keys.get("record_stop") or "설정에서 지정한 녹화 종료 키"
-        playback_stop = keys.get("playback_stop") or "설정에서 지정한 실행 중지 키"
-        self.setWindowTitle("TomaDesk 사용법 · 도움말")
-        self.resize(820, 680)
-        self.setMinimumSize(620, 500)
-        outer = QVBoxLayout(self)
-        title = QLabel("TomaDesk 사용법")
-        title.setObjectName("pageTitle")
-        outer.addWidget(title)
-        hero = QLabel("작업 만들기  →  단축키 지정  →  저장·등록  →  어디서든 실행")
-        hero.setObjectName("helpHero")
-        hero.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        hero.setWordWrap(True)
-        outer.addWidget(hero)
-
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        body = QWidget()
-        grid = QGridLayout(body)
-        grid.setSpacing(12)
-        cards = [
-            ("① 작업 만들기", "새 작업을 누르고 이름과 작업 유형을 선택합니다.\n문구 입력·사이트 열기·프로그램/폴더 열기·반복작업을 지원합니다."),
-            ("② 단축키 지정", "Ctrl·Alt·Win·Shift 조합과 실행 키를 정합니다.\n이미 사용 중인 조합은 저장할 수 없습니다."),
-            ("③ 저장하면 자동 등록", "저장한 작업은 단축키에 자동 등록됩니다.\n목록의 ON/OFF 스위치로 개별 작업을 즉시 켜거나 끌 수 있습니다."),
-            ("④ 반복작업 녹화", f"녹화 시작 안내를 확인한 뒤 외부 프로그램을 조작합니다.\n{record_stop}로 종료하고 문구와 대기 시간을 확인합니다."),
-            ("■ 실행과 긴급 중지", f"등록된 단축키는 다른 프로그램을 사용 중이어도 동작합니다.\n반복작업은 {playback_stop}로 즉시 중지할 수 있습니다."),
-            ("■ 알림 메모", "상단의 알림 메모 화면에서 메모와 알림 시간을 저장합니다.\n포스트잇으로 고정하면 메인창을 숨겨도 별도 메모 창이 유지됩니다."),
-            ("■ 백업과 이동", "JSON은 전체 설정 백업·복원에 사용합니다.\nExcel은 작업 목록을 편집하거나 다른 PC로 옮길 때 사용할 수 있습니다."),
-        ]
-        for index, (heading, description) in enumerate(cards):
-            card = QFrame()
-            card.setObjectName("helpCard")
-            card_layout = QVBoxLayout(card)
-            card_layout.setContentsMargins(16, 14, 16, 14)
-            card_title = QLabel(heading)
-            card_title.setObjectName("helpStep")
-            card_text = QLabel(description)
-            card_text.setWordWrap(True)
-            card_text.setMinimumHeight(58)
-            card_layout.addWidget(card_title)
-            card_layout.addWidget(card_text)
-            grid.addWidget(card, index // 2, index % 2)
-        grid.setColumnStretch(0, 1)
-        grid.setColumnStretch(1, 1)
-        scroll.setWidget(body)
-        outer.addWidget(scroll, 1)
-        close_button = QPushButton("확인")
-        close_button.setObjectName("primaryButton")
-        close_button.clicked.connect(self.accept)
-        outer.addWidget(close_button, alignment=Qt.AlignmentFlag.AlignRight)
 
 
 class StartJourneyDialog(QDialog):
@@ -569,7 +514,7 @@ class MainWindow(QMainWindow):
             ("시작", self.show_start_guide, "단축키, 메모, 일정 중 하나를 빠르게 시작"),
             ("휴지통", self.show_trash, "최근 7일 안에 삭제한 작업·메모·일정 복원"),
             ("설정", self.show_settings, "전역 단축키와 시작 위치 설정"),
-            ("도움말", self.show_help, "프로그램 사용법 보기"),
+            ("설명서", self.show_help, "화면 그림으로 보는 사용 설명서 열기"),
         ):
             button = self._button(mode_layout, text, callback)
             button.setObjectName("workspaceUtilityButton")
@@ -1485,9 +1430,18 @@ class MainWindow(QMainWindow):
                 button.setText(text)
 
     def show_help(self) -> None:
-        HelpDialog(
+        """설명서는 지금 쓰는 실제 단축키를 그대로 보여 준다."""
+        UserManualDialog(
             self,
             hotkeys={
+                "main_open": self.main_open_hotkey,
+                "tray_hide": self.tray_hide_hotkey,
+                "exit_key": self.exit_hotkey,
+                "quick_memo": self.quick_memo_hotkey,
+                "new_memo": self.new_memo_hotkey,
+                "today_view": self.today_view_hotkey,
+                "memo_search": self.memo_search_hotkey,
+                "quick_schedule": self.quick_schedule_hotkey,
                 "record_stop": self._record_stop_hotkey_from_store(),
                 "playback_stop": self._playback_stop_hotkey_from_store(),
             },

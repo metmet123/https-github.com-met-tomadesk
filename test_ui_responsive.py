@@ -116,7 +116,7 @@ class ResponsiveUiTest(unittest.TestCase):
         self.assertTrue(self.window.workspace_switch_hint.isVisible())
         self.assertEqual(
             [button.text() for button in self.window.workspace_utility_buttons],
-            ["시작", "휴지통", "설정", "도움말"],
+            ["시작", "휴지통", "설정", "설명서"],
         )
         self.assertTrue(all(button.isVisible() for button in self.window.workspace_utility_buttons))
         self.assertLess(self.window.active_filter.y(), 100)

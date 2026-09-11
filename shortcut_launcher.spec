@@ -22,6 +22,13 @@ QT_RUNTIME_DLLS = [
 # The icon is embedded in the EXE and also available at runtime for the window
 # and taskbar icon. Mutable user data is never bundled.
 datas = [(str(ICON_FILE), ".")] if ICON_FILE.is_file() else []
+# 사용 설명서는 실제 화면 캡처를 그대로 보여 준다.  함께 묶지 않으면 배포본에서
+# 그림 자리가 비어 버린다.
+MANUAL_DIR = PROJECT_ROOT / "assets" / "manual"
+datas += [
+    (str(path), "assets/manual")
+    for path in sorted(MANUAL_DIR.glob("*.png"))
+]
 hiddenimports = ["pythoncom", "pywintypes", "win32com.client"]
 
 a = Analysis(
