@@ -348,6 +348,14 @@ class NoteReminderStore(ReminderStoreMixin, ReminderRecurrenceStoreMixin):
             self.conn.commit()
         return note_id
 
+    def set_note_embedded(self, note_id: int, embedded: bool) -> None:
+        """Switch page/list visibility without changing ownership or content."""
+        with self.conn:
+            self.conn.execute(
+                "UPDATE notes SET embedded=? WHERE id=?",
+                (int(bool(embedded)), int(note_id)),
+            )
+
     def can_reparent(self, note_id: int, parent_id: int) -> bool:
         """A 를 A 안으로, 또는 자기 안의 메모 밑으로 넣으려는 것을 막는다."""
         note_id, parent_id = int(note_id), int(parent_id)

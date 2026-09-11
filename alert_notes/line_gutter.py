@@ -22,6 +22,7 @@ class LineGutter(QWidget):
         self._hover_block = None
         self._press_at: QPoint | None = None
         self._dragging = False
+        self._selecting = False
         self.setFixedWidth(self.WIDTH)
         self.setMouseTracking(True)
         self.setCursor(Qt.CursorShape.ArrowCursor)
@@ -73,6 +74,9 @@ class LineGutter(QWidget):
     # --------------------------------------------------------- 마우스 --
     def mouseMoveEvent(self, event) -> None:
         point = event.position().toPoint()
+        if self._selecting and event.buttons() & Qt.MouseButton.LeftButton:
+            self.editor.update_block_selection(self.editor.block_at_gutter(point.y()))
+            return
         if self._press_at is not None and event.buttons() & Qt.MouseButton.LeftButton:
             moved = (point - self._press_at).manhattanLength()
             if not self._dragging and moved >= self.DRAG_THRESHOLD:
@@ -92,12 +96,19 @@ class LineGutter(QWidget):
         self._set_hover(block)
         if block is None:
             return
+        if event.modifiers() & Qt.KeyboardModifier.AltModifier:
+            self._selecting = True
+            self.editor.begin_block_selection(block)
+            event.accept()
+            return
         self._press_at = point
         self.editor.begin_line_drag(block)
         event.accept()
 
     def mouseReleaseEvent(self, event) -> None:
-        if self._dragging:
+        if self._selecting:
+            self.editor.finish_block_selection()
+        elif self._dragging:
             self.editor.finish_line_drag(
                 self.mapTo(self.editor, event.position().toPoint())
             )
@@ -105,6 +116,7 @@ class LineGutter(QWidget):
             self.editor.cancel_line_drag()
         self._press_at = None
         self._dragging = False
+        self._selecting = False
         self.setCursor(Qt.CursorShape.OpenHandCursor if self._hover_block else Qt.CursorShape.ArrowCursor)
         event.accept()
 

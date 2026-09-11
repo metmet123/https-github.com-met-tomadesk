@@ -361,6 +361,10 @@ class MemoListPanel(QWidget):
     note_moved = pyqtSignal(int, int, int)
     child_requested = pyqtSignal(int)
     pin_toggled = pyqtSignal(int, bool)
+    copy_requested = pyqtSignal()
+    paste_requested = pyqtSignal()
+    clone_undo_requested = pyqtSignal()
+    clone_redo_requested = pyqtSignal()
 
     # 번호 carried no information the row order did not already show, and 표시
     # spent a whole column on one word; it is now a mark in front of the title.
@@ -536,6 +540,24 @@ class MemoListPanel(QWidget):
         if watched is self.table.viewport() and event.type() == QEvent.Type.Resize:
             self._resize_table_columns()
         if watched is self.table and event.type() == QEvent.Type.KeyPress:
+            modifiers = event.modifiers()
+            if event.key() == Qt.Key.Key_C and modifiers == Qt.KeyboardModifier.ControlModifier:
+                self.copy_requested.emit()
+                return True
+            if event.key() == Qt.Key.Key_V and modifiers == Qt.KeyboardModifier.ControlModifier:
+                self.paste_requested.emit()
+                return True
+            if event.key() == Qt.Key.Key_Z and modifiers == Qt.KeyboardModifier.ControlModifier:
+                self.clone_undo_requested.emit()
+                return True
+            if (
+                (event.key() == Qt.Key.Key_Y and modifiers == Qt.KeyboardModifier.ControlModifier)
+                or (event.key() == Qt.Key.Key_Z and modifiers == (
+                    Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier
+                ))
+            ):
+                self.clone_redo_requested.emit()
+                return True
             if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace) and self.deletion_ids():
                 self.delete_requested.emit()
                 return True

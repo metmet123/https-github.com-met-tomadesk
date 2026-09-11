@@ -10,8 +10,8 @@ from PyQt6.QtCore import (
     QTimer, Qt, QUrl, pyqtSignal,
 )
 from PyQt6.QtGui import (
-    QColor, QDesktopServices, QFont, QFontMetricsF, QImage, QImageReader, QKeyEvent,
-    QMouseEvent, QPainter, QPen, QTextCharFormat, QTextCursor, QTextDocument,
+    QColor, QDesktopServices, QFont, QFontMetricsF, QImage, QImageReader, QKeyEvent, QKeySequence,
+    QMouseEvent, QPainter, QPen, QTextCharFormat, QTextCursor, QTextDocument, QTextDocumentFragment,
     QTextBlockFormat, QTextFrameFormat, QTextImageFormat, QTextLength,
     QTextListFormat, QTextTableCellFormat, QTextTableFormat,
 )
@@ -26,6 +26,14 @@ from .insert_preferences import get_insert_preferences
 from .note_link_dialog import NoteLinkDialog
 from .line_gutter import LineGutter
 from .rich_text import editor_content, load_editor_content, sanitize_rich_html
+from .memo_clipboard import (
+    BLOCK_MIME, apply_block_metadata, attachment_ids_from_html, get_json,
+    page_ids_from_html, selected_block_metadata, set_json,
+)
+from .note_clone_service import NoteCloneService, rewrite_cloned_content
+from .block_selection import BlockSelectionManager
+from .block_commands import BlockCommandDispatcher
+from .block_action_bar import BlockActionBar
 
 
 IMAGE_URL_PREFIX = "toma-note-image://"
@@ -132,6 +140,9 @@ class RichMemoTextEdit(QTextEdit):
         self._watched_document = None
         self._structure_dirty = True
         self._block_count = 0
+        self._copied_character_format: QTextCharFormat | None = None
+        self._composite_edits: list[dict] = []
+        self._block_selecting = False
         # 본문 찾기로 표시해 둔 자리.  칠할 때 체크리스트 표시와 함께 얹는다.
         self._find_ranges: list[tuple[int, int]] = []
         self._find_current = -1
@@ -161,10 +172,17 @@ class RichMemoTextEdit(QTextEdit):
         self.gutter = LineGutter(self)
         self.setViewportMargins(0, 0, LineGutter.WIDTH, 0)
         self._place_gutter()
+        self.block_selection = BlockSelectionManager(self)
+        self.block_commands = BlockCommandDispatcher(self)
+        self.block_action_bar = BlockActionBar(self, self.block_commands)
+        self.block_selection.changed.connect(self._block_selection_changed)
+        self.verticalScrollBar().valueChanged.connect(lambda _value: self.block_action_bar.sync())
         # 넣을 수 있는 것들의 단축키.  목록 한곳에 적힌 것을 그대로 건다.
         self.insert_shortcuts = install_insert_shortcuts(self)
 
     def set_note_context(self, note_id: int | None) -> None:
+        if hasattr(self, "block_selection"):
+            self.block_selection.clear()
         resolved = int(note_id) if note_id is not None else None
         if self.note_id == resolved:
             return
@@ -215,11 +233,15 @@ class RichMemoTextEdit(QTextEdit):
         if self._watched_document is not None:
             try:
                 self._watched_document.contentsChange.disconnect(self._note_contents_change)
+                self._watched_document.undoCommandAdded.disconnect(self._discard_composite_redos)
             except (RuntimeError, TypeError):
                 # 앞 문서가 이미 지워졌으면 끊을 것도 없다.
                 pass
         self._watched_document = document
+        self._composite_edits = getattr(document, "_toma_composite_edits", [])
+        setattr(document, "_toma_composite_edits", self._composite_edits)
         document.contentsChange.connect(self._note_contents_change)
+        document.undoCommandAdded.connect(self._discard_composite_redos)
         self._block_count = document.blockCount()
         self._structure_dirty = True
 
@@ -262,7 +284,7 @@ class RichMemoTextEdit(QTextEdit):
         """
         cursor = self.textCursor()
         inside_link = cursor.position() > cursor.block().position() and (
-            cursor.charFormat().isAnchor()
+            self._valid_internal_link_at_position(cursor.position() - 1) is not None
         )
         if not inside_link:
             self.setCurrentCharFormat(QTextCharFormat())
@@ -298,6 +320,7 @@ class RichMemoTextEdit(QTextEdit):
         # 페이지 줄에 옛 제목이 남아 있으면 지금 제목으로 맞춘다.
         self._refresh_page_links()
         self._refresh_note_links()
+        self._remove_orphan_internal_links()
         self._refresh_known_pages()
         self._reset_typing_format()
         self.document().setProperty("tomaSourceContent", str(content or ""))
@@ -386,6 +409,10 @@ class RichMemoTextEdit(QTextEdit):
         finally:
             transaction.endEditBlock()
         self._structure_dirty = True
+
+    def _discard_composite_redos(self) -> None:
+        """A new edit after Undo invalidates the matching database redo batch."""
+        self._composite_edits[:] = [entry for entry in self._composite_edits if entry["active"]]
         self._refresh_structure()
         self.setFocus()
 
@@ -542,8 +569,29 @@ class RichMemoTextEdit(QTextEdit):
                     completed.format.setForeground(QColor(71, 85, 105, 145))
                     selections.append(completed)
         selections.extend(self._find_selections())
+        selections.extend(self._block_selection_highlights())
         self.setExtraSelections(selections)
         self.viewport().update()
+
+    def _block_selection_highlights(self):
+        if not hasattr(self, "block_selection"):
+            return []
+        selections = []
+        for block in self.block_selection.blocks():
+            mark = QTextEdit.ExtraSelection()
+            mark.cursor = QTextCursor(block)
+            mark.cursor.movePosition(
+                QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor,
+            )
+            mark.format.setBackground(QColor(219, 234, 254, 190))
+            mark.format.setProperty(QTextCharFormat.Property.FullWidthSelection, True)
+            selections.append(mark)
+        return selections
+
+    def _block_selection_changed(self) -> None:
+        self._refresh_checklist_display()
+        self.block_action_bar.sync()
+        self.gutter.update()
 
     # ------------------------------------------------------------ 본문 찾기 --
     FIND_BACKGROUND = "#fde68a"
@@ -709,6 +757,67 @@ class RichMemoTextEdit(QTextEdit):
             return
         cursor.deletePreviousChar()
 
+    def _delete_empty_block_and_restore(self, block, visible_anchor) -> None:
+        """빈 줄만 지우고 커서와 본문 스크롤을 보이는 문단에 유지한다.
+
+        빈 토글의 안내 줄은 접혀 있으면 화면에 없다.  그 줄의 위치로 커서를
+        복원하면 Qt가 숨은 커서를 보이게 하려고 문서 맨 위로 스크롤할 수 있다.
+        삭제할 줄과 복원할 줄을 따로 받아 항상 보이는 문단으로 돌아간다.
+        """
+        if not block.isValid() or not visible_anchor.isValid():
+            return
+        document = self.document()
+        restore_at = visible_anchor.position() + visible_anchor.length() - 1
+        scroll_bar = self.verticalScrollBar()
+        scroll_value = scroll_bar.value()
+        transaction = QTextCursor(document)
+        transaction.beginEditBlock()
+        try:
+            self._delete_empty_block(block)
+        finally:
+            transaction.endEditBlock()
+        restored = QTextCursor(document)
+        restored.setPosition(max(0, min(restore_at, document.characterCount() - 1)))
+        self.setTextCursor(restored)
+        self._restore_inner_scroll(scroll_value)
+
+    def _restore_inner_scroll(self, value: int) -> None:
+        scroll_bar = self.verticalScrollBar()
+        scroll_bar.setValue(max(scroll_bar.minimum(), min(int(value), scroll_bar.maximum())))
+
+    @staticmethod
+    def _table_at_block(block):
+        return QTextCursor(block).currentTable() if block.isValid() else None
+
+    def _is_table_boundary_block(self, block) -> bool:
+        """외부 표가 끝난 직후 Qt가 두는 빈 구조 문단인지 확인한다."""
+        if not block.isValid() or block.text().strip():
+            return False
+        previous = block.previous()
+        previous_table = self._table_at_block(previous)
+        if previous_table is None:
+            return False
+        current_table = self._table_at_block(block)
+        previous_key = previous_table.firstPosition()
+        current_key = current_table.firstPosition() if current_table is not None else None
+        return previous_key != current_key
+
+    def _move_caret_past_table_boundary(self, join_previous_edit: bool = False) -> bool:
+        """표 오른쪽 끝의 구조 문단 대신 왼쪽의 깨끗한 문단을 연다."""
+        cursor = self.textCursor()
+        if cursor.hasSelection() or not self._is_table_boundary_block(cursor.block()):
+            return False
+        if join_previous_edit:
+            cursor.joinPreviousEditBlock()
+        try:
+            self._open_clean_block(cursor)
+        finally:
+            if join_previous_edit:
+                cursor.endEditBlock()
+        self.setTextCursor(cursor)
+        self.setCurrentCharFormat(QTextCharFormat())
+        return True
+
     def _keep_pasted_blocks_inside_toggle(self, toggle, start: int, end: int) -> None:
         """빈 안내 줄에 붙인 문단들을 토글의 첫 깊이 안으로 넣는다."""
         if end <= start or not toggle.isValid():
@@ -738,13 +847,15 @@ class RichMemoTextEdit(QTextEdit):
             self._delete_empty_block(pasted[0])
         self._refresh_toggle_visibility()
 
-    def _paste_into_lone_empty_toggle(self, insert) -> None:
-        """안내 줄에서 붙여넣으면 새 문단도 모두 해당 토글의 자식으로 둔다."""
+    def _paste_into_lone_empty_toggle(self, insert, first_block_format=None) -> None:
+        """토글 자식에 붙인 새 문단을 같은 토글 안에 두고 첫 문단 서식을 지킨다."""
         cursor = self.textCursor()
-        toggle = (
-            None if cursor.hasSelection()
-            else self._toggle_for_lone_empty_child(cursor.block())
+        placeholder_toggle = None if cursor.hasSelection() else self._toggle_for_lone_empty_child(
+            cursor.block()
         )
+        toggle = placeholder_toggle
+        if toggle is None and not cursor.hasSelection():
+            toggle = self._parent_toggle(cursor.block())
         if toggle is None:
             insert()
             return
@@ -754,8 +865,125 @@ class RichMemoTextEdit(QTextEdit):
         try:
             insert()
             self._keep_pasted_blocks_inside_toggle(toggle, start, self.textCursor().position())
+            if placeholder_toggle is not None and first_block_format is not None:
+                first = self.document().findBlock(start)
+                if first.isValid():
+                    block_cursor = QTextCursor(first)
+                    block_format = QTextBlockFormat(first_block_format)
+                    block_format.setIndent(max(
+                        self._block_indent(toggle) + 1, block_format.indent(),
+                    ))
+                    block_cursor.setBlockFormat(block_format)
         finally:
             transaction.endEditBlock()
+
+    @staticmethod
+    def _clipboard_plain_text(value: str) -> str:
+        """클립보드 줄바꿈을 QTextDocument와 비교할 한 가지 형태로 맞춘다."""
+        return str(value or "").replace("\r\n", "\n").replace("\r", "\n").replace(
+            "\u2028", "\n"
+        ).replace("\u2029", "\n")
+
+    @classmethod
+    def _html_with_plain_text_line_breaks(cls, html: str, plain_text: str) -> str:
+        """HTML의 장식용 빈 줄만 걷고 클립보드 원문의 줄바꿈을 따른다.
+
+        일부 프로그램은 눈에 보이는 문단 간격을 ``<p><br></p>`` 또는 연속
+        ``<br>`` 로 함께 복사한다.  같은 클립보드의 text/plain에는 그 빈 줄이
+        없으므로, 글자는 같고 HTML 쪽 줄바꿈만 더 많을 때에만 초과분을 지운다.
+        QTextDocument에서 직접 고치므로 남은 글자·목록·문단 서식은 유지된다.
+        """
+        cleaned = sanitize_rich_html(html)
+        wanted = cls._clipboard_plain_text(plain_text)
+        if not wanted:
+            return cleaned
+        document = QTextDocument()
+        document.setHtml(cleaned)
+
+        def raw_characters():
+            result = []
+            # QTextDocument 끝의 암시적 문단 구분자는 toPlainText()에 나오지 않는다.
+            for position in range(max(0, document.characterCount() - 1)):
+                character = document.characterAt(position)
+                visible = "\n" if character in {"\u2028", "\u2029"} else character
+                result.append((position, character, visible))
+            return result
+
+        def newline_gaps(characters):
+            gaps: dict[int, list[tuple[int, str]]] = {}
+            visible_count = 0
+            for position, raw, visible in characters:
+                if visible == "\n":
+                    gaps.setdefault(visible_count, []).append((position, raw))
+                else:
+                    visible_count += 1
+            return gaps
+
+        wanted_without_breaks = wanted.replace("\n", "")
+        changed = False
+        while True:
+            characters = raw_characters()
+            actual = "".join(visible for _position, _raw, visible in characters)
+            if actual == wanted:
+                break
+            if actual.replace("\n", "") != wanted_without_breaks:
+                return cleaned
+            actual_gaps = newline_gaps(characters)
+            wanted_gaps = newline_gaps([
+                (position, character, character)
+                for position, character in enumerate(wanted)
+            ])
+            excess = next((
+                gap for gap, breaks in actual_gaps.items()
+                if len(breaks) > len(wanted_gaps.get(gap, []))
+            ), None)
+            if excess is None:
+                return cleaned
+            candidates = actual_gaps[excess]
+            soft_break = next((position for position, raw in candidates if raw == "\u2028"), None)
+            if soft_break is not None:
+                cursor = QTextCursor(document)
+                cursor.setPosition(soft_break)
+                cursor.deleteChar()
+                changed = True
+                continue
+            blank = document.begin()
+            removed_blank = False
+            candidate_positions = {position for position, _raw in candidates}
+            while blank.isValid():
+                if (
+                    not blank.text()
+                    and blank.position() in candidate_positions
+                    and blank.next().isValid()
+                ):
+                    cls._delete_empty_block(blank)
+                    removed_blank = changed = True
+                    break
+                blank = blank.next()
+            if removed_blank:
+                continue
+            # 남은 초과분은 비어 있지 않은 두 HTML 문단 사이의 구분자다.
+            # text/plain에 경계가 없을 때만 합쳐야 원문의 줄바꿈과 같아진다.
+            cursor = QTextCursor(document)
+            cursor.setPosition(candidates[-1][0])
+            cursor.deleteChar()
+            changed = True
+        return document.toHtml() if changed else cleaned
+
+    def _html_for_paste(self, source: QMimeData) -> str:
+        html = sanitize_rich_html(source.html())
+        cursor = self.textCursor()
+        inside_toggle = not cursor.hasSelection() and self._parent_toggle(cursor.block()) is not None
+        if inside_toggle and source.hasText():
+            return self._html_with_plain_text_line_breaks(html, source.text())
+        return html
+
+    @staticmethod
+    def _first_html_block_format(html: str):
+        document = QTextDocument()
+        document.setHtml(html)
+        first = document.begin()
+        return QTextBlockFormat(first.blockFormat()) if first.isValid() else None
 
     def _empty_toggle_blocks(self, blocks=None):
         """펼쳐져 있는데 안이 빈 토글과 그 빈 줄을 짝지어 돌려준다."""
@@ -812,8 +1040,24 @@ class RichMemoTextEdit(QTextEdit):
             self._remove_toggle_prefix(block)
             return
         cursor = QTextCursor(block)
-        cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock)
-        cursor.insertText(TOGGLE_OPEN_PREFIX)
+        cursor.beginEditBlock()
+        self._syncing_toggle_children = True
+        try:
+            cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock)
+            cursor.insertText(TOGGLE_OPEN_PREFIX)
+            block = cursor.block()
+            following = block.next()
+            if not following.isValid() or self._block_indent(following) <= self._block_indent(block):
+                cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+                self._open_clean_block(cursor, self._block_indent(block) + 1)
+        finally:
+            self._syncing_toggle_children = False
+            cursor.endEditBlock()
+        restored = QTextCursor(block)
+        restored.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+        self.setTextCursor(restored)
+        self._structure_dirty = True
+        self._refresh_structure()
         self.setFocus()
 
     # 줄 앞에서 이렇게 치면 그 기능이 된다.
@@ -1179,7 +1423,9 @@ class RichMemoTextEdit(QTextEdit):
         if source_at is None or spot is None:
             return False
         target_at, inside = spot
-        return self.move_line(source_at, target_at, inside)
+        return self.block_commands.execute(
+            "move_to", source_at=source_at, target_at=target_at, inside=inside,
+        )
 
     def move_line(self, source_at: int, target_at: int, inside: bool = False) -> bool:
         """줄 하나(토글이면 그 안까지)를 다른 자리로 옮긴다."""
@@ -1230,6 +1476,68 @@ class RichMemoTextEdit(QTextEdit):
             cut.endEditBlock()
         self._refresh_toggle_visibility()
         return True
+
+    def begin_block_selection(self, block) -> None:
+        self._block_selecting = True
+        self.block_selection.begin_drag(block, additive=True)
+
+    def update_block_selection(self, block) -> None:
+        if self._block_selecting:
+            self.block_selection.update_drag(block)
+
+    def finish_block_selection(self) -> None:
+        self._block_selecting = False
+        self.block_selection.finish_drag()
+
+    def mime_for_blocks(self, blocks) -> QMimeData | None:
+        """Build one ordered clipboard payload from non-contiguous blocks."""
+        blocks = sorted(
+            {block.position(): block for block in blocks if block is not None and block.isValid()}.values(),
+            key=lambda block: block.position(),
+        )
+        if not blocks:
+            return None
+        carrier = QTextDocument()
+        self._configure_document(carrier)
+        writer = QTextCursor(carrier)
+        metadata = []
+        for index, block in enumerate(blocks):
+            if index:
+                writer.insertBlock()
+            selected = QTextCursor(block)
+            selected.movePosition(
+                QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor,
+            )
+            writer.insertFragment(QTextDocumentFragment(selected))
+            fmt = block.blockFormat()
+            metadata.append({
+                "indent": int(fmt.indent()),
+                "heading": int(self.heading_level(block)),
+                "user_state": int(block.userState()),
+            })
+        html = carrier.toHtml()
+        mime = QMimeData()
+        mime.setHtml(html)
+        mime.setText("\n".join(block.text() for block in blocks))
+        page_snapshot = {"version": 1, "roots": [], "notes": [], "attachments": []}
+        attachments = []
+        if self.store is not None:
+            page_ids = [value for value in page_ids_from_html(html) if self.store.note(value) is not None]
+            page_snapshot = NoteCloneService(self.store).snapshot(page_ids)
+            for attachment_id in attachment_ids_from_html(html):
+                row = self.store.attachment(attachment_id)
+                if row is not None:
+                    attachments.append(dict(row))
+        set_json(mime, BLOCK_MIME, {
+            "version": 1,
+            "kind": "blocks",
+            "html": html,
+            "text": mime.text(),
+            "blocks": metadata,
+            "pages": page_snapshot,
+            "attachments": attachments,
+        })
+        return mime
 
     def _drop_empty_placeholder(self, toggle) -> None:
         if not self._is_toggle_block(toggle):
@@ -2004,7 +2312,71 @@ class RichMemoTextEdit(QTextEdit):
             self.blockSignals(blocked)
 
     def _page_link_at(self, point) -> int | None:
-        return self.page_id_at(self.anchorAt(point.toPoint()))
+        cursor = self.cursorForPosition(point.toPoint())
+        return self._valid_internal_link_at_position(cursor.position())
+
+    def _internal_link_runs(self, block):
+        """Yield contiguous internal-anchor runs in *block* with their text."""
+        runs = []
+        iterator = block.begin()
+        current = None
+        while not iterator.atEnd():
+            fragment = iterator.fragment()
+            iterator += 1
+            if not fragment.isValid():
+                continue
+            href = str(fragment.charFormat().anchorHref() or "")
+            note_id = self.page_id_at(href)
+            start = fragment.position()
+            end = start + fragment.length()
+            if note_id is None:
+                current = None
+                continue
+            if current is not None and current[2] == start and current[3] == href:
+                current[2] = end
+                current[4] += fragment.text()
+            else:
+                current = [start, note_id, end, href, fragment.text()]
+                runs.append(current)
+        return runs
+
+    @staticmethod
+    def _is_valid_internal_link_text(text: str) -> bool:
+        return str(text).startswith((PAGE_MARK, LINK_MARK))
+
+    def _valid_internal_link_at_position(self, position: int) -> int | None:
+        block = self.document().findBlock(max(0, int(position)))
+        if not block.isValid():
+            return None
+        for start, note_id, end, _href, text in self._internal_link_runs(block):
+            if start <= position < end and self._is_valid_internal_link_text(text):
+                return int(note_id)
+        return None
+
+    def _remove_orphan_internal_links(self) -> None:
+        """Strip stale toma-note anchors that no longer carry a link marker."""
+        stale = []
+        block = self.document().begin()
+        while block.isValid():
+            for start, _note_id, end, _href, text in self._internal_link_runs(block):
+                if not self._is_valid_internal_link_text(text):
+                    stale.append((start, end))
+            block = block.next()
+        if not stale:
+            return
+        blocked = self.blockSignals(True)
+        try:
+            for start, end in stale:
+                cursor = QTextCursor(self.document())
+                cursor.setPosition(start)
+                cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+                fmt = QTextCharFormat()
+                fmt.setAnchor(False)
+                fmt.setAnchorHref("")
+                fmt.setFontUnderline(False)
+                cursor.mergeCharFormat(fmt)
+        finally:
+            self.blockSignals(blocked)
 
     def _toggle_marker_rect(self, block) -> QRectF:
         cursor = QTextCursor(block)
@@ -2054,6 +2426,10 @@ class RichMemoTextEdit(QTextEdit):
             self.viewport().update()
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if self._block_selecting and event.buttons() & Qt.MouseButton.LeftButton:
+            self.update_block_selection(self.cursorForPosition(event.position().toPoint()).block())
+            event.accept()
+            return
         if self._image_resize is not None and event.buttons() & Qt.MouseButton.LeftButton:
             rect_left = self.image_rect_left(self._image_resize["at"])
             self.resize_image_to(event.position().x() - rect_left)
@@ -2232,6 +2608,10 @@ class RichMemoTextEdit(QTextEdit):
         return bytes(payload)
 
     def insertFromMimeData(self, source: QMimeData) -> None:
+        self._move_caret_past_table_boundary()
+        payload = get_json(source, BLOCK_MIME)
+        if payload is not None and self._paste_internal_blocks(payload):
+            return
         if source.hasImage():
             image = source.imageData()
             if isinstance(image, QImage) and self.insert_image(image):
@@ -2248,13 +2628,320 @@ class RichMemoTextEdit(QTextEdit):
             self.structured_files_dropped.emit(document_paths)
             return
         if source.hasHtml():
-            self._paste_into_lone_empty_toggle(
-                lambda: self.textCursor().insertHtml(sanitize_rich_html(source.html()))
-            )
+            html = self._html_for_paste(source)
+            first_block_format = self._first_html_block_format(html)
+            transaction = QTextCursor(self.document())
+            transaction.beginEditBlock()
+            try:
+                self._paste_into_lone_empty_toggle(
+                    lambda: self.textCursor().insertHtml(html), first_block_format,
+                )
+            finally:
+                transaction.endEditBlock()
+            # QTextDocument는 표 조각의 최종 경계 커서를 편집 블록이 닫힐 때
+            # 확정한다.  그 뒤에 확인해야 바깥 표의 끝을 놓치지 않는다.
+            self._move_caret_past_table_boundary(join_previous_edit=True)
             return
         self._paste_into_lone_empty_toggle(lambda: super(RichMemoTextEdit, self).insertFromMimeData(source))
 
+    def createMimeDataFromSelection(self) -> QMimeData:
+        mime = super().createMimeDataFromSelection()
+        cursor = self.textCursor()
+        if not cursor.hasSelection():
+            return mime
+        html = str(mime.html() or "")
+        page_snapshot = {"version": 1, "roots": [], "notes": [], "attachments": []}
+        attachments = []
+        if self.store is not None:
+            page_ids = [value for value in page_ids_from_html(html) if self.store.note(value) is not None]
+            page_snapshot = NoteCloneService(self.store).snapshot(page_ids)
+            for attachment_id in attachment_ids_from_html(html):
+                row = self.store.attachment(attachment_id)
+                if row is not None:
+                    attachments.append(dict(row))
+        set_json(mime, BLOCK_MIME, {
+            "version": 1,
+            "kind": "blocks",
+            "html": html,
+            "text": str(mime.text() or ""),
+            "blocks": selected_block_metadata(cursor, self.heading_level),
+            "pages": page_snapshot,
+            "attachments": attachments,
+        })
+        return mime
+
+    @staticmethod
+    def _set_block_heading_metadata(block, level: int) -> None:
+        cursor = QTextCursor(block)
+        fmt = block.blockFormat()
+        if level in HEADING_STYLES:
+            _size, _spacing, top, bottom = HEADING_STYLES[level]
+            fmt.setTopMargin(top)
+            fmt.setBottomMargin(bottom)
+            fmt.setProperty(HEADING_LEVEL_PROPERTY, level)
+        else:
+            fmt.clearProperty(HEADING_LEVEL_PROPERTY)
+        cursor.setBlockFormat(fmt)
+
+    def _paste_internal_blocks(self, payload: dict) -> bool:
+        html = str(payload.get("html") or "")
+        if not html:
+            return False
+        normalized = QMimeData()
+        normalized.setHtml(html)
+        normalized.setText(str(payload.get("text") or ""))
+        html = self._html_for_paste(normalized)
+        first_block_format = self._first_html_block_format(html)
+        service = NoteCloneService(self.store) if self.store is not None else None
+        page_batch = {"notes": [], "attachments": [], "id_map": {}, "roots": []}
+        loose_rows, loose_map = [], {}
+        before = int(self.document().availableUndoSteps())
+        try:
+            if service is not None and self.note_id is not None:
+                page_snapshot = payload.get("pages") or {}
+                root_parents = {
+                    int(value): int(self.note_id) for value in page_snapshot.get("roots") or []
+                }
+                page_batch = service.clone(page_snapshot, root_parents=root_parents)
+                loose_rows, loose_map = service.clone_attachments(
+                    payload.get("attachments") or [], int(self.note_id),
+                )
+            html = rewrite_cloned_content(html, page_batch.get("id_map") or {}, loose_map)
+            start = self.textCursor().selectionStart()
+            paste_toggle = None if self.textCursor().hasSelection() else self._parent_toggle(
+                self.textCursor().block()
+            )
+            if paste_toggle is None and not self.textCursor().hasSelection():
+                paste_toggle = self._toggle_for_lone_empty_child(self.textCursor().block())
+            transaction = QTextCursor(self.document())
+            transaction.beginEditBlock()
+            try:
+                self._paste_into_lone_empty_toggle(
+                    lambda: self.textCursor().insertHtml(html), first_block_format,
+                )
+                apply_block_metadata(
+                    self.document(), start, payload.get("blocks") or [],
+                    self._set_block_heading_metadata,
+                )
+                if paste_toggle is not None:
+                    self._keep_pasted_blocks_inside_toggle(
+                        paste_toggle, start, self.textCursor().position(),
+                    )
+            finally:
+                transaction.endEditBlock()
+        except Exception:
+            if service is not None:
+                cleanup = {
+                    "notes": page_batch.get("notes") or [],
+                    "attachments": [*(page_batch.get("attachments") or []), *loose_rows],
+                }
+                service.remove_batch(cleanup)
+            raise
+        batch = {
+            "notes": page_batch.get("notes") or [],
+            "attachments": [*(page_batch.get("attachments") or []), *loose_rows],
+        }
+        after = int(self.document().availableUndoSteps())
+        if service is not None and (batch["notes"] or batch["attachments"]):
+            self._composite_edits.append({"before": before, "after": after, "batch": batch, "active": True})
+        self._refresh_known_pages()
+        return True
+
+    def _undo_composite_or_document(self) -> None:
+        steps = int(self.document().availableUndoSteps())
+        entry = next(
+            (value for value in reversed(self._composite_edits)
+             if value["active"] and int(value["after"]) == steps),
+            None,
+        )
+        self._page_sync_timer.stop()
+        self.undo()
+        if entry is not None and self.store is not None:
+            if entry.get("batch") is not None:
+                NoteCloneService(self.store).remove_batch(entry["batch"])
+            self._apply_note_states(entry.get("before_states") or [])
+            entry["active"] = False
+        self._refresh_known_pages()
+
+    def _redo_composite_or_document(self) -> None:
+        steps = int(self.document().availableUndoSteps())
+        entry = next(
+            (value for value in self._composite_edits
+             if not value["active"] and int(value["before"]) == steps),
+            None,
+        )
+        if entry is not None and self.store is not None:
+            if entry.get("batch") is not None:
+                NoteCloneService(self.store).restore_batch(entry["batch"])
+            self._apply_note_states(entry.get("after_states") or [])
+            entry["active"] = True
+        self.redo()
+        self._refresh_known_pages()
+
+    def _apply_note_states(self, states) -> None:
+        if self.store is None or not states:
+            return
+        for state in states:
+            self.store.set_note_embedded(int(state["id"]), bool(state["embedded"]))
+
+    @staticmethod
+    def _clear_anchor_in_cursor(cursor: QTextCursor) -> None:
+        fmt = QTextCharFormat()
+        fmt.setAnchor(False)
+        fmt.setAnchorHref("")
+        fmt.setFontUnderline(False)
+        cursor.mergeCharFormat(fmt)
+
+    def remove_linked_features(self, blocks, links_only: bool = False, exact_range=None) -> bool:
+        """Remove structural behaviour while preserving ordinary content and pages."""
+        blocks = sorted(
+            {block.position(): block for block in blocks if block is not None and block.isValid()}.values(),
+            key=lambda block: block.position(),
+        )
+        if not blocks:
+            return False
+        before_steps = int(self.document().availableUndoSteps())
+        before_states, after_states = [], []
+        transaction = QTextCursor(self.document())
+        transaction.beginEditBlock()
+        try:
+            for original in blocks:
+                block = self.document().findBlock(original.position())
+                if not block.isValid():
+                    continue
+                page_id = self.page_id_of_block(block)
+                if page_id is not None and self.store is not None:
+                    row = self.store.note(page_id)
+                    if row is not None:
+                        before_states.append({"id": page_id, "embedded": int(row["embedded"] or 0)})
+                        after_states.append({"id": page_id, "embedded": 0})
+                if not links_only:
+                    if self._is_toggle_block(block):
+                        self._remove_toggle_prefix(block)
+                        block = self.document().findBlock(block.position())
+                    if self._is_checklist_block(block):
+                        self._remove_checklist_prefix(block)
+                    for prefix in (CALLOUT_PREFIX, QUOTE_PREFIX, CODE_PREFIX):
+                        if block.text().startswith(prefix):
+                            self._drop_line_prefix(block, prefix)
+                            break
+                    if self.is_divider_block(block):
+                        wipe = QTextCursor(block)
+                        wipe.movePosition(
+                            QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor,
+                        )
+                        wipe.removeSelectedText()
+                    fmt = block.blockFormat()
+                    fmt.setObjectIndex(-1)
+                    fmt.clearProperty(HEADING_LEVEL_PROPERTY)
+                    fmt.clearBackground()
+                    fmt.setLeftMargin(0)
+                    fmt.setTopMargin(0)
+                    fmt.setBottomMargin(0)
+                    QTextCursor(block).setBlockFormat(fmt)
+                marker_selected = exact_range is None or (
+                    int(exact_range[0]) <= block.position() < int(exact_range[1])
+                )
+                run = QTextCursor(block)
+                if exact_range is None:
+                    run.movePosition(
+                        QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor,
+                    )
+                else:
+                    run.setPosition(max(block.position(), int(exact_range[0])))
+                    run.setPosition(
+                        min(block.position() + block.length() - 1, int(exact_range[1])),
+                        QTextCursor.MoveMode.KeepAnchor,
+                    )
+                if marker_selected and page_id is not None and block.text().startswith(PAGE_MARK):
+                    run.setPosition(block.position())
+                    run.movePosition(
+                        QTextCursor.MoveOperation.NextCharacter,
+                        QTextCursor.MoveMode.KeepAnchor, len(PAGE_MARK),
+                    )
+                    run.removeSelectedText()
+                    block = self.document().findBlock(block.position())
+                    run = QTextCursor(block)
+                    run.movePosition(
+                        QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor,
+                    )
+                elif marker_selected and block.text().startswith(LINK_MARK):
+                    run.setPosition(block.position())
+                    run.movePosition(
+                        QTextCursor.MoveOperation.NextCharacter,
+                        QTextCursor.MoveMode.KeepAnchor, len(LINK_MARK),
+                    )
+                    run.removeSelectedText()
+                    block = self.document().findBlock(block.position())
+                    run = QTextCursor(block)
+                    run.movePosition(
+                        QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor,
+                    )
+                self._clear_anchor_in_cursor(run)
+        finally:
+            transaction.endEditBlock()
+        after_steps = int(self.document().availableUndoSteps())
+        if before_states:
+            self._apply_note_states(after_states)
+            self._composite_edits.append({
+                "before": before_steps,
+                "after": after_steps,
+                "before_states": before_states,
+                "after_states": after_states,
+                "active": True,
+            })
+        self._refresh_known_pages()
+        return True
+
+    @staticmethod
+    def _visual_character_format(source: QTextCharFormat) -> QTextCharFormat:
+        source = QTextCharFormat(source)
+        fmt = QTextCharFormat()
+        fmt.setFont(source.font())
+        if source.foreground().style() != Qt.BrushStyle.NoBrush:
+            fmt.setForeground(source.foreground())
+        if source.background().style() != Qt.BrushStyle.NoBrush:
+            fmt.setBackground(source.background())
+        return fmt
+
+    def _copy_or_apply_character_format(self) -> None:
+        cursor = self.textCursor()
+        if cursor.hasSelection() and self._copied_character_format is not None:
+            cursor.mergeCharFormat(self._copied_character_format)
+            self.mergeCurrentCharFormat(self._copied_character_format)
+            return
+        if cursor.hasSelection():
+            return
+        probe = QTextCursor(cursor)
+        if probe.atBlockEnd() and probe.position() > probe.block().position():
+            probe.movePosition(QTextCursor.MoveOperation.PreviousCharacter)
+        self._copied_character_format = self._visual_character_format(probe.charFormat())
+
     def keyPressEvent(self, event: QKeyEvent) -> None:
+        if event.key() in {Qt.Key.Key_Up, Qt.Key.Key_Down} and event.modifiers() == Qt.KeyboardModifier.AltModifier:
+            command = "move_up" if event.key() == Qt.Key.Key_Up else "move_down"
+            if self.block_commands.execute(command):
+                return
+        if event.key() == Qt.Key.Key_Escape and self.block_selection.count():
+            self.block_selection.clear()
+            return
+        if event.key() == Qt.Key.Key_C and event.modifiers() == Qt.KeyboardModifier.ControlModifier and self.block_selection.count():
+            self.block_commands.execute("copy")
+            return
+        if event.key() == Qt.Key.Key_C and event.modifiers() == Qt.KeyboardModifier.AltModifier:
+            self._copy_or_apply_character_format()
+            return
+        if event.key() == Qt.Key.Key_Z and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+            self._undo_composite_or_document()
+            return
+        if event.key() == Qt.Key.Key_Y and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+            self._redo_composite_or_document()
+            return
+        if event.key() == Qt.Key.Key_Z and event.modifiers() == (
+            Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier
+        ):
+            self._redo_composite_or_document()
+            return
         if self.insert_popup_visible():
             # 메뉴가 떠 있는 동안은 위아래·Enter·Esc 를 메뉴가 먼저 쓴다.
             if event.key() in {Qt.Key.Key_Up, Qt.Key.Key_Down}:
@@ -2271,6 +2958,23 @@ class RichMemoTextEdit(QTextEdit):
         ):
             self.paste_as_plain_text()
             return
+        boundary_keys = {
+            Qt.Key.Key_Backspace, Qt.Key.Key_Delete,
+            Qt.Key.Key_Return, Qt.Key.Key_Enter,
+        }
+        plain_typing = bool(event.text()) and not event.modifiers() & (
+            Qt.KeyboardModifier.ControlModifier
+            | Qt.KeyboardModifier.AltModifier
+            | Qt.KeyboardModifier.MetaModifier
+        )
+        if (event.key() in boundary_keys or plain_typing) and self._is_table_boundary_block(
+            self.textCursor().block()
+        ):
+            moved = self._move_caret_past_table_boundary()
+            if moved and event.key() in boundary_keys:
+                # 구조 경계에서 이 키를 그대로 넘기면 표를 합치거나 깨끗한 줄을
+                # 즉시 다시 지운다.  첫 입력은 안전한 바깥 줄을 여는 데만 쓴다.
+                return
         cursor = self.textCursor()
         block = cursor.block()
         checklist = self._is_checklist_block(block)
@@ -2375,11 +3079,7 @@ class RichMemoTextEdit(QTextEdit):
                     preceding_toggle is not None
                     and self._block_indent(block) <= self._block_indent(preceding_toggle)
                 ):
-                    restore_at = previous.position()
-                    self._delete_empty_block(block)
-                    restored = QTextCursor(self.document())
-                    restored.setPosition(restore_at)
-                    self.setTextCursor(restored)
+                    self._delete_empty_block_and_restore(block, preceding_toggle)
                     return
         if not cursor.hasSelection() and event.key() == Qt.Key.Key_Backspace and offset <= 2:
             if self.is_quote_block(block):
@@ -2419,16 +3119,93 @@ class RichMemoTextEdit(QTextEdit):
             self.setCurrentCharFormat(continuation_format)
 
     def contextMenuEvent(self, event) -> None:
+        point_cursor = self.cursorForPosition(event.pos())
+        point_block = point_cursor.block()
+        if self.block_selection.count() and not self.block_selection.contains(point_block):
+            self.block_selection.select_only(point_block)
+        elif not self.block_selection.count():
+            current = self.textCursor()
+            if not current.hasSelection() or not (
+                current.selectionStart() <= point_cursor.position() <= current.selectionEnd()
+            ):
+                self.setTextCursor(point_cursor)
         menu = self.createStandardContextMenu()
+        self._wire_context_history_actions(menu)
+        menu.addSeparator()
+        self._populate_block_context_menu(menu)
         menu.addSeparator()
         action = menu.addAction("일반 텍스트로 붙여넣기\tCtrl+Shift+V")
         action.setEnabled(bool(QApplication.clipboard().text()))
         action.triggered.connect(self.paste_as_plain_text)
         menu.exec(event.globalPos())
 
+    def _populate_block_context_menu(self, menu) -> None:
+        block_menu = menu.addMenu("블록")
+        for label, command in (
+            ("위로 이동\tAlt+↑", "move_up"), ("아래로 이동\tAlt+↓", "move_down"),
+            ("복사", "copy"), ("독립 복제", "duplicate"),
+            ("내어쓰기", "outdent"), ("들여쓰기", "indent"),
+            ("토글로 묶기", "group_toggle"), ("삭제", "delete"),
+        ):
+            action = block_menu.addAction(label)
+            action.triggered.connect(lambda _checked=False, name=command: self.block_commands.execute(name))
+        convert_menu = menu.addMenu("블록 변환")
+        for label, command in (
+            ("본문", "body"), ("제목 1", "heading1"), ("제목 2", "heading2"),
+            ("제목 3", "heading3"), ("제목 4", "heading4"),
+            ("토글", "toggle"), ("체크리스트", "checklist"),
+            ("글머리표", "bullet"), ("강조 상자", "callout"),
+            ("인용문", "quote"), ("코드 줄", "code"),
+        ):
+            action = convert_menu.addAction(label)
+            action.triggered.connect(lambda _checked=False, name=command: self.block_commands.execute(name))
+        linked = menu.addAction("연동 기능 삭제")
+        linked.triggered.connect(lambda: self.block_commands.execute("unlink_features"))
+        blocks = self.block_commands.blocks()
+        has_page = any(self.page_id_of_block(block) is not None for block in blocks)
+        has_link = any(self._block_has_anchor(block) for block in blocks)
+        if has_page or has_link:
+            page_link_menu = menu.addMenu("페이지·링크")
+            label = "페이지 연결 해제 (메모 유지)" if has_page else "링크 기능 해제 (글자 유지)"
+            action = page_link_menu.addAction(label)
+            action.triggered.connect(lambda: self.block_commands.execute("unlink_links"))
+
+    @staticmethod
+    def _block_has_anchor(block) -> bool:
+        iterator = block.begin()
+        while not iterator.atEnd():
+            fragment = iterator.fragment()
+            iterator += 1
+            if fragment.isValid() and fragment.charFormat().isAnchor():
+                return True
+        return False
+
+    def _wire_context_history_actions(self, menu) -> None:
+        """Route context-menu Undo/Redo through document and database history."""
+        for action in menu.actions():
+            shortcut = action.shortcut()
+            hint = action.text().rsplit("\t", 1)[-1].replace(" ", "").upper()
+            is_undo = (
+                shortcut.matches(QKeySequence(QKeySequence.StandardKey.Undo))
+                == QKeySequence.SequenceMatch.ExactMatch
+                or hint == "CTRL+Z"
+            )
+            is_redo = (
+                shortcut.matches(QKeySequence(QKeySequence.StandardKey.Redo))
+                == QKeySequence.SequenceMatch.ExactMatch
+                or hint in {"CTRL+Y", "CTRL+SHIFT+Z"}
+            )
+            if is_undo:
+                action.triggered.disconnect()
+                action.triggered.connect(self._undo_composite_or_document)
+            elif is_redo:
+                action.triggered.disconnect()
+                action.triggered.connect(self._redo_composite_or_document)
+
     def paste_as_plain_text(self) -> None:
         text = QApplication.clipboard().text()
         if text:
+            self._move_caret_past_table_boundary()
             self._paste_into_lone_empty_toggle(lambda: self.textCursor().insertText(text))
 
     def _place_caret_outside_toggles(self) -> bool:
@@ -2461,6 +3238,10 @@ class RichMemoTextEdit(QTextEdit):
         return point.y() > self.cursorRect(QTextCursor(block)).bottom()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton and event.modifiers() & Qt.KeyboardModifier.AltModifier:
+            self.begin_block_selection(self.cursorForPosition(event.position().toPoint()).block())
+            event.accept()
+            return
         if event.button() == Qt.MouseButton.LeftButton:
             grip = self.image_grip_at(event.position())
             if grip is not None:
@@ -2484,6 +3265,10 @@ class RichMemoTextEdit(QTextEdit):
         return float(self.cursorRect(spot).left())
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if self._block_selecting:
+            self.finish_block_selection()
+            event.accept()
+            return
         if self._image_resize is not None:
             self.finish_image_resize()
             self._claimed_press = False
@@ -2532,6 +3317,8 @@ class RichMemoTextEdit(QTextEdit):
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._place_gutter()
+        if hasattr(self, "block_action_bar"):
+            self.block_action_bar.sync()
         self._refit_timer.start(0)
 
     def refit_images(self) -> None:

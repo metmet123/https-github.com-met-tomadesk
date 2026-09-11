@@ -1,8 +1,9 @@
 import json
 from datetime import datetime
+from html import escape
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QMimeData, Qt, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QShortcut
 from datetime import date, datetime, timedelta
 
@@ -37,6 +38,8 @@ from .memo_archive import (
     export_memo_archive, inspect_memo_archive, restore_memo_archive,
 )
 from .rich_memo_edit import RichMemoTextEdit
+from .memo_clipboard import NOTES_MIME, get_json, set_json
+from .note_clone_service import NoteCloneService
 from .structured_import import (
     MAX_IMPORT_FILES, SUPPORTED_IMPORT_SUFFIXES, heading_levels_for_strategy,
     import_strategy, load_clipboard, load_import_file, unique_title,
@@ -70,6 +73,8 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         self._horizontal_splitter_restored = False
         self.hotkey_validator = None
         self.current_id: int | None = None
+        self._list_clone_undo: list[dict] = []
+        self._list_clone_redo: list[dict] = []
         # Esc 로 돌아갈 길.  페이지를 타고 들어간 만큼만 얕게 쌓는다.
         self.visit_history: list[int] = []
         self.postits: dict[int, PostitWindow] = {}
@@ -154,6 +159,10 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         self.list_panel.note_moved.connect(self.move_note)
         self.list_panel.child_requested.connect(self.create_child_note)
         self.list_panel.pin_toggled.connect(self.set_note_pinned)
+        self.list_panel.copy_requested.connect(self.copy_selected_notes)
+        self.list_panel.paste_requested.connect(self.paste_copied_notes)
+        self.list_panel.clone_undo_requested.connect(self.undo_note_clone)
+        self.list_panel.clone_redo_requested.connect(self.redo_note_clone)
         self.list_panel.recent_chosen.connect(self.show_note)
         self.editor.note_open_requested.connect(self.show_note)
         self.editor.page_created.connect(self._page_created)
@@ -470,6 +479,60 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         self.calendar.refresh()
         self.editor.title_edit.setFocus()
         self.editor.title_edit.selectAll()
+
+    def copy_selected_notes(self) -> bool:
+        ids = self.list_panel.deletion_ids()
+        if not ids:
+            return False
+        snapshot = NoteCloneService(self.store).snapshot(ids)
+        if not snapshot.get("notes"):
+            return False
+        titles = [str(self.store.note(value)["title"]) for value in snapshot["roots"]]
+        mime = QMimeData()
+        mime.setText("\n".join(titles))
+        mime.setHtml("<ul>" + "".join(f"<li>{escape(title)}</li>" for title in titles) + "</ul>")
+        set_json(mime, NOTES_MIME, {"version": 1, "kind": "notes", "snapshot": snapshot})
+        QApplication.clipboard().setMimeData(mime)
+        return True
+
+    def paste_copied_notes(self) -> bool:
+        payload = get_json(QApplication.clipboard().mimeData(), NOTES_MIME)
+        if payload is None:
+            return False
+        batch = NoteCloneService(self.store).clone(payload.get("snapshot") or {}, rename_roots=True)
+        if not batch.get("notes"):
+            return False
+        self._list_clone_undo.append(batch)
+        self._list_clone_redo.clear()
+        roots = batch.get("roots") or []
+        self.current_id = int(roots[-1]) if roots else self.current_id
+        self.refresh()
+        self.shortcuts_changed.emit()
+        return True
+
+    def undo_note_clone(self) -> bool:
+        if not self._list_clone_undo:
+            return False
+        batch = self._list_clone_undo.pop()
+        NoteCloneService(self.store).remove_batch(batch)
+        self._list_clone_redo.append(batch)
+        if self.current_id in {int(row["id"]) for row in batch.get("notes") or []}:
+            self.current_id = None
+        self.refresh()
+        self.shortcuts_changed.emit()
+        return True
+
+    def redo_note_clone(self) -> bool:
+        if not self._list_clone_redo:
+            return False
+        batch = self._list_clone_redo.pop()
+        NoteCloneService(self.store).restore_batch(batch)
+        self._list_clone_undo.append(batch)
+        roots = batch.get("roots") or []
+        self.current_id = int(roots[-1]) if roots else self.current_id
+        self.refresh()
+        self.shortcuts_changed.emit()
+        return True
 
     def select_note(self, note_id: int) -> None:
         self._remember_visit(int(note_id))

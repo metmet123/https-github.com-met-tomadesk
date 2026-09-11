@@ -258,6 +258,49 @@ class EmptyToggleHintTest(unittest.TestCase):
             for block in children
         ))
 
+    def test_single_line_paste_stays_on_one_toggle_child(self):
+        source = QMimeData()
+        source.setText("한 문단")
+        toggle = self._paste_into_hint(source)
+        self.assertEqual(
+            [block.text() for block in self.editor._toggle_children(toggle)],
+            ["한 문단"],
+        )
+
+    def test_html_visual_spacer_does_not_add_a_blank_line(self):
+        source = QMimeData()
+        source.setText("A\nB")
+        source.setHtml("<p><b>A</b></p><p><br></p><p>B</p>")
+        toggle = self._paste_into_hint(source)
+        children = list(self.editor._toggle_children(toggle))
+        self.assertEqual([block.text() for block in children], ["A", "B"])
+        first = QTextCursor(children[0])
+        first.movePosition(
+            QTextCursor.MoveOperation.NextCharacter, QTextCursor.MoveMode.KeepAnchor,
+        )
+        self.assertGreaterEqual(first.charFormat().fontWeight(), 700)
+
+    def test_html_consecutive_breaks_follow_plain_text_line_count(self):
+        source = QMimeData()
+        source.setText("A\nB")
+        source.setHtml("<p><b>A</b><br><br>B</p>")
+        toggle = self._paste_into_hint(source)
+        children = list(self.editor._toggle_children(toggle))
+        self.assertEqual(
+            "\n".join(block.text().replace("\u2028", "\n") for block in children),
+            "A\nB",
+        )
+
+    def test_a_real_blank_line_in_plain_text_is_preserved(self):
+        source = QMimeData()
+        source.setText("A\n\nB")
+        source.setHtml("<p>A</p><p><br></p><p>B</p>")
+        toggle = self._paste_into_hint(source)
+        self.assertEqual(
+            [block.text() for block in self.editor._toggle_children(toggle)],
+            ["A", "", "B"],
+        )
+
     def test_html_paste_keeps_every_paragraph_inside_and_preserves_bold(self):
         source = QMimeData()
         source.setHtml("<p><b>첫 문단</b></p><p>둘째 문단</p>")
@@ -296,6 +339,100 @@ class EmptyToggleHintTest(unittest.TestCase):
         self.assertIsNotNone(self.editor._lone_empty_child(toggle))
         self.assertNotIn("첫 문단", self.editor.toPlainText())
         self.assertNotIn("둘째 문단", self.editor.toPlainText())
+
+    def test_ctrl_y_redoes_the_whole_toggle_paste(self):
+        source = QMimeData()
+        source.setText("A\nB")
+        source.setHtml("<p>A</p><p><br></p><p>B</p>")
+        self._paste_into_hint(source)
+        press(self.editor, Qt.Key.Key_Z, "z", Qt.KeyboardModifier.ControlModifier)
+        press(self.editor, Qt.Key.Key_Y, "y", Qt.KeyboardModifier.ControlModifier)
+        toggle = self.editor.document().begin()
+        self.assertEqual(
+            [block.text() for block in self.editor._toggle_children(toggle)],
+            ["A", "B"],
+        )
+
+    def test_ctrl_shift_z_redoes_the_whole_toggle_paste(self):
+        source = QMimeData()
+        source.setText("A\nB")
+        source.setHtml("<p>A</p><p><br></p><p>B</p>")
+        self._paste_into_hint(source)
+        press(self.editor, Qt.Key.Key_Z, "z", Qt.KeyboardModifier.ControlModifier)
+        press(
+            self.editor, Qt.Key.Key_Z, "z",
+            Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier,
+        )
+        toggle = self.editor.document().begin()
+        self.assertEqual(
+            [block.text() for block in self.editor._toggle_children(toggle)],
+            ["A", "B"],
+        )
+
+    def test_html_paste_in_the_middle_of_a_filled_toggle_adds_no_blank_child(self):
+        toggle = self._make_toggle()
+        child = self.editor._lone_empty_child(toggle)
+        cursor = QTextCursor(child)
+        cursor.insertText("앞")
+        cursor.insertBlock()
+        block_format = cursor.blockFormat()
+        block_format.setIndent(toggle.blockFormat().indent() + 1)
+        cursor.setBlockFormat(block_format)
+        cursor.insertText("뒤")
+        cursor = QTextCursor(child)
+        cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+        self.editor.setTextCursor(cursor)
+        source = QMimeData()
+        source.setText("A\nB")
+        source.setHtml("<p>A</p><p><br></p><p>B</p>")
+        self.editor.insertFromMimeData(source)
+        children = list(self.editor._toggle_children(toggle))
+        self.assertFalse(any(not block.text().replace("\u2028", "").strip() for block in children))
+        self.assertEqual(
+            "\n".join(block.text().replace("\u2028", "\n") for block in children),
+            "앞A\nB\n뒤",
+        )
+
+    def test_nested_toggle_html_paste_adds_no_blank_child(self):
+        outer = self._make_toggle("바깥")
+        inner = self.editor._lone_empty_child(outer)
+        cursor = QTextCursor(inner)
+        cursor.insertText("안쪽")
+        self.editor.setTextCursor(cursor)
+        self.editor.make_toggle()
+        inner = self.editor.textCursor().block()
+        self.editor.setTextCursor(QTextCursor(self.editor._lone_empty_child(inner)))
+        source = QMimeData()
+        source.setText("A\nB")
+        source.setHtml("<p>A</p><p><br></p><p>B</p>")
+        self.editor.insertFromMimeData(source)
+        self.assertEqual(
+            [block.text() for block in self.editor._toggle_children(inner)],
+            ["A", "B"],
+        )
+
+    def test_mixed_structural_blocks_keep_their_types_when_pasted(self):
+        source_editor = RichMemoTextEdit()
+        source_editor.setPlainText("제목\n☐ 할 일\n⌗ code")
+        heading = source_editor.document().begin()
+        source_editor.setTextCursor(QTextCursor(heading))
+        source_editor.apply_heading1()
+        selection = QTextCursor(source_editor.document())
+        selection.select(QTextCursor.SelectionType.Document)
+        source_editor.setTextCursor(selection)
+        source = source_editor.createMimeDataFromSelection()
+        toggle = self._paste_into_hint(source)
+        children = list(self.editor._toggle_children(toggle))
+        self.assertEqual([block.text() for block in children], ["제목", "☐ 할 일", "⌗ code"])
+        first = QTextCursor(children[0])
+        first.movePosition(
+            QTextCursor.MoveOperation.NextCharacter, QTextCursor.MoveMode.KeepAnchor,
+        )
+        self.assertAlmostEqual(first.charFormat().fontPointSize(), 22.0)
+        self.assertGreaterEqual(first.charFormat().fontWeight(), 700)
+        self.assertTrue(self.editor._is_checklist_block(children[1]))
+        self.assertTrue(self.editor.is_code_block(children[2]))
+        destroy_widget(source_editor, self.app)
 
     def test_backspace_removes_an_empty_child_before_filled_children(self):
         toggle = self._make_toggle()
@@ -344,10 +481,179 @@ class EmptyToggleHintTest(unittest.TestCase):
         )
         self.editor.setTextCursor(QTextCursor(outside))
         press(self.editor, Qt.Key.Key_Backspace)
+        self.app.processEvents()
         self.assertEqual(
             [(block.text(), block.blockFormat().indent()) for block in self.editor._iter_blocks()],
             [(f"{TOGGLE_OPEN_PREFIX}테스트", 0), ("", 1), ("다음 문단", 0)],
         )
+        self.assertEqual(self.editor.textCursor().block().position(), toggle.position())
+        self.assertTrue(self.editor.textCursor().block().isVisible())
+
+    def test_backspace_after_a_folded_empty_toggle_keeps_the_inner_scroll(self):
+        self.editor.resize(500, 180)
+        self.editor.setPlainText("\n".join(f"앞 문단 {index}" for index in range(45)))
+        cursor = self.editor.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        cursor.insertBlock()
+        cursor.insertText("끝 토글")
+        self.editor.setTextCursor(cursor)
+        self.editor.make_toggle()
+        toggle = self.editor.textCursor().block()
+        hint = self.editor._lone_empty_child(toggle)
+        cursor = QTextCursor(hint)
+        cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+        cursor.insertBlock()
+        outside = cursor.block()
+        fmt = outside.blockFormat()
+        fmt.setIndent(toggle.blockFormat().indent())
+        cursor.setBlockFormat(fmt)
+        cursor.insertBlock()
+        cursor.insertText("다음 문단")
+        self.editor.fold_toggle(toggle)
+        self.editor.setTextCursor(QTextCursor(outside))
+        self.editor.ensureCursorVisible()
+        self.app.processEvents()
+        self.app.processEvents()
+        scroll_bar = self.editor.verticalScrollBar()
+        before = scroll_bar.value()
+        self.assertGreater(before, 0)
+
+        press(self.editor, Qt.Key.Key_Backspace)
+        self.app.processEvents()
+        self.app.processEvents()
+
+        self.assertEqual(self.editor.textCursor().block().position(), toggle.position())
+        self.assertTrue(self.editor.textCursor().block().isVisible())
+        self.assertEqual(scroll_bar.value(), min(before, scroll_bar.maximum()))
+
+
+class TableBoundaryCaretTest(unittest.TestCase):
+    """HTML 표가 끝나는 구조 문단에 커서가 갇히지 않는다."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance() or QApplication([])
+
+    def setUp(self):
+        self.editor = RichMemoTextEdit()
+        self.editor.resize(574, 290)
+        self.editor.show()
+
+    def tearDown(self):
+        destroy_widget(self.editor, self.app)
+
+    def _paste_html(self, html: str) -> None:
+        source = QMimeData()
+        source.setHtml(html)
+        self.editor.insertFromMimeData(source)
+        self.app.processEvents()
+        self.app.processEvents()
+
+    def _tables(self):
+        tables = {}
+        for block in self.editor._iter_blocks():
+            table = QTextCursor(block).currentTable()
+            if table is not None:
+                tables[table.firstPosition()] = table
+        return list(tables.values())
+
+    def test_original_format_table_paste_opens_a_left_hand_paragraph(self):
+        self._paste_html(
+            "<table border='1' width='100%'><tr><td>"
+            "<table border='0' width='100%'><tr><td><p>본문</p></td></tr></table>"
+            "<p><b>제목</b></p></td></tr></table>"
+        )
+        cursor = self.editor.textCursor()
+        self.assertIsNone(cursor.currentTable())
+        self.assertFalse(self.editor._is_table_boundary_block(cursor.block()))
+        self.assertLess(self.editor.cursorRect(cursor).x(), 40)
+        self.assertIn("본문", self.editor.toPlainText())
+        self.assertIn("제목", self.editor.toPlainText())
+        self.assertTrue(self._tables(), "붙여넣은 실제 표까지 사라졌습니다")
+
+    def test_bordered_multi_cell_table_is_preserved(self):
+        self._paste_html(
+            "<table border='1'><tr><td>A</td><td>B</td></tr>"
+            "<tr><td>C</td><td>D</td></tr></table>"
+        )
+        table = max(self._tables(), key=lambda item: item.rows() * item.columns())
+        self.assertEqual((table.rows(), table.columns()), (2, 2))
+        self.assertEqual(set("ABCD"), set(self.editor.toPlainText().replace("\n", "")))
+        self.assertLess(self.editor.cursorRect(self.editor.textCursor()).x(), 40)
+
+    def test_table_paste_and_clean_paragraph_undo_together(self):
+        before = self.editor.toHtml()
+        self._paste_html("<table border='1'><tr><td>내용</td></tr></table>")
+        self.editor.undo()
+        self.assertEqual(self.editor.toHtml(), before)
+
+    def test_existing_html_is_not_changed_until_the_boundary_is_used(self):
+        html = (
+            "<html><body><table border='1' width='100%'><tr><td>기존 내용</td></tr></table>"
+            "</body></html>"
+        )
+        self.editor.set_content(html)
+        self.assertFalse(self.editor.document().isModified())
+        boundary = next(
+            block for block in self.editor._iter_blocks()
+            if self.editor._is_table_boundary_block(block)
+        )
+        self.editor.setTextCursor(QTextCursor(boundary))
+        count = self.editor.document().blockCount()
+
+        self.assertTrue(self.editor._move_caret_past_table_boundary())
+
+        self.assertEqual(self.editor.document().blockCount(), count + 1)
+        self.assertLess(self.editor.cursorRect(self.editor.textCursor()).x(), 40)
+
+    def test_typing_from_an_existing_table_boundary_uses_a_clean_paragraph(self):
+        self.editor.setHtml(
+            "<table border='1' width='100%'><tr><td>기존 내용</td></tr></table>"
+        )
+        boundary = next(
+            block for block in self.editor._iter_blocks()
+            if self.editor._is_table_boundary_block(block)
+        )
+        self.editor.setTextCursor(QTextCursor(boundary))
+        press(self.editor, Qt.Key.Key_X, "x")
+        self.app.processEvents()
+
+        self.assertFalse(self.editor._is_table_boundary_block(self.editor.textCursor().block()))
+        self.assertEqual(self.editor.textCursor().block().text(), "x")
+        self.assertLess(self.editor.cursorRect(self.editor.textCursor()).x(), 40)
+
+    def test_navigation_at_a_table_boundary_does_not_create_a_paragraph(self):
+        self.editor.setHtml(
+            "<table border='1' width='100%'><tr><td>기존 내용</td></tr></table>"
+        )
+        boundary = next(
+            block for block in self.editor._iter_blocks()
+            if self.editor._is_table_boundary_block(block)
+        )
+        self.editor.setTextCursor(QTextCursor(boundary))
+        count = self.editor.document().blockCount()
+
+        press(self.editor, Qt.Key.Key_Left)
+
+        self.assertEqual(self.editor.document().blockCount(), count)
+
+    def test_plain_text_paste_from_a_table_boundary_starts_on_the_left(self):
+        self.editor.setHtml(
+            "<table border='1' width='100%'><tr><td>기존 내용</td></tr></table>"
+        )
+        boundary = next(
+            block for block in self.editor._iter_blocks()
+            if self.editor._is_table_boundary_block(block)
+        )
+        self.editor.setTextCursor(QTextCursor(boundary))
+        source = QMimeData()
+        source.setText("새 문단")
+
+        self.editor.insertFromMimeData(source)
+        self.app.processEvents()
+
+        self.assertEqual(self.editor.textCursor().block().text(), "새 문단")
+        self.assertLess(self.editor.cursorRect(self.editor.textCursor()).x(), 100)
 
 
 class WritingOutsideAToggleTest(unittest.TestCase):
