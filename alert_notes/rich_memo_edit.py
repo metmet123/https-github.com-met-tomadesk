@@ -89,6 +89,10 @@ DIVIDER_COLOR = "#cbd5e1"
 _IMAGE_ID_RE = re.compile(r"toma-note-image://(?:attachment/)?(\d+)", re.IGNORECASE)
 _LINK_RE = re.compile(r"(?P<url>(?:https?://|www\.)[^\s<>]+|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,})$")
 HEADING_LEVEL_PROPERTY = QTextBlockFormat.Property.UserProperty + 31
+HEADING_FOLDED_PROPERTY = QTextBlockFormat.Property.UserProperty + 32
+# QTextDocument does not serialize custom block properties to HTML. Keep the
+# closed marker in the title text as well so the state survives reopening.
+HEADING_FOLDED_PREFIX = "▶ "
 HEADING_STYLES = {
     1: (22.0, 0.7, 12.0, 6.0),
     2: (18.0, 0.5, 10.0, 5.0),
@@ -259,7 +263,7 @@ class RichMemoTextEdit(QTextEdit):
         if not first.isValid() or first.blockNumber() != last.blockNumber():
             self._structure_dirty = True
             return
-        if self._is_toggle_block(first):
+        if self._is_toggle_block(first) or self.heading_level(first):
             self._structure_dirty = True
 
     def _refresh_structure(self) -> None:
@@ -1142,6 +1146,7 @@ class RichMemoTextEdit(QTextEdit):
             transaction.beginEditBlock()
         try:
             for block in list(self._selected_blocks()):
+                self._set_heading_folded(block, False)
                 block_cursor = QTextCursor(block)
                 block_format = block.blockFormat()
                 block_format.setTopMargin(top)
