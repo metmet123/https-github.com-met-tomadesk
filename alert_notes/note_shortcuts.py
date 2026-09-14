@@ -21,6 +21,11 @@ FORMAT_SHORTCUTS = {
     "blue": ("파랑", "hotkey_format_blue", "Alt+9"),
 }
 
+STRUCTURE_SHORTCUTS = {
+    "open_link": ("현재 페이지·메모 링크 열기", "hotkey_editor_open_link", "Ctrl+Alt+Enter"),
+    "toggle_fold": ("현재 제목·토글 접기/펴기", "hotkey_editor_toggle_fold", "Ctrl+Alt+Space"),
+}
+
 
 def modifier_setting(store) -> str:
     value = store.setting(SETTING_MODIFIER, DEFAULT_MODIFIER)

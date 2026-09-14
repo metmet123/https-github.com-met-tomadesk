@@ -4,9 +4,10 @@ from hotkey_builder import HotkeyBuilder
 from hotkey_parser import parse_hotkey
 
 from .note_shortcuts import (
-    DEFAULT_MODIFIER, FORMAT_SHORTCUTS, SETTING_MODIFIER, TIME_SHORTCUTS, VALID_MODIFIERS,
+    DEFAULT_MODIFIER, FORMAT_SHORTCUTS, STRUCTURE_SHORTCUTS, SETTING_MODIFIER, TIME_SHORTCUTS, VALID_MODIFIERS,
     shortcut_text,
 )
+from .value_input_guard import install_value_input_guard
 
 
 SETTING_ALWAYS_TOP = "hotkey_always_on_top"
@@ -34,10 +35,16 @@ class EditorShortcutSettingsDialog(QDialog):
             builder = self._builder(store.setting(setting, default))
             self.format_builders[action] = builder
             layout.addRow(label, builder)
+        self.structure_builders = {}
+        for action, (label, setting, default) in STRUCTURE_SHORTCUTS.items():
+            builder = self._builder(store.setting(setting, default))
+            self.structure_builders[action] = builder
+            layout.addRow(label, builder)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self._save)
         buttons.rejected.connect(self.reject)
         layout.addRow(buttons)
+        self._value_input_guard = install_value_input_guard(self)
 
     @staticmethod
     def _builder(text: str) -> HotkeyBuilder:
@@ -48,6 +55,7 @@ class EditorShortcutSettingsDialog(QDialog):
     def _save(self) -> None:
         raw = [self.always_top.text(), self.postit.text()]
         raw.extend(builder.text() for builder in self.format_builders.values())
+        raw.extend(builder.text() for builder in self.structure_builders.values())
         raw.extend(shortcut_text(self.modifier.currentText(), key) for key, _label, _minutes in TIME_SHORTCUTS)
         try:
             normalized = [parse_hotkey(text).text for text in raw]
@@ -57,10 +65,21 @@ class EditorShortcutSettingsDialog(QDialog):
         if len(normalized) != len(set(normalized)):
             QMessageBox.warning(self, "단축키 설정", "서로 중복되는 단축키가 있습니다.")
             return
+        reserved = {
+            parse_hotkey(value).text for value in (
+                "Ctrl+Enter", "Ctrl+Shift+E", "Ctrl+S", "Ctrl+F",
+                "Ctrl+V", "Ctrl+Shift+V", "Alt+Up", "Alt+Down",
+            )
+        }
+        if any(value in reserved for value in normalized):
+            QMessageBox.warning(self, "단축키 설정", "편집·알림 기본 단축키와 겹칩니다.")
+            return
         self.store.set_setting(SETTING_MODIFIER, self.modifier.currentText())
         self.store.set_setting(SETTING_ALWAYS_TOP, self.always_top.text())
         self.store.set_setting(SETTING_POSTIT, self.postit.text())
         for action, builder in self.format_builders.items():
             self.store.set_setting(FORMAT_SHORTCUTS[action][1], builder.text())
+        for action, builder in self.structure_builders.items():
+            self.store.set_setting(STRUCTURE_SHORTCUTS[action][1], builder.text())
         QMessageBox.information(self, "설정 저장", "설정이 저장되었습니다.")
         self.accept()

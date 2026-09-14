@@ -658,12 +658,30 @@ class RichMemoTextEdit(QTextEdit):
         return out
 
     def reveal_position(self, position: int) -> bool:
-        """접힌 토글 안에 있는 자리면 그 토글을 펴서 보이게 한다."""
+        """접힌 제목·토글 안에 있는 자리면 그 범위를 펴서 보이게 한다."""
         document = self.document()
         block = document.findBlock(max(0, min(int(position), document.characterCount() - 1)))
         if not block.isValid() or block.isVisible():
             return False
         opened = False
+        # Open enclosing headings from the outside in. A nested heading may be
+        # hidden while its ancestor is closed, but its marker still persists.
+        stack = []
+        probe = document.begin()
+        while probe.isValid() and probe.position() < block.position():
+            level = self.heading_level(probe)
+            if level:
+                depth = self._block_indent(probe)
+                while stack and stack[-1][0] >= level and stack[-1][1] >= depth:
+                    stack.pop()
+                stack.append((level, depth, probe))
+            probe = probe.next()
+        for _level, _depth, heading in stack:
+            if self._heading_is_folded(heading):
+                self._set_heading_folded(heading, False)
+                opened = True
+        if opened:
+            self._refresh_toggle_visibility()
         for _ in range(64):
             if block.isVisible():
                 break
@@ -1146,11 +1164,11 @@ class RichMemoTextEdit(QTextEdit):
             transaction.beginEditBlock()
         try:
             for block in list(self._selected_blocks()):
-                self._set_heading_folded(block, False)
                 block_cursor = QTextCursor(block)
                 block_format = block.blockFormat()
                 block_format.setTopMargin(top)
                 block_format.setBottomMargin(bottom)
+                block_format.setLeftMargin(max(18.0, block_format.leftMargin()))
                 block_format.setProperty(HEADING_LEVEL_PROPERTY, level)
                 block_cursor.setBlockFormat(block_format)
                 block_cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock,
@@ -1185,10 +1203,13 @@ class RichMemoTextEdit(QTextEdit):
         transaction.beginEditBlock()
         try:
             for block in list(self._selected_blocks()):
+                self._set_heading_folded(block, False)
                 block_cursor = QTextCursor(block)
                 block_format = block.blockFormat()
                 block_format.setTopMargin(0)
                 block_format.setBottomMargin(0)
+                if abs(block_format.leftMargin() - 18.0) < 0.1:
+                    block_format.setLeftMargin(0)
                 block_format.clearProperty(HEADING_LEVEL_PROPERTY)
                 block_cursor.setBlockFormat(block_format)
                 block_cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock,
@@ -1208,7 +1229,13 @@ class RichMemoTextEdit(QTextEdit):
             level = 0
         if level in HEADING_STYLES:
             return level
-        size = block.charFormat().fontPointSize()
+        probe = QTextCursor(block)
+        if block.text().startswith(HEADING_FOLDED_PREFIX):
+            probe.setPosition(block.position() + len(HEADING_FOLDED_PREFIX))
+        probe.movePosition(
+            QTextCursor.MoveOperation.NextCharacter, QTextCursor.MoveMode.KeepAnchor,
+        )
+        size = probe.charFormat().fontPointSize()
         for candidate, (point_size, _spacing, top, _bottom) in HEADING_STYLES.items():
             if abs(size - point_size) < 0.1 and abs(block.blockFormat().topMargin() - top) < 0.1:
                 return candidate
@@ -1258,6 +1285,112 @@ class RichMemoTextEdit(QTextEdit):
         cursor.insertText(TOGGLE_OPEN_PREFIX[0] if open_state else TOGGLE_CLOSED_PREFIX[0])
         self._refresh_toggle_visibility()
 
+    @staticmethod
+    def _heading_is_folded(block) -> bool:
+        return block.isValid() and block.text().startswith(HEADING_FOLDED_PREFIX)
+
+    def _set_heading_folded(self, block, folded: bool) -> None:
+        if not block.isValid() or self._heading_is_folded(block) == folded:
+            return
+        cursor = QTextCursor(block)
+        cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock)
+        if folded:
+            marker_format = QTextCharFormat()
+            marker_format.setFontPointSize(10)
+            marker_format.setFontWeight(QFont.Weight.Normal)
+            marker_format.setForeground(QColor("#64748b"))
+            cursor.insertText(HEADING_FOLDED_PREFIX, marker_format)
+        else:
+            cursor.movePosition(
+                QTextCursor.MoveOperation.NextCharacter, QTextCursor.MoveMode.KeepAnchor,
+                len(HEADING_FOLDED_PREFIX),
+            )
+            cursor.removeSelectedText()
+        block_format = block.blockFormat()
+        if folded:
+            block_format.setProperty(HEADING_FOLDED_PROPERTY, True)
+        else:
+            block_format.clearProperty(HEADING_FOLDED_PROPERTY)
+        QTextCursor(block).setBlockFormat(block_format)
+
+    def fold_heading(self, block) -> bool:
+        if (not self.heading_level(block) or not block.text().strip()
+                or self.page_id_of_block(block) is not None):
+            return False
+        closing = not self._heading_is_folded(block)
+        if closing and self.textCursor().block() != block:
+            level = self.heading_level(block)
+            depth = self._block_indent(block)
+            child = block.next()
+            while child.isValid() and not (
+                self.heading_level(child) and self.heading_level(child) <= level
+                and self._block_indent(child) <= depth
+            ):
+                if child.contains(self.textCursor().position()):
+                    self.setTextCursor(QTextCursor(block))
+                    break
+                child = child.next()
+        transaction = QTextCursor(self.document())
+        transaction.beginEditBlock()
+        try:
+            self._set_heading_folded(block, closing)
+        finally:
+            transaction.endEditBlock()
+        self._refresh_toggle_visibility()
+        return True
+
+    def toggle_current_fold(self) -> bool:
+        block = self.textCursor().block()
+        if self.heading_level(block):
+            return self.fold_heading(block)
+        if self._is_toggle_block(block):
+            self.fold_toggle(block)
+            return True
+        return False
+
+    def enter_current_fold(self) -> bool:
+        block = self.textCursor().block()
+        level = self.heading_level(block)
+        toggle = self._is_toggle_block(block)
+        if not level and not toggle:
+            return False
+        if level and self._heading_is_folded(block):
+            self.fold_heading(block)
+        elif toggle and not self._toggle_is_open(block):
+            self.fold_toggle(block)
+        child = block.next()
+        if not child.isValid() or not child.isVisible():
+            return False
+        if (level and self.heading_level(child) and self.heading_level(child) <= level
+                and self._block_indent(child) <= self._block_indent(block)):
+            return False
+        if toggle and self._block_indent(child) <= self._block_indent(block):
+            return False
+        self.setTextCursor(QTextCursor(child))
+        self.ensureCursorVisible()
+        return True
+
+    def exit_current_fold(self) -> bool:
+        block = self.textCursor().block()
+        if self.heading_level(block) or self._is_toggle_block(block):
+            return self.toggle_current_fold()
+        toggle = self._parent_toggle(block)
+        heading = None
+        probe = block.previous()
+        while probe.isValid():
+            if self.heading_level(probe):
+                heading = probe
+                break
+            probe = probe.previous()
+        parent = toggle if toggle is not None and (
+            heading is None or toggle.position() > heading.position()
+        ) else heading
+        if parent is None:
+            return False
+        self.setTextCursor(QTextCursor(parent))
+        self.ensureCursorVisible()
+        return True
+
     def fold_toggle(self, block) -> None:
         """▸ ↔ ▾.  접으면 안쪽 줄이 사라지고, 펼치면 돌아온다."""
         if not self._is_toggle_block(block):
@@ -1278,16 +1411,23 @@ class RichMemoTextEdit(QTextEdit):
         """접힌 토글 아래를 숨긴다.  문서 전체를 한 번에 다시 계산한다."""
         document = self.document()
         hidden_depth = None
+        folded_heading = None
         changed = False
         block = document.begin()
         while block.isValid():
             indent = self._block_indent(block)
+            level = self.heading_level(block)
+            if (folded_heading is not None and level and level <= folded_heading[0]
+                    and indent <= folded_heading[1]):
+                folded_heading = None
             if hidden_depth is not None and indent <= hidden_depth:
                 hidden_depth = None
-            visible = hidden_depth is None
+            visible = hidden_depth is None and folded_heading is None
             if block.isVisible() != visible:
                 block.setVisible(visible)
                 changed = True
+            if visible and level and self._heading_is_folded(block):
+                folded_heading = (level, indent)
             if visible and self._is_toggle_block(block) and not self._toggle_is_open(block):
                 hidden_depth = indent
             block = block.next()
@@ -2047,18 +2187,59 @@ class RichMemoTextEdit(QTextEdit):
 
     # ----------------------------------------------------- 전부 접기·펼치기 --
     def toggle_all_folds(self) -> bool:
-        """모든 토글을 한 번에 접거나 편다.  하나라도 펼쳐져 있으면 접는다."""
-        blocks = [
-            block for block in self._iter_blocks() if self._is_toggle_block(block)
-        ]
+        """모든 토글과 제목 범위를 한 번에 접거나 편다."""
+        blocks = [block for block in self._iter_blocks()
+                  if self._is_toggle_block(block) or (
+                      self.heading_level(block) and self.page_id_of_block(block) is None
+                      and block.text().removeprefix(HEADING_FOLDED_PREFIX).strip()
+                  )]
         if not blocks:
             return False
-        opening = not any(self._toggle_is_open(block) for block in blocks)
-        for block in blocks:
-            if self._toggle_is_open(block) != opening:
-                self._set_toggle_open(block, opening)
+        opening = not any(
+            self._toggle_is_open(block) if self._is_toggle_block(block)
+            else not self._heading_is_folded(block)
+            for block in blocks
+        )
+        transaction = QTextCursor(self.document())
+        transaction.beginEditBlock()
+        try:
+            for block in blocks:
+                if self._is_toggle_block(block) and self._toggle_is_open(block) != opening:
+                    self._set_toggle_open(block, opening)
+                elif self.heading_level(block) and self._heading_is_folded(block) == opening:
+                    self._set_heading_folded(block, not opening)
+        finally:
+            transaction.endEditBlock()
         self._refresh_toggle_visibility()
         return opening
+
+    def apply_line_spacing(self, multiplier: float) -> bool:
+        """Apply a proportional line height to selected paragraphs in one undo."""
+        percent = int(round(float(multiplier) * 100))
+        if percent not in {100, 115, 150, 200}:
+            return False
+        blocks = self.block_commands.blocks()
+        if not blocks:
+            return False
+        transaction = QTextCursor(self.document())
+        transaction.beginEditBlock()
+        try:
+            for block in blocks:
+                cursor = QTextCursor(block)
+                fmt = block.blockFormat()
+                fmt.setLineHeight(percent, QTextBlockFormat.LineHeightTypes.ProportionalHeight.value)
+                cursor.setBlockFormat(fmt)
+        finally:
+            transaction.endEditBlock()
+        self.setFocus()
+        return True
+
+    def selected_line_spacing(self) -> float | None:
+        values = set()
+        for block in self.block_commands.blocks():
+            value = int(block.blockFormat().lineHeight())
+            values.add(round((value if value > 0 else 100) / 100, 2))
+        return next(iter(values)) if len(values) == 1 else None
 
     def _iter_blocks(self):
         block = self.document().begin()
@@ -2398,10 +2579,25 @@ class RichMemoTextEdit(QTextEdit):
             block = block.next()
         return None
 
+    def _heading_marker_rect(self, block) -> QRectF:
+        glyph = self.cursorRect(QTextCursor(block))
+        if self._heading_is_folded(block):
+            left = glyph.left() - 2
+        else:
+            left = max(0.0, glyph.left() - 18)
+        return QRectF(left, glyph.top(), 18.0, max(glyph.height(), 20))
+
+    def _heading_block_at(self, point):
+        for block in self._visible_blocks():
+            if block.isVisible() and self.heading_level(block) and self.page_id_of_block(block) is None:
+                if self._heading_marker_rect(block).contains(point):
+                    return block
+        return None
+
     # ------------------------------------------------------- 마우스 올림 --
     def _marker_block_at(self, point):
         """마우스 밑에 눌러서 동작하는 표시가 있으면 그 줄을 돌려준다."""
-        return self._toggle_block_at(point) or self._checklist_block_at(point)
+        return self._toggle_block_at(point) or self._heading_block_at(point) or self._checklist_block_at(point)
 
     def _hover_marker_rect(self) -> QRectF | None:
         if self._hover_marker is None:
@@ -2413,6 +2609,8 @@ class RichMemoTextEdit(QTextEdit):
             # 누르는 자리는 넉넉해야 하지만, 그려지는 사각형까지 제목을 덮으면
             # 글자가 가려진다.  표시 글자에 맞춰 좁혀서 그린다.
             return self._toggle_marker_rect(block).adjusted(0, 1, -5, -2)
+        if self.heading_level(block):
+            return self._heading_marker_rect(block)
         if self._is_checklist_block(block):
             return self._checkbox_rect(block, hit_target=True).adjusted(3, 3, -3, -3)
         return None
@@ -2492,6 +2690,7 @@ class RichMemoTextEdit(QTextEdit):
         self._paint_empty_toggle_hints(painter, viewport_rect)
         self._paint_dividers(painter, viewport_rect)
         self._paint_quote_bars(painter, viewport_rect)
+        self._paint_heading_markers(painter, viewport_rect)
         self._paint_drop_marker(painter)
         for block in self._visible_blocks():
             text = block.text()
@@ -2515,6 +2714,19 @@ class RichMemoTextEdit(QTextEdit):
                             rect.right() - 3.0, rect.top() + 3.5,
                         ))
         painter.end()
+
+    def _paint_heading_markers(self, painter: QPainter, viewport_rect) -> None:
+        painter.save()
+        painter.setPen(QColor("#64748b"))
+        for block in self._visible_blocks():
+            if not block.isVisible() or not self.heading_level(block) or self._heading_is_folded(block):
+                continue
+            if self.page_id_of_block(block) is not None:
+                continue
+            rect = self._heading_marker_rect(block)
+            if rect.intersects(QRectF(viewport_rect)):
+                painter.drawText(rect, int(Qt.AlignmentFlag.AlignCenter), "▾")
+        painter.restore()
 
     def _paint_dividers(self, painter: QPainter, viewport_rect) -> None:
         """구분선 줄 자리에 가로줄을 그린다."""
@@ -2923,6 +3135,11 @@ class RichMemoTextEdit(QTextEdit):
         self._copied_character_format = self._visual_character_format(probe.charFormat())
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
+        if event.modifiers() == Qt.KeyboardModifier.AltModifier:
+            if event.key() == Qt.Key.Key_Right and self.enter_current_fold():
+                return
+            if event.key() == Qt.Key.Key_Left and self.exit_current_fold():
+                return
         if event.key() in {Qt.Key.Key_Up, Qt.Key.Key_Down} and event.modifiers() == Qt.KeyboardModifier.AltModifier:
             command = "move_up" if event.key() == Qt.Key.Key_Up else "move_down"
             if self.block_commands.execute(command):
@@ -3139,9 +3356,17 @@ class RichMemoTextEdit(QTextEdit):
         menu.addSeparator()
         self._populate_block_context_menu(menu)
         menu.addSeparator()
-        action = menu.addAction("일반 텍스트로 붙여넣기\tCtrl+Shift+V")
-        action.setEnabled(bool(QApplication.clipboard().text()))
-        action.triggered.connect(self.paste_as_plain_text)
+        paste_menu = menu.addMenu("붙여넣기 방식")
+        source = QApplication.clipboard().mimeData()
+        original = paste_menu.addAction("원본 서식 유지\tCtrl+V")
+        original.setEnabled(bool(source and (source.hasText() or source.hasImage() or source.hasUrls())))
+        original.triggered.connect(self.paste)
+        matching = paste_menu.addAction("현재 서식에 맞추기")
+        matching.setEnabled(bool(QApplication.clipboard().text()))
+        matching.triggered.connect(self.paste_matching_format)
+        plain = paste_menu.addAction("텍스트만\tCtrl+Shift+V")
+        plain.setEnabled(bool(QApplication.clipboard().text()))
+        plain.triggered.connect(self.paste_as_plain_text)
         menu.exec(event.globalPos())
 
     def _populate_block_context_menu(self, menu) -> None:
@@ -3154,6 +3379,11 @@ class RichMemoTextEdit(QTextEdit):
         ):
             action = block_menu.addAction(label)
             action.triggered.connect(lambda _checked=False, name=command: self.block_commands.execute(name))
+        block_menu.addSeparator()
+        fold = block_menu.addAction("현재 제목·토글 접기/펴기\tCtrl+Alt+Space")
+        fold.setEnabled(bool(self.heading_level(self.textCursor().block()) or self.current_block_is_toggle()))
+        fold.triggered.connect(self.toggle_current_fold)
+        block_menu.addAction("모두 접기/펴기\tCtrl+Shift+E", self.toggle_all_folds)
         convert_menu = menu.addMenu("블록 변환")
         for label, command in (
             ("본문", "body"), ("제목 1", "heading1"), ("제목 2", "heading2"),
@@ -3208,10 +3438,40 @@ class RichMemoTextEdit(QTextEdit):
                 action.triggered.connect(self._redo_composite_or_document)
 
     def paste_as_plain_text(self) -> None:
+        self._paste_clipboard_text(match_current=False)
+
+    def paste_matching_format(self) -> None:
+        self._paste_clipboard_text(match_current=True)
+
+    def _paste_clipboard_text(self, match_current: bool) -> None:
         text = QApplication.clipboard().text()
         if text:
             self._move_caret_past_table_boundary()
-            self._paste_into_lone_empty_toggle(lambda: self.textCursor().insertText(text))
+            fmt = QTextCharFormat(self.currentCharFormat()) if match_current else QTextCharFormat()
+            # Neither text-only mode should carry a source anchor to another memo.
+            fmt.setAnchor(False)
+            fmt.setAnchorHref("")
+            transaction = QTextCursor(self.document())
+            transaction.beginEditBlock()
+            try:
+                def insert():
+                    cursor = self.textCursor()
+                    cursor.insertText(text, fmt)
+                    self.setTextCursor(cursor)
+                self._paste_into_lone_empty_toggle(insert)
+            finally:
+                transaction.endEditBlock()
+
+    def open_current_link(self) -> bool:
+        """Open a real internal link under the caret, never a stale anchor."""
+        position = self.textCursor().position()
+        note_id = self._valid_internal_link_at_position(position)
+        if note_id is None and position > self.textCursor().block().position():
+            note_id = self._valid_internal_link_at_position(position - 1)
+        if note_id is None:
+            return False
+        self.page_open_requested.emit(note_id)
+        return True
 
     def _place_caret_outside_toggles(self) -> bool:
         """마지막 줄 아래 빈 곳을 누르면 토글 밖에서 이어 쓰게 한다.
@@ -3295,6 +3555,11 @@ class RichMemoTextEdit(QTextEdit):
             marker = self._toggle_block_at(event.position())
             if marker is not None:
                 self.fold_toggle(marker)
+                event.accept()
+                return
+            heading = self._heading_block_at(event.position())
+            if heading is not None:
+                self.fold_heading(heading)
                 event.accept()
                 return
         if event.button() == Qt.MouseButton.LeftButton:

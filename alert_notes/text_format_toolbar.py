@@ -1,7 +1,7 @@
 from PyQt6.QtCore import QPoint, QSize, Qt, QTimer
 from PyQt6.QtGui import QConicalGradient, QColor, QFont, QIcon, QKeySequence, QPainter, QPen, QPixmap, QShortcut, QTextCharFormat
 from PyQt6.QtWidgets import (
-    QFontComboBox, QFrame, QGridLayout, QHBoxLayout, QInputDialog, QLabel, QMenu, QMessageBox, QPushButton,
+    QComboBox, QFontComboBox, QFrame, QGridLayout, QHBoxLayout, QInputDialog, QLabel, QMenu, QMessageBox, QPushButton,
     QSizePolicy, QSpinBox, QToolButton, QVBoxLayout, QWidget, QWidgetAction,
 )
 
@@ -11,6 +11,7 @@ from .format_presets import (
     preset_summary, save_preset, save_preset_name,
 )
 from .note_shortcuts import FORMAT_SHORTCUTS
+from .value_input_guard import install_value_input_guard
 
 
 class TextFormatToolbar(QWidget):
@@ -43,6 +44,8 @@ class TextFormatToolbar(QWidget):
         self.sync_timer.timeout.connect(self._sync_from_cursor)
         editor.cursorPositionChanged.connect(self._queue_cursor_sync)
         editor.currentCharFormatChanged.connect(self._queue_cursor_sync)
+        editor.selectionChanged.connect(self._queue_cursor_sync)
+        editor.block_selection.changed.connect(self._queue_cursor_sync)
         self.apply_default()
         self.reload_presets()
         self.reload_shortcuts()
@@ -61,10 +64,19 @@ class TextFormatToolbar(QWidget):
         self.size_box.setRange(8, 72)
         self.size_box.setValue(10)
         self.size_box.setFixedWidth(76)
+        self.line_spacing_box = QComboBox()
+        self.line_spacing_box.setAccessibleName("줄 간격")
+        self.line_spacing_box.setFixedWidth(88)
+        self.line_spacing_box.addItem("혼합", None)
+        for value, label in ((1.0, "1.0"), (1.15, "1.15"), (1.5, "1.5"), (2.0, "2.0")):
+            self.line_spacing_box.addItem(label, value)
+        self.line_spacing_box.setCurrentIndex(1)
         first.addWidget(QLabel("글씨체"))
         first.addWidget(self.font_box)
         first.addWidget(QLabel("크기"))
         first.addWidget(self.size_box)
+        first.addWidget(QLabel("줄 간격"))
+        first.addWidget(self.line_spacing_box)
         color_controls = QWidget()
         color_layout = QVBoxLayout(color_controls)
         color_layout.setContentsMargins(0, 0, 0, 0)
@@ -129,6 +141,17 @@ class TextFormatToolbar(QWidget):
         self.insert_menu = build_insert_menu(self.editor, self.insert_button)
         self.insert_button.setMenu(self.insert_menu)
         second.addWidget(self.insert_button)
+        self.fold_button = QToolButton()
+        self.fold_button.setText("접기")
+        self.fold_button.setAccessibleName("현재 제목 또는 토글 접기 펴기")
+        self.fold_button.setToolTip("현재 제목·토글 접기/펴기")
+        self.fold_button.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
+        fold_menu = QMenu(self.fold_button)
+        fold_menu.addAction("현재 제목·토글 접기/펴기", self.editor.toggle_current_fold)
+        fold_menu.addAction("모두 접기/펴기\tCtrl+Shift+E", self.editor.toggle_all_folds)
+        self.fold_button.setMenu(fold_menu)
+        self.fold_button.clicked.connect(self.editor.toggle_current_fold)
+        second.addWidget(self.fold_button)
         self.image_button = QPushButton()
         self.image_button.setAccessibleName("이미지 삽입")
         self.image_button.setToolTip("이미지 삽입")
@@ -170,9 +193,16 @@ class TextFormatToolbar(QWidget):
         root.addLayout(second)
         self.font_box.currentFontChanged.connect(lambda font: self.apply_family(font.family()))
         self.size_box.valueChanged.connect(self.apply_size)
+        self.line_spacing_box.activated.connect(self._apply_line_spacing_index)
         self._build_color_menu()
         self.color_button.clicked.connect(self.choose_color)
         self.default_button.clicked.connect(self.apply_default)
+        self._value_input_guard = install_value_input_guard(self)
+
+    def _apply_line_spacing_index(self, index: int) -> None:
+        value = self.line_spacing_box.itemData(index)
+        if value is not None:
+            self.editor.apply_line_spacing(float(value))
 
     @staticmethod
     def _group_separator() -> QFrame:
@@ -436,7 +466,7 @@ class TextFormatToolbar(QWidget):
 
     def _sync_from_format(self, fmt: QTextCharFormat) -> None:
         controls = [
-            self.font_box, self.size_box, self.bullet_button, self.checklist_button,
+            self.font_box, self.size_box, self.line_spacing_box, self.bullet_button, self.checklist_button,
             *self.style_buttons.values(),
         ]
         for control in controls:
@@ -459,6 +489,9 @@ class TextFormatToolbar(QWidget):
                 self.font_box.setCurrentFont(family_font)
             if fmt.fontPointSize() > 0:
                 self.size_box.setValue(round(fmt.fontPointSize()))
+            spacing = self.editor.selected_line_spacing()
+            index = self.line_spacing_box.findData(spacing) if spacing is not None else 0
+            self.line_spacing_box.setCurrentIndex(max(0, index))
             color = fmt.foreground().color()
             if color.isValid():
                 self.current_color = color

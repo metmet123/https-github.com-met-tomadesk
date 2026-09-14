@@ -21,7 +21,7 @@ from .editor_shortcut_settings import (
     DEFAULT_ALWAYS_TOP, DEFAULT_POSTIT, SETTING_ALWAYS_TOP, SETTING_POSTIT,
     EditorShortcutSettingsDialog,
 )
-from .note_shortcuts import TIME_SHORTCUTS, bind_time_shortcuts, modifier_setting, shortcut_text
+from .note_shortcuts import STRUCTURE_SHORTCUTS, TIME_SHORTCUTS, bind_time_shortcuts, modifier_setting, shortcut_text
 from .recurrence import RecurrenceRule
 from .recurrence_controls import RecurrenceControls
 from .rich_memo_edit import RichMemoTextEdit
@@ -611,8 +611,8 @@ class MemoEditor(QWidget):
             button.setEnabled(enabled)
 
     def _toggle_all_folds(self) -> None:
-        if self.content_edit.toggle_all_folds():
-            self.content_edit.setFocus()
+        self.content_edit.toggle_all_folds()
+        self.content_edit.setFocus()
 
     def set_wide_body(self, on: bool) -> None:
         """목록을 접어 넓어졌을 때 어디에 자리를 줄지 정한다.
@@ -954,6 +954,18 @@ class MemoEditor(QWidget):
             button.setText(f"{label}\n{shortcut_text(modifier, key)}")
             button.updateGeometry()
         self.format_toolbar.reload_shortcuts()
+        for shortcut in getattr(self, "structure_shortcuts", []):
+            shortcut.deleteLater()
+        self.structure_shortcuts = []
+        for action, (_label, setting, default) in STRUCTURE_SHORTCUTS.items():
+            shortcut = QShortcut(QKeySequence(self.store.setting(setting, default)), self.content_edit)
+            shortcut.setContext(Qt.ShortcutContext.WidgetShortcut)
+            callback = (
+                self.content_edit.open_current_link if action == "open_link"
+                else self.content_edit.toggle_current_fold
+            )
+            shortcut.activated.connect(callback)
+            self.structure_shortcuts.append(shortcut)
         if not hasattr(self, "always_top_shortcut"):
             self.always_top_shortcut = QShortcut(QKeySequence(), self)
             self.postit_shortcut = QShortcut(QKeySequence(), self)
