@@ -25,7 +25,7 @@ sys.path.insert(0, str(ROOT))
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtGui import QFontDatabase  # noqa: E402
+from PyQt6.QtGui import QFontDatabase, QTextCursor  # noqa: E402
 from PyQt6.QtWidgets import QApplication  # noqa: E402
 
 import main_window  # noqa: E402
@@ -199,6 +199,18 @@ def main() -> int:
     panel.list_panel.toggle_all_folds()
     panel.select_note(memo_id)
     panel.list_panel.select_id(memo_id)
+    # 서식 안내 그림은 접힌 상태보다 실제 조작 지점을 함께 보여 준다.
+    # 위쪽에는 메인 프리셋, 본문에는 일반 글자 선택용 24px 프리셋을 띄운다.
+    panel.editor.property_chips.buttons["format"].click()
+    body = panel.editor.content_edit
+    phrase = "지난 분기 기준"
+    start = body.toPlainText().find(phrase)
+    if start >= 0:
+        cursor = body.textCursor()
+        cursor.setPosition(start)
+        cursor.setPosition(start + len(phrase), QTextCursor.MoveMode.KeepAnchor)
+        body.setTextCursor(cursor)
+        body.text_format_bar.sync()
     app.processEvents()
     _save(window, "03_memo_editor")
 

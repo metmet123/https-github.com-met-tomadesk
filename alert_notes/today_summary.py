@@ -86,6 +86,7 @@ class TodaySummaryPanel(QWidget):
     deadline_changed = pyqtSignal()
     monthly_suggestion_accepted = pyqtSignal(dict)
     monthly_suggestion_dismissed = pyqtSignal(str)
+    content_presence_changed = pyqtSignal(bool)
 
     def __init__(self, store, parent=None, show_reminders: bool = True):
         super().__init__(parent)
@@ -203,6 +204,11 @@ class TodaySummaryPanel(QWidget):
     def set_suggestion(self, suggestion: dict | None) -> None:
         """Show one repeat worth turning into a monthly postit, or hide the bar."""
         self._suggestion = suggestion or None
+        self.content_presence_changed.emit(bool(
+            self._suggestion or getattr(self, "_has_deadline_content", False)
+            or getattr(self, "_has_schedule_content", False)
+            or getattr(self, "_has_reminder_content", False)
+        ))
         if self._suggestion is None:
             self.suggestion_bar.setVisible(False)
             return
@@ -262,6 +268,12 @@ class TodaySummaryPanel(QWidget):
         self._fill_schedules(today)
         self._fill_reminders()
         self._rebalance()
+        self.content_presence_changed.emit(bool(
+            getattr(self, "_has_deadline_content", False)
+            or getattr(self, "_has_schedule_content", False)
+            or getattr(self, "_has_reminder_content", False)
+            or self._suggestion
+        ))
 
     # 빈 구역도 가득 찬 구역과 같은 높이를 차지해서, D-Day 가 다섯 건이어도
     # 세 칸으로 잘려 보였다.  가진 줄 수만큼만 가져가게 한다.
@@ -310,6 +322,7 @@ class TodaySummaryPanel(QWidget):
             rows = []
         past_rows = [row for row in rows if deadline_urgency(row) == "past"]
         rows = [row for row in rows if deadline_urgency(row) != "past"]
+        self._has_deadline_content = bool(past_rows or rows)
         self._past_deadline_ids = [int(row["id"]) for row in past_rows]
         self.past_deadline_header.setVisible(bool(past_rows))
         expanded = bool(past_rows) and self.past_deadline_toggle.isChecked()
@@ -333,6 +346,7 @@ class TodaySummaryPanel(QWidget):
             return
         if self._option("deadline_hide_finished", False):
             rows = [row for row in rows if deadline_urgency(row) != "done"]
+            self._has_deadline_content = bool(past_rows or rows)
             if not rows:
                 self._add_placeholder(self.deadline_list, "진행 중인 D-Day가 없습니다.")
                 self.deadline_list.blockSignals(False)
@@ -431,6 +445,7 @@ class TodaySummaryPanel(QWidget):
             )
         except Exception:
             items = []
+        self._has_schedule_content = bool(items)
         if not items:
             self._add_placeholder(self.schedule_list, "오늘 등록된 일정이 없습니다.")
             return
@@ -449,12 +464,14 @@ class TodaySummaryPanel(QWidget):
 
     def _fill_reminders(self) -> None:
         if not getattr(self, "_show_reminders", True):
+            self._has_reminder_content = False
             return
         self.reminder_list.clear()
         try:
             rows = self.store.pending_reminders()
         except Exception:
             rows = []
+        self._has_reminder_content = bool(rows)
         if not rows:
             self._add_placeholder(self.reminder_list, "예약된 알림이 없습니다.")
             return

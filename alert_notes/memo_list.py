@@ -1,34 +1,89 @@
 import json
-from datetime import date
 
 from PyQt6.QtCore import QEvent, QRect, QRectF, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QKeySequence, QPainter, QPen, QShortcut
+from PyQt6.QtGui import QColor, QIcon, QKeySequence, QPainter, QPen, QPixmap, QShortcut
 from PyQt6.QtWidgets import (
-    QAbstractItemView, QApplication, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMenu,
-    QPushButton, QStyle, QStyledItemDelegate, QStyleOptionButton, QStyleOptionViewItem,
+    QAbstractItemView, QApplication, QHBoxLayout, QHeaderView, QLabel, QLayout, QLineEdit, QMenu,
+    QPushButton, QComboBox, QStyle, QStyledItemDelegate, QStyleOptionButton, QStyleOptionViewItem,
     QSizePolicy, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from .deadline import deadline_chip_text, is_deadline_done, reminder_display_text
-from .rich_text import plain_text_from_content
+from .rich_text import display_plain_text_from_content
 from .sqlite_store import TOP_LEVEL_PARENT
+from .title_symbols import (
+    TitleValueCount, count_title_values, leading_title_prefix,
+    leading_title_symbol, title_prefix_key, title_symbol_key,
+)
 from select_all_header import SelectAllHeader
 
 NOTE_ID_ROLE = Qt.ItemDataRole.UserRole
 SORT_KEY_ROLE = Qt.ItemDataRole.UserRole + 1
 CHILD_COUNT_ROLE = Qt.ItemDataRole.UserRole + 2
 PINNED_ROLE = Qt.ItemDataRole.UserRole + 3
+GROUP_ROLE = Qt.ItemDataRole.UserRole + 4
+
+
+class NoWheelComboBox(QComboBox):
+    def wheelEvent(self, event) -> None:
+        event.ignore()
 
 
 def list_datetime(value) -> str:
-    """Shorter than the export format: this year needs no year in a narrow column."""
+    """Compact list value; the title tooltip keeps the complete timestamp."""
     text = str(value or "")[:12]
     if len(text) != 12 or not text.isdigit():
         return ""
-    clock = f"{text[8:10]}:{text[10:12]}"
-    if text[:4] == str(date.today().year):
-        return f"{text[4:6]}-{text[6:8]} {clock}"
-    return f"{text[2:4]}-{text[4:6]}-{text[6:8]} {clock}"
+    return f"{text[4:6]}-{text[6:8]}"
+
+
+def full_list_datetime(value) -> str:
+    text = str(value or "")[:12]
+    if len(text) != 12 or not text.isdigit():
+        return ""
+    return f"{text[:4]}-{text[4:6]}-{text[6:8]} {text[8:10]}:{text[10:12]}"
+
+
+def color_dot_icon(value: str, size: int = 10) -> QIcon:
+    color = QColor(str(value or "#94a3b8"))
+    if not color.isValid():
+        color = QColor("#94a3b8")
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(color)
+    painter.drawEllipse(1, 1, size - 2, size - 2)
+    painter.end()
+    return QIcon(pixmap)
+
+
+class ElidingStatusLabel(QLabel):
+    """Keep the complete status in a tooltip while fitting the footer."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._full_text = ""
+
+    def setText(self, text: str) -> None:
+        self._full_text = str(text or "")
+        self.setToolTip(self._full_text)
+        self._refresh_elision()
+
+    def fullText(self) -> str:
+        return self._full_text
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._refresh_elision()
+
+    def _refresh_elision(self) -> None:
+        width = max(0, self.contentsRect().width() - 2)
+        shown = self.fontMetrics().elidedText(
+            self._full_text, Qt.TextElideMode.ElideRight, width,
+        ) if width else self._full_text
+        QLabel.setText(self, shown)
 
 
 class CenteredCheckDelegate(QStyledItemDelegate):
@@ -199,7 +254,7 @@ class MemoTree(QTreeWidget):
     def _show_row_menu(self, point) -> None:
         """줄에서 오른쪽 단추.  지금은 목록 고정을 켜고 끈다."""
         item = self.itemAt(point)
-        if item is None:
+        if item is None or item.data(0, NOTE_ID_ROLE) is None:
             return
         self.setCurrentItem(item)
         note_id = int(item.data(0, NOTE_ID_ROLE))
@@ -365,24 +420,25 @@ class MemoListPanel(QWidget):
     paste_requested = pyqtSignal()
     clone_undo_requested = pyqtSignal()
     clone_redo_requested = pyqtSignal()
+    filters_changed = pyqtSignal()
+    category_assign_requested = pyqtSignal(list, object)
 
     # 번호 carried no information the row order did not already show, and 표시
     # spent a whole column on one word; it is now a mark in front of the title.
     # 머리글 글자가 곧 그 열의 최소 폭이다.  좁은 목록에서 제목이 잘리던 가장
     # 큰 까닭이라 이름을 짧게 줄였다.  열에 담기는 내용은 그대로다.
-    HEADERS = ["", "제목", "내용", "일정", "수정시간"]
-    COLUMN_WEIGHTS = (34, 210, 196, 122, 114)
-    # 이보다 좁아지면 수정시간을 접는다.  접은 값은 제목 말풍선에 남는다.
-    NARROW_WIDTH = 520
-    FOLDABLE_COLUMN = 4
+    HEADERS = ["", "제목", "카테고리", "수정일"]
+    COLUMN_WEIGHTS = (28, 300, 72, 48)
+    NARROW_WIDTH = 380
+    FOLDABLE_COLUMN = 3
     # 모두 접기·펼치기 단축키.  이 창이 앞에 있을 때만 듣는다.  본문 토글은
     # 편집 구역의 Ctrl+Shift+E 가 따로 맡고 있어 글자를 겹치지 않게 골랐다.
     FOLD_ALL_SHORTCUT = "Ctrl+Shift+A"
     # 제목이 잘릴 때 폭을 빌려 오는 차례.
-    BORROW_ORDER = (4, 3, 2)
+    BORROW_ORDER = (3, 2)
     # Floor per column; the real minimum also has to fit the header text, which
     # is measured at runtime so every title stays readable at the narrowest width.
-    COLUMN_FLOORS = (30, 62, 62, 62, 62)
+    COLUMN_FLOORS = (28, 62, 62, 48)
     HEADER_PADDING = 20
     # A column may not be dragged below this share of the width it would get from
     # the default proportions, so the minimum follows the splitter, not a constant.
@@ -391,21 +447,32 @@ class MemoListPanel(QWidget):
     PINNED_MARK = "⭐"
     TITLE_COLUMN = 1
     # 한 줄에 제목 한 줄만 들어간다.  48px 은 빈 위아래 여백이 너무 넓었다.
-    ROW_HEIGHT = 32
+    ROW_HEIGHT = 28
     # 목록 위아래의 단추와 검색칸 높이.  낮출수록 목록이 길어진다.
     BUTTON_HEIGHT = 28
     HEADER_HEIGHT = 29
     COLUMN_RATIOS_SETTING = "memo_list_column_ratios_v2"
     EXPANDED_SETTING = "memo_list_expanded_ids"
+    FILTER_SETTING = "memo_category_filter"
+    VIEW_SETTING = "memo_category_view"
+    SORT_SETTING = "memo_category_sort"
+    FILTER_CONTROLS_INLINE_WIDTH = 480
 
     def __init__(self, store=None, parent=None):
         super().__init__(parent)
         self.store = store
         self._restoring_columns = False
         self._restoring_expansion = False
+        self.title_symbol_filter: str | None = None
+        self.title_prefix_filter: str | None = None
+        self._title_symbol_counts: list[TitleValueCount] = []
+        self._title_prefix_counts: list[TitleValueCount] = []
         self.setObjectName("memoListPanel")
         self.rows_by_id: dict[int, object] = {}
         layout = QVBoxLayout(self)
+        # Responsive controls move into "더보기" below 480px.  Let the panel
+        # reach that width before the child layouts have switched state.
+        layout.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
         # 세로로 남는 자리는 모두 목록에 준다.
         layout.setContentsMargins(12, 8, 12, 8)
         layout.setSpacing(6)
@@ -437,12 +504,78 @@ class MemoListPanel(QWidget):
         header.addWidget(self.add_button)
         layout.addLayout(header)
 
+        search_host = QWidget()
+        search_row = QHBoxLayout(search_host)
+        search_row.setContentsMargins(0, 0, 0, 0)
+        search_row.setSpacing(4)
         self.search = QLineEdit()
         self.search.setPlaceholderText("메모 제목과 내용 검색")
         self.search.setClearButtonEnabled(True)
         self.search.setAccessibleName("알림 메모 검색")
         self.search.setFixedHeight(self.BUTTON_HEIGHT)
-        layout.addWidget(self.search)
+        search_row.addWidget(self.search, 1)
+        self.title_symbol_button = QPushButton("기호 ▾")
+        self.title_symbol_button.setObjectName("memoTitleSymbolFilter")
+        self.title_symbol_button.setCheckable(True)
+        self.title_symbol_button.setAccessibleName("제목 첫 기호 필터")
+        self.title_symbol_button.setToolTip("제목 맨 앞의 이모지·기호로 메모를 모아 봅니다.")
+        self.title_symbol_button.setFixedHeight(self.BUTTON_HEIGHT)
+        self.title_symbol_button.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.title_symbol_button.clicked.connect(self._show_title_symbol_menu)
+        search_row.addWidget(self.title_symbol_button)
+        layout.addWidget(search_host)
+
+        self.filter_host = QWidget()
+        filter_row = QHBoxLayout(self.filter_host)
+        filter_row.setContentsMargins(0, 0, 0, 0)
+        filter_row.setSpacing(4)
+        self.category_filter_buttons: list[QPushButton] = []
+        self.category_filter_id = self._saved_category_filter()
+        self.category_chip_host = QWidget()
+        self.category_chip_host.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.category_chip_layout = QHBoxLayout(self.category_chip_host)
+        self.category_chip_layout.setContentsMargins(0, 0, 0, 0)
+        self.category_chip_layout.setSpacing(4)
+        filter_row.addWidget(self.category_chip_host, 1)
+        self.more_categories_button = QPushButton("더보기")
+        self.more_categories_button.setObjectName("memoMoreCategoriesButton")
+        self.more_categories_button.setCheckable(True)
+        self.more_categories_button.setFixedHeight(self.BUTTON_HEIGHT)
+        self.more_categories_button.setMaximumWidth(120)
+        self.more_categories_button.clicked.connect(self._show_more_categories)
+        filter_row.addWidget(self.more_categories_button)
+        layout.addWidget(self.filter_host)
+        self.view_combo = NoWheelComboBox()
+        self.view_combo.addItem("보기: 기본", "default")
+        self.view_combo.addItem("보기: 카테고리별", "category")
+        self.sort_combo = NoWheelComboBox()
+        for label, value in (
+            ("정렬: 기본", "default"), ("수정일 최근순", "updated_desc"),
+            ("수정일 오래된순", "updated_asc"), ("제목 가나다순", "title_asc"),
+            ("제목 역순", "title_desc"),
+        ):
+            self.sort_combo.addItem(label, value)
+        for combo in (self.view_combo, self.sort_combo):
+            combo.setFixedHeight(self.BUTTON_HEIGHT)
+            minimum = max(90, combo.sizeHint().width())
+            combo.setProperty("inline_minimum_width", minimum)
+            combo.setMinimumWidth(minimum)
+            combo.setMaximumWidth(max(138, minimum))
+            combo.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+            search_row.addWidget(combo)
+        self.recent_toggle = QPushButton("최근 ▸")
+        self.recent_toggle.setObjectName("compactUtilityButton")
+        self.recent_toggle.setFixedHeight(self.BUTTON_HEIGHT)
+        self.recent_toggle.setCheckable(True)
+        self.recent_toggle.setAccessibleName("최근 본 메모 펼치기")
+        self.recent_toggle.clicked.connect(self._toggle_recent)
+        self.recent_toggle.hide()
+        filter_row.insertWidget(filter_row.count() - 1, self.recent_toggle)
+        self._restore_combo(self.view_combo, self.store.setting(self.VIEW_SETTING, "default") if self.store else "default")
+        self._restore_combo(self.sort_combo, self.store.setting(self.SORT_SETTING, "default") if self.store else "default")
+        self.view_combo.currentIndexChanged.connect(self._filter_controls_changed)
+        self.sort_combo.currentIndexChanged.connect(self._filter_controls_changed)
+        self.refresh_category_filters()
 
         # 방금 보던 메모로 한 번에 돌아가는 칩.  없을 때는 자리도 차지하지 않는다.
         self.recent_host = QWidget()
@@ -512,6 +645,31 @@ class MemoListPanel(QWidget):
         self.empty_label.setWordWrap(True)
         layout.addWidget(self.empty_label, 1)
 
+        self.filtered_empty_host = QWidget()
+        self.filtered_empty_host.setObjectName("memoFilteredEmptyState")
+        filtered_empty_layout = QVBoxLayout(self.filtered_empty_host)
+        filtered_empty_layout.addStretch(1)
+        self.filtered_empty_message = QLabel("조건에 맞는 메모가 없습니다.")
+        self.filtered_empty_message.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        filtered_empty_layout.addWidget(self.filtered_empty_message)
+        self.filtered_empty_summary = QLabel()
+        self.filtered_empty_summary.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.filtered_empty_summary.setWordWrap(True)
+        filtered_empty_layout.addWidget(self.filtered_empty_summary)
+        self.clear_title_filters_button = QPushButton("기호·머리말 필터 해제")
+        self.clear_title_filters_button.setObjectName("memoClearTitleFiltersButton")
+        self.clear_title_filters_button.setFixedHeight(self.BUTTON_HEIGHT)
+        self.clear_title_filters_button.setSizePolicy(
+            QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed
+        )
+        self.clear_title_filters_button.clicked.connect(self.clear_title_filters)
+        filtered_empty_layout.addWidget(
+            self.clear_title_filters_button, 0, Qt.AlignmentFlag.AlignHCenter
+        )
+        filtered_empty_layout.addStretch(1)
+        self.filtered_empty_host.hide()
+        layout.addWidget(self.filtered_empty_host, 1)
+
         self.actions_host = QWidget()
         actions = QHBoxLayout(self.actions_host)
         actions.setContentsMargins(0, 0, 0, 0)
@@ -520,13 +678,37 @@ class MemoListPanel(QWidget):
         self.delete_button.setObjectName("dangerButton")
         for button in (self.export_button, self.delete_button):
             button.setFixedHeight(self.BUTTON_HEIGHT)
-            actions.addWidget(button)
-        actions.addStretch()
+        self.selection_chip = QLabel()
+        self.selection_chip.setObjectName("selectedMemoCountChip")
+        self.selection_chip.setFixedHeight(self.BUTTON_HEIGHT)
+        self.selection_chip.hide()
+        actions.addWidget(self.selection_chip)
+        actions.addWidget(self.export_button)
+        self.action_status = ElidingStatusLabel()
+        self.action_status.setObjectName("memoStatus")
+        self.action_status.setProperty("level", "info")
+        self.action_status.setFixedHeight(self.BUTTON_HEIGHT)
+        self.action_status.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        actions.addWidget(self.action_status, 1)
+        self.bulk_category_button = QPushButton("카테고리 지정 ▾")
+        self.bulk_category_button.setFixedHeight(self.BUTTON_HEIGHT)
+        self.bulk_category_button.clicked.connect(self._show_bulk_category_menu)
+        self.bulk_category_button.hide()
+        actions.addWidget(self.bulk_category_button)
+        actions.addWidget(self.delete_button)
+        self.delete_button.hide()
         layout.addWidget(self.actions_host)
         self.export_button.clicked.connect(self.export_requested.emit)
         self.delete_button.clicked.connect(self.delete_requested.emit)
 
     # ------------------------------------------------------------- 크기 --
+    def resize(self, *args) -> None:
+        """Switch responsive controls before Qt applies the old layout floor."""
+        if hasattr(self, "view_combo") and args:
+            width = args[0].width() if len(args) == 1 else int(args[0])
+            self._sync_responsive_filter_controls(width)
+        super().resize(*args)
+
     def height_for_rows(self, rows: int) -> int:
         """Height this panel needs before the table can show `rows` entries."""
         header = max(22, self.table_header.height())
@@ -565,7 +747,242 @@ class MemoListPanel(QWidget):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
+        self._sync_responsive_filter_controls(event.size().width())
+        self._layout_category_filters()
         self._resize_table_columns()
+
+    def _sync_responsive_filter_controls(self, width: int | None = None) -> None:
+        compact = int(self.width() if width is None else width) < self.FILTER_CONTROLS_INLINE_WIDTH
+        self._controls_in_more = compact
+        for combo in (self.view_combo, self.sort_combo):
+            combo.setVisible(not compact)
+            combo.setMinimumWidth(
+                0 if compact else int(combo.property("inline_minimum_width") or 90)
+            )
+
+    def _saved_category_filter(self):
+        if self.store is None:
+            return None
+        raw = str(self.store.setting(self.FILTER_SETTING, "") or "")
+        if raw == "none":
+            return "none"
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            return None
+        return value if self.store.category(value) is not None else None
+
+    @staticmethod
+    def _restore_combo(combo: QComboBox, value: str) -> None:
+        index = combo.findData(str(value))
+        combo.setCurrentIndex(max(0, index))
+
+    def refresh_category_filters(self) -> None:
+        if (
+            self.category_filter_id not in (None, "none")
+            and (self.store is None or self.store.category(self.category_filter_id) is None)
+        ):
+            self.category_filter_id = None
+            if self.store is not None:
+                self.store.set_setting(self.FILTER_SETTING, "")
+        while self.category_chip_layout.count():
+            item = self.category_chip_layout.takeAt(0)
+            if item.widget() is not None:
+                item.widget().deleteLater()
+        self.category_filter_buttons = []
+        category_rows = list(self.store.categories() if self.store else [])
+        choices = [(None, "전체", "")] + [
+            (int(row["id"]), str(row["name"]), str(row["color"])) for row in category_rows
+        ] + [("none", "미지정", "")]
+        for category_id, label, color in choices:
+            button = QPushButton(label)
+            button.setObjectName("memoCategoryFilterChip")
+            button.setCheckable(True)
+            button.setChecked(category_id == self.category_filter_id)
+            button.setFixedHeight(self.BUTTON_HEIGHT)
+            button.setProperty("category_id", category_id)
+            if color:
+                button.setIcon(color_dot_icon(color))
+            button.clicked.connect(lambda _checked=False, value=category_id: self._set_category_filter(value))
+            self.category_chip_layout.addWidget(button)
+            self.category_filter_buttons.append(button)
+        self.category_chip_layout.addStretch(1)
+        self._layout_category_filters()
+
+    def _layout_category_filters(self) -> None:
+        if not hasattr(self, "category_filter_buttons"):
+            return
+        available = max(100, self.category_chip_host.width())
+        used = 0
+        hidden_buttons = []
+        for button in self.category_filter_buttons:
+            width = button.sizeHint().width() + 4
+            visible = used + width <= available or button.property("category_id") is None
+            button.setVisible(visible)
+            used += width if visible else 0
+            if not visible:
+                hidden_buttons.append(button)
+        selected_hidden = next(
+            (
+                button for button in hidden_buttons
+                if button.property("category_id") == self.category_filter_id
+            ),
+            None,
+        )
+        self.more_categories_button.setText(
+            selected_hidden.text() if selected_hidden is not None else "더보기"
+        )
+        self.more_categories_button.setIcon(
+            selected_hidden.icon() if selected_hidden is not None else QIcon()
+        )
+        self.more_categories_button.setChecked(selected_hidden is not None)
+        self.more_categories_button.setVisible(
+            bool(hidden_buttons) or bool(getattr(self, "_controls_in_more", False))
+        )
+
+    def _show_more_categories(self) -> None:
+        menu = QMenu(self.more_categories_button)
+        category_actions = 0
+        for button in self.category_filter_buttons:
+            if button.isVisible():
+                continue
+            action = menu.addAction(button.text())
+            action.setIcon(button.icon())
+            action.setCheckable(True)
+            action.setChecked(button.property("category_id") == self.category_filter_id)
+            action.triggered.connect(
+                lambda _checked=False, value=button.property("category_id"): self._set_category_filter(value)
+            )
+            category_actions += 1
+        if getattr(self, "_controls_in_more", False):
+            if category_actions:
+                menu.addSeparator()
+            view_menu = menu.addMenu("보기")
+            for index in range(self.view_combo.count()):
+                action = view_menu.addAction(self.view_combo.itemText(index).removeprefix("보기: "))
+                action.setCheckable(True)
+                action.setChecked(index == self.view_combo.currentIndex())
+                action.triggered.connect(
+                    lambda _checked=False, value=index: self.view_combo.setCurrentIndex(value)
+                )
+            sort_menu = menu.addMenu("정렬")
+            for index in range(self.sort_combo.count()):
+                action = sort_menu.addAction(self.sort_combo.itemText(index).removeprefix("정렬: "))
+                action.setCheckable(True)
+                action.setChecked(index == self.sort_combo.currentIndex())
+                action.triggered.connect(
+                    lambda _checked=False, value=index: self.sort_combo.setCurrentIndex(value)
+                )
+        self.more_categories_menu = menu
+        menu.exec(self.more_categories_button.mapToGlobal(self.more_categories_button.rect().bottomLeft()))
+        self._layout_category_filters()
+
+    def _set_category_filter(self, category_id) -> None:
+        self.category_filter_id = (
+            None if category_id is None else "none" if category_id == "none" else int(category_id)
+        )
+        if self.store:
+            self.store.set_setting(
+                self.FILTER_SETTING, "" if self.category_filter_id is None else str(self.category_filter_id),
+            )
+        for button in self.category_filter_buttons:
+            button.setChecked(button.property("category_id") == self.category_filter_id)
+        self._layout_category_filters()
+        self.filters_changed.emit()
+
+    def _show_title_symbol_menu(self) -> None:
+        menu = QMenu(self.title_symbol_button)
+        all_action = menu.addAction("전체")
+        all_action.setCheckable(True)
+        all_action.setChecked(self.title_symbol_filter is None)
+        all_action.triggered.connect(lambda: self._set_title_symbol_filter(None))
+        values = sorted(
+            self._title_symbol_counts, key=lambda value: (-value.count, value.key)
+        )
+        if self.title_symbol_filter and all(
+            value.key != self.title_symbol_filter for value in values
+        ):
+            values.insert(0, TitleValueCount(self.title_symbol_filter, self.title_symbol_filter, 0, ""))
+        if values:
+            menu.addSeparator()
+            for value in values:
+                action = menu.addAction(f"{value.display}  {value.count}")
+                action.setCheckable(True)
+                action.setChecked(value.key == self.title_symbol_filter)
+                action.triggered.connect(
+                    lambda _checked=False, key=value.key: self._set_title_symbol_filter(key)
+                )
+        else:
+            empty = menu.addAction("제목 앞에 기호가 없습니다")
+            empty.setEnabled(False)
+        self.title_symbol_menu = menu
+        menu.exec(self.title_symbol_button.mapToGlobal(self.title_symbol_button.rect().bottomLeft()))
+        self._update_title_symbol_button()
+
+    def _set_title_symbol_filter(self, symbol: str | None) -> None:
+        self.title_symbol_filter = title_symbol_key(symbol) if symbol else None
+        self._update_title_symbol_button()
+        self.filters_changed.emit()
+
+    def _set_title_prefix_filter(self, key: str | None) -> None:
+        self.title_prefix_filter = title_prefix_key(key) if key else None
+        self.filters_changed.emit()
+
+    def clear_title_filters(self) -> None:
+        if self.title_symbol_filter is None and self.title_prefix_filter is None:
+            return
+        self.title_symbol_filter = None
+        self.title_prefix_filter = None
+        self._update_title_symbol_button()
+        self.filters_changed.emit()
+
+    def _update_title_symbol_button(self) -> None:
+        if self.title_symbol_filter:
+            value = next(
+                (entry for entry in self._title_symbol_counts if entry.key == self.title_symbol_filter),
+                None,
+            )
+            count = value.count if value is not None else 0
+            display = value.display if value is not None else self.title_symbol_filter
+            self.title_symbol_button.setText(f"{display} {count} ▾")
+            self.title_symbol_button.setChecked(True)
+            self.title_symbol_button.setToolTip(
+                f"제목이 {display}(으)로 시작하는 메모 {count}개를 표시합니다."
+            )
+            return
+        self.title_symbol_button.setChecked(False)
+        if self._title_symbol_counts:
+            representative = min(
+                self._title_symbol_counts, key=lambda value: (-value.count, value.key)
+            )
+            self.title_symbol_button.setText(
+                f"{representative.display} {representative.count} ▾"
+            )
+        else:
+            self.title_symbol_button.setText("기호 ▾")
+        self.title_symbol_button.setToolTip("제목 맨 앞의 이모지·기호로 메모를 모아 봅니다.")
+
+    def _filter_controls_changed(self, *_args) -> None:
+        if self.store:
+            self.store.set_setting(self.VIEW_SETTING, str(self.view_combo.currentData()))
+            self.store.set_setting(self.SORT_SETTING, str(self.sort_combo.currentData()))
+        self.filters_changed.emit()
+
+    def _show_bulk_category_menu(self) -> None:
+        ids = self.checked_ids()
+        if not ids:
+            return
+        menu = QMenu(self.bulk_category_button)
+        action = menu.addAction("미지정")
+        action.triggered.connect(lambda: self.category_assign_requested.emit(ids, None))
+        for row in self.store.categories() if self.store else []:
+            action = menu.addAction(str(row["name"]))
+            action.triggered.connect(
+                lambda _checked=False, category_id=int(row["id"]):
+                self.category_assign_requested.emit(ids, category_id)
+            )
+        self.bulk_category_menu = menu
+        menu.exec(self.bulk_category_button.mapToGlobal(self.bulk_category_button.rect().topLeft()))
 
     def text_minimums(self) -> list[int]:
         """Hard floor: a header must never be cut off, whatever the width."""
@@ -744,11 +1161,19 @@ class MemoListPanel(QWidget):
         except (IndexError, KeyError):
             return False
 
-    @classmethod
-    def _ordered(cls, rows) -> list:
+    def _ordered(self, rows) -> list:
         """고정한 것이 맨 위, 그다음 직접 끌어 옮긴 차례, 나머지는 최근 순."""
-        pinned = [row for row in rows if cls._pinned(row)]
-        rows = [row for row in rows if not cls._pinned(row)]
+        pinned = [row for row in rows if self._pinned(row)]
+        rows = [row for row in rows if not self._pinned(row)]
+        mode = str(self.sort_combo.currentData()) if hasattr(self, "sort_combo") else "default"
+        if mode != "default":
+            reverse = mode in {"updated_desc", "title_desc"}
+            key = (
+                (lambda row: (str(row["updated_at"] or ""), int(row["id"])))
+                if mode.startswith("updated") else
+                (lambda row: (str(row["title"] or "").casefold(), int(row["id"])))
+            )
+            return sorted(pinned, key=key, reverse=reverse) + sorted(rows, key=key, reverse=reverse)
         moved = sorted(
             [row for row in rows if int(row["sort_order"] or 0)],
             key=lambda row: int(row["sort_order"]),
@@ -767,13 +1192,101 @@ class MemoListPanel(QWidget):
         except (IndexError, KeyError):
             return False
 
+    @staticmethod
+    def _row_symbol_key(row) -> str | None:
+        symbol = leading_title_symbol(str(row["title"] or ""))
+        return title_symbol_key(symbol) if symbol is not None else None
+
+    @staticmethod
+    def _row_prefix_key(row) -> str | None:
+        prefix = leading_title_prefix(str(row["title"] or ""))
+        return title_prefix_key(prefix) if prefix is not None else None
+
+    def _set_empty_state(self, has_rows: bool) -> None:
+        filtered = (
+            self.category_filter_id is not None or self.searching()
+            or self.title_symbol_filter is not None or self.title_prefix_filter is not None
+        )
+        self.empty_label.setVisible(not has_rows and not filtered)
+        self.filtered_empty_host.setVisible(not has_rows and filtered)
+        if has_rows or not filtered:
+            return
+        labels = []
+        if self.category_filter_id == "none":
+            labels.append("● 미지정")
+        elif self.category_filter_id is not None and self.store is not None:
+            category = self.store.category(self.category_filter_id)
+            if category is not None:
+                labels.append(f"● {category['name']}")
+        if self.searching():
+            labels.append(f"검색: {self.search.text().strip()}")
+        if self.title_symbol_filter is not None:
+            value = next(
+                (entry for entry in self._title_symbol_counts if entry.key == self.title_symbol_filter),
+                None,
+            )
+            labels.append(value.display if value is not None else self.title_symbol_filter)
+        if self.title_prefix_filter is not None:
+            value = next(
+                (entry for entry in self._title_prefix_counts if entry.key == self.title_prefix_filter),
+                None,
+            )
+            labels.append(f"[{value.display if value is not None else self.title_prefix_filter}]")
+        self.filtered_empty_summary.setText(" · ".join(labels))
+        self.clear_title_filters_button.setVisible(
+            self.title_symbol_filter is not None or self.title_prefix_filter is not None
+        )
+
     def set_rows(self, rows, selected_id: int | None = None) -> None:
+        rows = list(rows)
         checked = set(self.checked_ids())
         if not self.searching():
             # 본문에 넣은 페이지는 그 메모의 줄로만 오간다.  목록에는 내놓지
             # 않되, 찾을 때는 보여 준다.  그러지 않으면 영영 못 찾는다.
             rows = [row for row in rows if not self._is_embedded(row)]
+        if self.category_filter_id == "none":
+            rows = [row for row in rows if row["category_id"] is None]
+        elif self.category_filter_id is not None:
+            rows = [
+                row for row in rows
+                if row["category_id"] is not None and int(row["category_id"]) == self.category_filter_id
+            ]
+        symbol_rows = [
+            row for row in rows
+            if self.title_prefix_filter is None
+            or self._row_prefix_key(row) == self.title_prefix_filter
+        ]
+        prefix_rows = [
+            row for row in rows
+            if self.title_symbol_filter is None
+            or self._row_symbol_key(row) == self.title_symbol_filter
+        ]
+        self._title_symbol_counts = count_title_values(
+            symbol_rows, leading_title_symbol, title_symbol_key
+        )
+        self._title_prefix_counts = count_title_values(
+            prefix_rows, leading_title_prefix, title_prefix_key
+        )
+        self._update_title_symbol_button()
+        rows = [
+            row for row in rows
+            if (self.title_symbol_filter is None
+                or self._row_symbol_key(row) == self.title_symbol_filter)
+            and (self.title_prefix_filter is None
+                 or self._row_prefix_key(row) == self.title_prefix_filter)
+        ]
         self.rows_by_id = {int(row["id"]): row for row in rows}
+        if self.title_symbol_filter is not None or self.title_prefix_filter is not None:
+            self._set_flat_rows(rows, checked)
+            if selected_id is not None:
+                self.select_id(selected_id)
+            return
+        if str(self.view_combo.currentData()) == "category":
+            self._set_category_rows(rows, checked)
+            if selected_id is not None:
+                self.select_id(selected_id)
+            return
+        self.table.setDragEnabled(True)
         by_parent: dict[int, list] = {}
         for row in rows:
             parent = int(row["parent_id"] or TOP_LEVEL_PARENT)
@@ -794,13 +1307,82 @@ class MemoListPanel(QWidget):
         self._restore_expansion()
         has_rows = bool(rows)
         self.table.setVisible(has_rows)
-        self.empty_label.setVisible(not has_rows)
+        self._set_empty_state(has_rows)
         if has_rows:
             self._resize_table_columns()
         if selected_id is not None:
             self.select_id(selected_id)
         self._sync_select_all_state()
         self._sync_fold_button()
+
+    def _set_category_rows(self, rows, checked: set[int]) -> None:
+        blocked = self.table.blockSignals(True)
+        try:
+            self.table.forget_hover()
+            self.table.clear()
+            groups = [(int(row["id"]), str(row["name"])) for row in (self.store.categories() if self.store else [])]
+            groups.append((None, "미지정"))
+            for category_id, label in groups:
+                members = [
+                    row for row in rows
+                    if (None if row["category_id"] is None else int(row["category_id"])) == category_id
+                ]
+                if not members:
+                    continue
+                group = QTreeWidgetItem(["", f"{label} ({len(members)})", "", ""])
+                group.setData(0, GROUP_ROLE, True)
+                group.setFlags(Qt.ItemFlag.ItemIsEnabled)
+                self.table.addTopLevelItem(group)
+                for row in self._ordered(members):
+                    item = QTreeWidgetItem()
+                    self._fill_item(item, row, int(row["id"]) in checked)
+                    parent_id = int(row["parent_id"] or 0)
+                    if parent_id:
+                        path = self.store.note_path(int(row["id"]))
+                        item.setToolTip(self.TITLE_COLUMN, item.toolTip(self.TITLE_COLUMN) + "\n원래 위치: " + " › ".join(str(p["title"]) for p in path))
+                    group.addChild(item)
+                group.setExpanded(True)
+        finally:
+            self.table.blockSignals(blocked)
+        self.table.setDragEnabled(False)
+        has_rows = bool(rows)
+        self.table.setVisible(has_rows)
+        self._set_empty_state(has_rows)
+        if has_rows:
+            self._resize_table_columns()
+        self._sync_select_all_state()
+        self._sync_fold_button()
+
+    def _set_flat_rows(self, rows, checked: set[int]) -> None:
+        """Filtered results are flat so dragging cannot alter the real hierarchy."""
+        blocked = self.table.blockSignals(True)
+        try:
+            self.table.forget_hover()
+            self.table.clear()
+            for row in self._ordered(rows):
+                item = QTreeWidgetItem()
+                self._fill_item(item, row, int(row["id"]) in checked)
+                parent_id = int(row["parent_id"] or 0)
+                if parent_id and self.store is not None:
+                    path = self.store.note_path(int(row["id"]))
+                    item.setToolTip(
+                        self.TITLE_COLUMN,
+                        item.toolTip(self.TITLE_COLUMN)
+                        + "\n원래 위치: "
+                        + " › ".join(str(part["title"]) for part in path),
+                    )
+                self.table.addTopLevelItem(item)
+        finally:
+            self.table.blockSignals(blocked)
+        self.table.setDragEnabled(False)
+        has_rows = bool(rows)
+        self.table.setVisible(has_rows)
+        self._set_empty_state(has_rows)
+        if has_rows:
+            self._resize_table_columns()
+        self._sync_select_all_state()
+        self._sync_fold_button()
+        self.fold_button.setEnabled(False)
 
     def _build_children(self, parent_item, parent_id, by_parent, checked, seen) -> None:
         for row in by_parent.get(parent_id, []):
@@ -819,7 +1401,7 @@ class MemoListPanel(QWidget):
 
     def _fill_item(self, item: QTreeWidgetItem, row, checked: bool) -> None:
         note_id = int(row["id"])
-        preview = plain_text_from_content(str(row["content"])).replace("\n", " ").strip()[:80]
+        preview = display_plain_text_from_content(str(row["content"])).replace("\n", " ").strip()[:80]
         # DD3: both live in one column, so they must not look alike —
         # a reminder shows a clock, a D-Day shows a countdown chip.
         parts = []
@@ -829,7 +1411,11 @@ class MemoListPanel(QWidget):
         reminder_text = reminder_display_text(str(row["reminder_due_at"] or ""))
         if reminder_text:
             parts.append(reminder_text)
-        title = str(row["title"] or "제목 없음")
+        raw_title = str(row["title"] or "제목 없음")
+        title = raw_title
+        conflict_sync_id = str(row["conflict_of_sync_id"] or "")
+        if conflict_sync_id:
+            title = f"⚠ 충돌 · {title}"
         if row["postit"]:
             title = f"{self.POSTIT_MARK} {title}"
         if self._pinned(row):
@@ -842,18 +1428,32 @@ class MemoListPanel(QWidget):
         item.setCheckState(0, Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
         item.setData(0, PINNED_ROLE, self._pinned(row))
         item.setSizeHint(0, QSize(0, self.ROW_HEIGHT))
-        for column, value in enumerate(
-            ["", title, preview, "   ".join(parts), list_datetime(row["updated_at"])]
-        ):
+        category = None if row["category_id"] is None or self.store is None else self.store.category(int(row["category_id"]))
+        category_name = str(category["name"]) if category is not None else "미지정"
+        category_text = category_name if category is not None else "—"
+        for column, value in enumerate(["", title, category_text, list_datetime(row["updated_at"]) ]):
             if column:
                 item.setText(column, value)
             item.setData(column, NOTE_ID_ROLE, note_id)
-        item.setData(4, SORT_KEY_ROLE, str(row["updated_at"] or ""))
+        if category is not None:
+            item.setIcon(2, color_dot_icon(str(category["color"])))
+        item.setToolTip(2, category_name)
+        item.setToolTip(3, full_list_datetime(row["updated_at"]))
+        item.setData(3, SORT_KEY_ROLE, str(row["updated_at"] or ""))
         # 좁은 창에서는 수정시간 열이 접히므로, 말풍선에 남겨 둔다.
         tip = [title]
-        updated = list_datetime(row["updated_at"])
+        updated = full_list_datetime(row["updated_at"])
         if updated:
             tip.append(f"수정 {updated}")
+        if preview:
+            tip.append(f"내용: {preview}")
+        if parts:
+            tip.append("일정: " + "   ".join(parts))
+        tip.append(f"카테고리: {category_name}")
+        if conflict_sync_id:
+            original = self.store.note_by_sync_id(conflict_sync_id, include_trashed=True) if self.store else None
+            original_title = str(original["title"]) if original is not None else conflict_sync_id
+            tip.extend((f"충돌 사본 · 원본: {original_title}", "두 버전을 비교한 뒤 정리해 주세요."))
         if row["postit"]:
             tip.append("포스트잇으로 띄워둔 메모입니다.")
         if self._pinned(row):
@@ -870,7 +1470,7 @@ class MemoListPanel(QWidget):
 
     def expanded_ids(self) -> list[int]:
         return [
-            int(item.data(0, NOTE_ID_ROLE)) for item in self._walk()
+            int(item.data(0, NOTE_ID_ROLE)) for item in self._note_items()
             if item.childCount() and item.isExpanded()
         ]
 
@@ -890,7 +1490,8 @@ class MemoListPanel(QWidget):
             for item in self._walk():
                 if not item.childCount():
                     continue
-                item.setExpanded(int(item.data(0, NOTE_ID_ROLE)) in wanted)
+                note_id = item.data(0, NOTE_ID_ROLE)
+                item.setExpanded(True if note_id is None else int(note_id) in wanted)
         finally:
             self._restoring_expansion = False
 
@@ -933,7 +1534,21 @@ class MemoListPanel(QWidget):
                 pass
             button.clicked.connect(lambda _checked=False, value=int(note_id): self.recent_chosen.emit(value))
             button.show()
-        self.recent_host.setVisible(bool(wanted))
+        self.recent_toggle.setVisible(bool(wanted))
+        if not wanted:
+            self.recent_toggle.setChecked(False)
+        self._sync_recent_visibility()
+
+    def _toggle_recent(self, checked: bool) -> None:
+        self.recent_toggle.setText("최근 ▾" if checked else "최근 ▸")
+        self.recent_toggle.setAccessibleName(
+            "최근 본 메모 접기" if checked else "최근 본 메모 펼치기"
+        )
+        self._sync_recent_visibility()
+
+    def _sync_recent_visibility(self) -> None:
+        has_recent = any(not button.isHidden() for button in self.recent_buttons)
+        self.recent_host.setVisible(has_recent and self.recent_toggle.isChecked())
 
     def toggle_all_folds(self) -> bool:
         """하위가 있는 메모를 한 번에 접거나 편다.  펼친 것이 있으면 접는다."""
@@ -974,15 +1589,18 @@ class MemoListPanel(QWidget):
             yield child
             yield from self._walk(child)
 
+    def _note_items(self):
+        return (item for item in self._walk() if item.data(0, NOTE_ID_ROLE) is not None)
+
     def _item_for(self, note_id: int) -> QTreeWidgetItem | None:
-        for item in self._walk():
+        for item in self._note_items():
             if int(item.data(0, NOTE_ID_ROLE)) == int(note_id):
                 return item
         return None
 
     def row_count(self) -> int:
         """화면에 올라온 메모 수.  접혀서 보이지 않는 것도 센다."""
-        return sum(1 for _item in self._walk())
+        return sum(1 for _item in self._note_items())
 
     def select_id(self, note_id: int) -> None:
         item = self._item_for(note_id)
@@ -993,12 +1611,12 @@ class MemoListPanel(QWidget):
 
     def checked_ids(self) -> list[int]:
         return [
-            int(item.data(0, NOTE_ID_ROLE)) for item in self._walk()
+            int(item.data(0, NOTE_ID_ROLE)) for item in self._note_items()
             if item.checkState(0) == Qt.CheckState.Checked
         ]
 
     def export_ids(self) -> list[int]:
-        return self.checked_ids() or [int(item.data(0, NOTE_ID_ROLE)) for item in self._walk()]
+        return self.checked_ids() or [int(item.data(0, NOTE_ID_ROLE)) for item in self._note_items()]
 
     def deletion_ids(self) -> list[int]:
         """Checked rows if any, else the row the user is standing on."""
@@ -1006,12 +1624,12 @@ class MemoListPanel(QWidget):
         if checked:
             return checked
         current = self.table.currentItem()
-        if current is None:
+        if current is None or current.data(0, NOTE_ID_ROLE) is None:
             return []
         return [int(current.data(0, NOTE_ID_ROLE))]
 
     def toggle_all(self) -> None:
-        items = list(self._walk())
+        items = list(self._note_items())
         checked = bool(items) and all(
             item.checkState(0) == Qt.CheckState.Checked for item in items
         )
@@ -1023,7 +1641,7 @@ class MemoListPanel(QWidget):
         blocked = self.table.blockSignals(True)
         try:
             state = Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked
-            for item in self._walk():
+            for item in self._note_items():
                 item.setCheckState(0, state)
         finally:
             self.table.blockSignals(blocked)
@@ -1031,7 +1649,7 @@ class MemoListPanel(QWidget):
         self._sync_select_all_state()
 
     def _sync_select_all_state(self, *_args) -> None:
-        items = list(self._walk())
+        items = list(self._note_items())
         total = len(items)
         selected = sum(item.checkState(0) == Qt.CheckState.Checked for item in items)
         if selected == 0:
@@ -1046,9 +1664,15 @@ class MemoListPanel(QWidget):
     def _update_action_buttons(self, selected: int, total: int) -> None:
         """Nothing checked means nothing to delete, so say so with the button."""
         self.export_button.setEnabled(total > 0)
+        self.export_button.setVisible(selected == 0)
+        self.action_status.setVisible(selected == 0)
+        self.selection_chip.setText(f"{selected}개 선택")
+        self.selection_chip.setVisible(selected > 0)
+        self.delete_button.setVisible(selected > 0)
         self.delete_button.setEnabled(selected > 0)
-        self.delete_button.setText(f"선택 삭제 ({selected})" if selected else "선택 삭제")
+        self.delete_button.setText("선택 삭제")
+        self.bulk_category_button.setVisible(selected > 0)
 
     def _activate_row(self, item: QTreeWidgetItem, column: int) -> None:
-        if column != 0 and item is not None:
+        if column != 0 and item is not None and item.data(0, NOTE_ID_ROLE) is not None:
             self.note_selected.emit(int(item.data(0, NOTE_ID_ROLE)))

@@ -11,6 +11,8 @@ from .reminder_recurrence_store import ReminderRecurrenceStoreMixin
 from .reminder_store import REMINDER_SELECT, ReminderStoreMixin
 from .monthly_rule import dump_rule, parse_rule
 from .schedule_store import ScheduleStore
+from .sync_identity import new_sync_id, utc_now_ms
+from .memo_data_service import MemoDataService
 
 
 DATETIME_FMT = "%Y%m%d%H%M"
@@ -22,11 +24,18 @@ NOTE_COLUMNS = (
     "monthly_rule", "monthly_shown_for",
     "hotkey", "hotkey_action", "created_at", "updated_at", "deleted_at",
     "parent_id", "sort_order", "embedded", "pinned",
+    "sync_id", "revision", "modified_at_utc", "origin_device_id", "category_id",
+    "conflict_of_sync_id",
 )
 # 부모가 없는 메모.  지금까지의 모든 메모가 여기에 해당한다.
 TOP_LEVEL_PARENT = 0
 ATTACHMENT_COLUMNS = (
     "id", "note_id", "mime_type", "data_base64", "width", "height", "created_at",
+    "sync_id", "revision", "modified_at_utc", "origin_device_id",
+)
+CATEGORY_COLUMNS = (
+    "id", "sync_id", "name", "color", "sort_order", "revision",
+    "created_at_utc", "modified_at_utc", "origin_device_id",
 )
 REMINDER_COLUMNS = (
     "id", "note_id", "due_at", "memo", "status", "created_at", "series_id",
@@ -55,6 +64,7 @@ class NoteReminderStore(ReminderStoreMixin, ReminderRecurrenceStoreMixin):
         self.upgrade_backup_path = self._backup_before_upgrade()
         self._init_schema()
         self.schedules = ScheduleStore(self.conn)
+        self.memo_data = MemoDataService(self)
 
     def _backup_before_upgrade(self) -> Path | None:
         tables = {
@@ -74,14 +84,25 @@ class NoteReminderStore(ReminderStoreMixin, ReminderRecurrenceStoreMixin):
         needs_notes = not {
             "postit_visible", "postit_startup", "postit_display_mode", "background_transparency",
             "d_day_at", "d_day_label", "d_day_alert", "parent_id", "sort_order",
-            "embedded", "pinned",
+            "embedded", "pinned", "sync_id", "revision", "modified_at_utc",
+            "origin_device_id", "category_id", "conflict_of_sync_id",
         }.issubset(note_columns)
-        needs_attachments = "note_attachments" not in tables
+        attachment_columns = (
+            {str(row[1]) for row in self.conn.execute("PRAGMA table_info(note_attachments)")}
+            if "note_attachments" in tables else set()
+        )
+        needs_attachments = "note_attachments" not in tables or not {
+            "sync_id", "revision", "modified_at_utc", "origin_device_id",
+        }.issubset(attachment_columns)
+        needs_sync = not {
+            "memo_categories", "sync_tombstones", "memo_annotations",
+            "memo_templates", "memo_versions",
+        }.issubset(tables)
         needs_reminders = "reminders" in tables and self._reminders_need_rebuild()
         needs_support = "reminders" in tables and not {"reminder_series", "reminder_history"}.issubset(tables)
         if not (
             needs_schedule or needs_schedule_shape or needs_notes or needs_attachments
-            or needs_reminders or needs_support
+            or needs_reminders or needs_support or needs_sync
         ):
             return None
         stamp = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -129,16 +150,62 @@ class NoteReminderStore(ReminderStoreMixin, ReminderRecurrenceStoreMixin):
                 parent_id INTEGER NOT NULL DEFAULT 0,
                 sort_order INTEGER NOT NULL DEFAULT 0,
                 embedded INTEGER NOT NULL DEFAULT 0,
-                pinned INTEGER NOT NULL DEFAULT 0
+                pinned INTEGER NOT NULL DEFAULT 0,
+                sync_id TEXT NOT NULL DEFAULT '', revision INTEGER NOT NULL DEFAULT 1,
+                modified_at_utc TEXT NOT NULL DEFAULT '', origin_device_id TEXT NOT NULL DEFAULT '',
+                category_id INTEGER, conflict_of_sync_id TEXT NOT NULL DEFAULT ''
             );
             CREATE TABLE IF NOT EXISTS note_attachments (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, note_id INTEGER NOT NULL,
                 mime_type TEXT NOT NULL, data_base64 TEXT NOT NULL,
                 width INTEGER NOT NULL, height INTEGER NOT NULL, created_at TEXT NOT NULL,
+                sync_id TEXT NOT NULL DEFAULT '', revision INTEGER NOT NULL DEFAULT 1,
+                modified_at_utc TEXT NOT NULL DEFAULT '', origin_device_id TEXT NOT NULL DEFAULT '',
                 FOREIGN KEY(note_id) REFERENCES notes(id) ON DELETE CASCADE
             );
             CREATE INDEX IF NOT EXISTS idx_note_attachments_note ON note_attachments(note_id);
             CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS memo_categories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, sync_id TEXT NOT NULL UNIQUE,
+                name TEXT NOT NULL COLLATE NOCASE UNIQUE, color TEXT NOT NULL DEFAULT '#64748b',
+                sort_order INTEGER NOT NULL DEFAULT 0, revision INTEGER NOT NULL DEFAULT 1,
+                created_at_utc TEXT NOT NULL, modified_at_utc TEXT NOT NULL,
+                origin_device_id TEXT NOT NULL DEFAULT ''
+            );
+            CREATE TABLE IF NOT EXISTS sync_tombstones (
+                entity_type TEXT NOT NULL, sync_id TEXT NOT NULL, revision INTEGER NOT NULL,
+                deleted_at_utc TEXT NOT NULL, origin_device_id TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY(entity_type,sync_id)
+            );
+            CREATE TABLE IF NOT EXISTS memo_annotations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, sync_id TEXT NOT NULL UNIQUE,
+                memo_id INTEGER NOT NULL, block_id TEXT NOT NULL DEFAULT '',
+                start_offset INTEGER NOT NULL DEFAULT 0, end_offset INTEGER NOT NULL DEFAULT 0,
+                quote TEXT NOT NULL DEFAULT '', context_before TEXT NOT NULL DEFAULT '',
+                context_after TEXT NOT NULL DEFAULT '', comment TEXT NOT NULL,
+                location_status TEXT NOT NULL DEFAULT 'resolved', revision INTEGER NOT NULL DEFAULT 1,
+                created_at_utc TEXT NOT NULL, modified_at_utc TEXT NOT NULL,
+                origin_device_id TEXT NOT NULL DEFAULT '',
+                FOREIGN KEY(memo_id) REFERENCES notes(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_memo_annotations_memo ON memo_annotations(memo_id);
+            CREATE TABLE IF NOT EXISTS memo_templates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, sync_id TEXT NOT NULL UNIQUE,
+                name TEXT NOT NULL COLLATE NOCASE UNIQUE, trigger TEXT NOT NULL COLLATE NOCASE UNIQUE,
+                sort_order INTEGER NOT NULL DEFAULT 0, payload_version INTEGER NOT NULL DEFAULT 1,
+                payload_json TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1,
+                created_at_utc TEXT NOT NULL, modified_at_utc TEXT NOT NULL,
+                origin_device_id TEXT NOT NULL DEFAULT ''
+            );
+            CREATE TABLE IF NOT EXISTS memo_versions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, sync_id TEXT NOT NULL UNIQUE,
+                memo_id INTEGER NOT NULL, payload_hash TEXT NOT NULL, payload_json TEXT NOT NULL,
+                kind TEXT NOT NULL DEFAULT 'auto', important INTEGER NOT NULL DEFAULT 0,
+                created_at_utc TEXT NOT NULL, origin_device_id TEXT NOT NULL DEFAULT '',
+                FOREIGN KEY(memo_id) REFERENCES notes(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_memo_versions_memo_created
+                ON memo_versions(memo_id,created_at_utc DESC,id DESC);
             CREATE TABLE IF NOT EXISTS reminder_series (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, note_id INTEGER, memo TEXT NOT NULL,
                 rule_type TEXT NOT NULL, weekdays TEXT NOT NULL DEFAULT '[]', month_day INTEGER,
@@ -150,6 +217,8 @@ class NoteReminderStore(ReminderStoreMixin, ReminderRecurrenceStoreMixin):
             """
         )
         self._ensure_note_columns()
+        self._ensure_attachment_columns()
+        self._ensure_sync_rows()
         if not self._table_exists("reminders"):
             self._create_reminders_table()
         elif self._reminders_need_rebuild():
@@ -250,7 +319,54 @@ class NoteReminderStore(ReminderStoreMixin, ReminderRecurrenceStoreMixin):
         if "pinned" not in columns:
             # 1 은 "목록 맨 위에 고정".  형제들 가운데 늘 먼저 놓인다.
             self.conn.execute("ALTER TABLE notes ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
+        if "sync_id" not in columns:
+            self.conn.execute("ALTER TABLE notes ADD COLUMN sync_id TEXT NOT NULL DEFAULT ''")
+        if "revision" not in columns:
+            self.conn.execute("ALTER TABLE notes ADD COLUMN revision INTEGER NOT NULL DEFAULT 1")
+        if "modified_at_utc" not in columns:
+            self.conn.execute("ALTER TABLE notes ADD COLUMN modified_at_utc TEXT NOT NULL DEFAULT ''")
+        if "origin_device_id" not in columns:
+            self.conn.execute("ALTER TABLE notes ADD COLUMN origin_device_id TEXT NOT NULL DEFAULT ''")
+        if "category_id" not in columns:
+            self.conn.execute("ALTER TABLE notes ADD COLUMN category_id INTEGER")
+        if "conflict_of_sync_id" not in columns:
+            self.conn.execute("ALTER TABLE notes ADD COLUMN conflict_of_sync_id TEXT NOT NULL DEFAULT ''")
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_notes_parent ON notes(parent_id)")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_notes_category ON notes(category_id)")
+
+    def _ensure_attachment_columns(self) -> None:
+        columns = {str(row[1]) for row in self.conn.execute("PRAGMA table_info(note_attachments)")}
+        additions = {
+            "sync_id": "TEXT NOT NULL DEFAULT ''",
+            "revision": "INTEGER NOT NULL DEFAULT 1",
+            "modified_at_utc": "TEXT NOT NULL DEFAULT ''",
+            "origin_device_id": "TEXT NOT NULL DEFAULT ''",
+        }
+        for name, definition in additions.items():
+            if name not in columns:
+                self.conn.execute(f"ALTER TABLE note_attachments ADD COLUMN {name} {definition}")
+
+    def _ensure_sync_rows(self) -> None:
+        device_id = self.setting("sync_device_id", "").strip()
+        if not device_id:
+            device_id = new_sync_id()
+            self.conn.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('sync_device_id',?)", (device_id,))
+        stamp = utc_now_ms()
+        for table in ("notes", "note_attachments"):
+            rows = self.conn.execute(f"SELECT id FROM {table} WHERE sync_id='' OR sync_id IS NULL").fetchall()
+            self.conn.executemany(
+                f"UPDATE {table} SET sync_id=?,modified_at_utc=CASE WHEN modified_at_utc='' THEN ? ELSE modified_at_utc END,"
+                "origin_device_id=CASE WHEN origin_device_id='' THEN ? ELSE origin_device_id END WHERE id=?",
+                ((new_sync_id(), stamp, device_id, int(row["id"])) for row in rows),
+            )
+            self.conn.execute(f"CREATE UNIQUE INDEX IF NOT EXISTS idx_{table}_sync_id ON {table}(sync_id)")
+        if not self.conn.execute("SELECT 1 FROM memo_categories LIMIT 1").fetchone():
+            for index, (name, color) in enumerate((('업무', '#3b82f6'), ('개발', '#8b5cf6'), ('자료', '#10b981')), 1):
+                self.conn.execute(
+                    "INSERT INTO memo_categories(sync_id,name,color,sort_order,revision,created_at_utc,modified_at_utc,origin_device_id) "
+                    "VALUES(?,?,?,?,1,?,?,?)",
+                    (new_sync_id(), name, color, index, stamp, stamp, device_id),
+                )
 
     def _table_exists(self, name: str) -> bool:
         return self.conn.execute(
@@ -259,9 +375,12 @@ class NoteReminderStore(ReminderStoreMixin, ReminderRecurrenceStoreMixin):
 
     def create_note(self, title: str | None = None, content: str = "") -> int:
         stamp = self._now_key()
+        sync_stamp = utc_now_ms()
         cursor = self.conn.execute(
-            "INSERT INTO notes(title,content,created_at,updated_at) VALUES(?,?,?,?)",
-            (str(title or "").strip() or self.default_title, content, stamp, stamp),
+            "INSERT INTO notes(title,content,created_at,updated_at,sync_id,revision,modified_at_utc,origin_device_id) "
+            "VALUES(?,?,?,?,?,1,?,?)",
+            (str(title or "").strip() or self.default_title, content, stamp, stamp,
+             new_sync_id(), sync_stamp, self.device_id),
         )
         self.conn.commit()
         return int(cursor.lastrowid)
@@ -343,18 +462,19 @@ class NoteReminderStore(ReminderStoreMixin, ReminderRecurrenceStoreMixin):
         note_id = self.create_note(title)
         if int(parent_id) != TOP_LEVEL_PARENT:
             self.set_note_parent(note_id, int(parent_id))
+            parent = self.conn.execute("SELECT category_id FROM notes WHERE id=?", (int(parent_id),)).fetchone()
+            if parent is not None and parent["category_id"] is not None:
+                self._touch_note(note_id, {"category_id": int(parent["category_id"])})
+                self.conn.commit()
         if embedded:
-            self.conn.execute("UPDATE notes SET embedded=1 WHERE id=?", (note_id,))
+            self._touch_note(note_id, {"embedded": 1})
             self.conn.commit()
         return note_id
 
     def set_note_embedded(self, note_id: int, embedded: bool) -> None:
         """Switch page/list visibility without changing ownership or content."""
         with self.conn:
-            self.conn.execute(
-                "UPDATE notes SET embedded=? WHERE id=?",
-                (int(bool(embedded)), int(note_id)),
-            )
+            self._touch_note(note_id, {"embedded": int(bool(embedded))})
 
     def can_reparent(self, note_id: int, parent_id: int) -> bool:
         """A 를 A 안으로, 또는 자기 안의 메모 밑으로 넣으려는 것을 막는다."""
@@ -378,10 +498,7 @@ class NoteReminderStore(ReminderStoreMixin, ReminderRecurrenceStoreMixin):
         index = len(siblings) if position is None else max(0, min(int(position), len(siblings)))
         siblings.insert(index, note_id)
         with self.conn:
-            self.conn.execute(
-                "UPDATE notes SET parent_id=?,updated_at=? WHERE id=?",
-                (parent_id, self._now_key(), note_id),
-            )
+            self._touch_note(note_id, {"parent_id": parent_id, "updated_at": self._now_key()})
             self._write_sort_order(siblings)
         return True
 
@@ -395,7 +512,120 @@ class NoteReminderStore(ReminderStoreMixin, ReminderRecurrenceStoreMixin):
     def _write_sort_order(self, ordered_ids) -> None:
         # 1 부터 매긴다.  0 은 "아직 직접 옮긴 적 없음" 이라는 뜻으로 남겨 둔다.
         for index, value in enumerate(ordered_ids, start=1):
-            self.conn.execute("UPDATE notes SET sort_order=? WHERE id=?", (index, int(value)))
+            self._touch_note(int(value), {"sort_order": index})
+
+    @property
+    def device_id(self) -> str:
+        return self.setting("sync_device_id", "")
+
+    def _touch_note(self, note_id: int, values: dict | None = None) -> None:
+        updates = dict(values or {})
+        updates.update(modified_at_utc=utc_now_ms(), origin_device_id=self.device_id)
+        fields = ",".join(f"{key}=?" for key in updates)
+        self.conn.execute(
+            f"UPDATE notes SET {fields},revision=revision+1 WHERE id=?",
+            [*updates.values(), int(note_id)],
+        )
+
+    def note_by_sync_id(self, sync_id: str, include_trashed: bool = False):
+        deleted = "" if include_trashed else " AND deleted_at=''"
+        return self.conn.execute(
+            f"SELECT * FROM notes WHERE sync_id=?{deleted}", (str(sync_id),),
+        ).fetchone()
+
+    # ------------------------------------------------------- 카테고리 --
+    def categories(self) -> list[sqlite3.Row]:
+        return list(self.conn.execute(
+            "SELECT * FROM memo_categories ORDER BY sort_order,name COLLATE NOCASE,id"
+        ))
+
+    def category(self, category_id: int):
+        return self.conn.execute(
+            "SELECT * FROM memo_categories WHERE id=?", (int(category_id),),
+        ).fetchone()
+
+    def create_category(self, name: str, color: str = "#64748b") -> int:
+        clean = str(name or "").strip()
+        if not clean:
+            raise ValueError("카테고리 이름을 입력하세요.")
+        stamp = utc_now_ms()
+        position = int(self.conn.execute(
+            "SELECT COALESCE(MAX(sort_order),0)+1 FROM memo_categories"
+        ).fetchone()[0])
+        with self.conn:
+            cursor = self.conn.execute(
+                "INSERT INTO memo_categories(sync_id,name,color,sort_order,revision,created_at_utc,modified_at_utc,origin_device_id) "
+                "VALUES(?,?,?,?,1,?,?,?)",
+                (new_sync_id(), clean, str(color or "#64748b"), position, stamp, stamp, self.device_id),
+            )
+        return int(cursor.lastrowid)
+
+    def update_category(self, category_id: int, *, name: str | None = None, color: str | None = None) -> None:
+        updates: dict[str, object] = {}
+        if name is not None:
+            clean = str(name).strip()
+            if not clean:
+                raise ValueError("카테고리 이름을 입력하세요.")
+            updates["name"] = clean
+        if color is not None:
+            updates["color"] = str(color or "#64748b")
+        if not updates:
+            return
+        updates.update(modified_at_utc=utc_now_ms(), origin_device_id=self.device_id)
+        fields = ",".join(f"{key}=?" for key in updates)
+        with self.conn:
+            self.conn.execute(
+                f"UPDATE memo_categories SET {fields},revision=revision+1 WHERE id=?",
+                [*updates.values(), int(category_id)],
+            )
+
+    def reorder_categories(self, ordered_ids) -> None:
+        actual = {int(row["id"]) for row in self.categories()}
+        ordered = [int(value) for value in ordered_ids if int(value) in actual]
+        ordered.extend(sorted(actual - set(ordered)))
+        stamp = utc_now_ms()
+        with self.conn:
+            for position, category_id in enumerate(ordered, 1):
+                self.conn.execute(
+                    "UPDATE memo_categories SET sort_order=?,revision=revision+1,modified_at_utc=?,origin_device_id=? WHERE id=?",
+                    (position, stamp, self.device_id, category_id),
+                )
+
+    def set_note_category(self, note_id: int, category_id: int | None) -> None:
+        if category_id is not None and self.category(int(category_id)) is None:
+            raise ValueError("카테고리를 찾을 수 없습니다.")
+        with self.conn:
+            self._touch_note(int(note_id), {"category_id": None if category_id is None else int(category_id)})
+
+    def set_notes_category(self, note_ids, category_id: int | None) -> None:
+        if category_id is not None and self.category(int(category_id)) is None:
+            raise ValueError("카테고리를 찾을 수 없습니다.")
+        with self.conn:
+            for note_id in {int(value) for value in note_ids}:
+                self._touch_note(note_id, {"category_id": None if category_id is None else int(category_id)})
+
+    def delete_category(self, category_id: int) -> None:
+        row = self.category(category_id)
+        if row is None:
+            return
+        stamp = utc_now_ms()
+        with self.conn:
+            note_ids = [int(item["id"]) for item in self.conn.execute(
+                "SELECT id FROM notes WHERE category_id=?", (int(category_id),)
+            )]
+            for note_id in note_ids:
+                self._touch_note(note_id, {"category_id": None})
+            self._write_tombstone("memo_category", str(row["sync_id"]), int(row["revision"]) + 1, stamp)
+            self.conn.execute("DELETE FROM memo_categories WHERE id=?", (int(category_id),))
+
+    def _write_tombstone(self, entity_type: str, sync_id: str, revision: int, stamp: str | None = None) -> None:
+        self.conn.execute(
+            "INSERT INTO sync_tombstones(entity_type,sync_id,revision,deleted_at_utc,origin_device_id) "
+            "VALUES(?,?,?,?,?) ON CONFLICT(entity_type,sync_id) DO UPDATE SET "
+            "revision=MAX(revision,excluded.revision),deleted_at_utc=excluded.deleted_at_utc,"
+            "origin_device_id=excluded.origin_device_id",
+            (str(entity_type), str(sync_id), int(revision), stamp or utc_now_ms(), self.device_id),
+        )
 
     def deadline_notes(self, search: str = "") -> list[sqlite3.Row]:
         """Active D-Day notes, closest deadline first, for the calendar navigator."""
@@ -448,17 +678,17 @@ class NoteReminderStore(ReminderStoreMixin, ReminderRecurrenceStoreMixin):
             # 고정만 켜고 끄는 것은 메모를 고친 것이 아니다.  손댄 시각을 올리면
             # 목록에서 맨 위로 튀어 올라 순서가 흐트러진다.
             updates["updated_at"] = self._now_key()
-        fields = ",".join(f"{key}=?" for key in updates)
-        self.conn.execute(f"UPDATE notes SET {fields} WHERE id=?", [*updates.values(), note_id])
+        self._touch_note(note_id, updates)
         self.conn.commit()
 
     def add_attachment(
         self, note_id: int, mime_type: str, data_base64: str, width: int, height: int,
     ) -> int:
         cursor = self.conn.execute(
-            "INSERT INTO note_attachments(note_id,mime_type,data_base64,width,height,created_at) "
-            "VALUES(?,?,?,?,?,?)",
-            (int(note_id), str(mime_type), str(data_base64), int(width), int(height), self._now_key()),
+            "INSERT INTO note_attachments(note_id,mime_type,data_base64,width,height,created_at,sync_id,revision,modified_at_utc,origin_device_id) "
+            "VALUES(?,?,?,?,?,?,?,1,?,?)",
+            (int(note_id), str(mime_type), str(data_base64), int(width), int(height), self._now_key(),
+             new_sync_id(), utc_now_ms(), self.device_id),
         )
         self.conn.commit()
         return int(cursor.lastrowid)
@@ -475,6 +705,9 @@ class NoteReminderStore(ReminderStoreMixin, ReminderRecurrenceStoreMixin):
 
     def delete_attachment(self, attachment_id: int) -> None:
         with self.conn:
+            row = self.attachment(attachment_id)
+            if row is not None:
+                self._write_tombstone("attachment", row["sync_id"], int(row["revision"]) + 1)
             self.conn.execute("DELETE FROM note_attachments WHERE id=?", (int(attachment_id),))
 
     def prune_note_attachments(self, note_id: int, referenced_ids: set[int]) -> None:
@@ -483,7 +716,11 @@ class NoteReminderStore(ReminderStoreMixin, ReminderRecurrenceStoreMixin):
         if not stale:
             return
         with self.conn:
-            self.conn.executemany("DELETE FROM note_attachments WHERE id=?", ((value,) for value in stale))
+            for value in stale:
+                row = self.attachment(value)
+                if row is not None:
+                    self._write_tombstone("attachment", row["sync_id"], int(row["revision"]) + 1)
+                self.conn.execute("DELETE FROM note_attachments WHERE id=?", (value,))
 
     def set_deadline(self, note_id: int, due_at: str, label: str = "", alert: bool = False) -> None:
         self._require_note(note_id)
@@ -498,11 +735,10 @@ class NoteReminderStore(ReminderStoreMixin, ReminderRecurrenceStoreMixin):
         ).fetchone()
         reminder_id = int(current["id"]) if current is not None else None
         with self.conn:
-            self.conn.execute(
-                "UPDATE notes SET d_day_at=?,d_day_label=?,d_day_alert=?,d_day_done_at='',"
-                "updated_at=? WHERE id=?",
-                (due, memo, int(bool(alert)), self._now_key(), int(note_id)),
-            )
+            self._touch_note(note_id, {
+                "d_day_at": due, "d_day_label": memo, "d_day_alert": int(bool(alert)),
+                "d_day_done_at": "", "updated_at": self._now_key(),
+            })
             self._sync_day_before_reminder(note_id, due, memo, alert)
             if alert and reminder_id is None:
                 cursor = self.conn.execute(
@@ -552,11 +788,11 @@ class NoteReminderStore(ReminderStoreMixin, ReminderRecurrenceStoreMixin):
         self._require_note(note_id)
         text = dump_rule(parse_rule(rule)) if rule else ""
         with self.conn:
-            self.conn.execute(
-                "UPDATE notes SET monthly_rule=?,monthly_shown_for=?,updated_at=? WHERE id=?",
-                (text, "" if not text else self.note(note_id)["monthly_shown_for"],
-                 self._now_key(), int(note_id)),
-            )
+            self._touch_note(note_id, {
+                "monthly_rule": text,
+                "monthly_shown_for": "" if not text else self.note(note_id)["monthly_shown_for"],
+                "updated_at": self._now_key(),
+            })
 
     def monthly_notes(self) -> list:
         return list(self.conn.execute(
@@ -566,19 +802,14 @@ class NoteReminderStore(ReminderStoreMixin, ReminderRecurrenceStoreMixin):
 
     def mark_monthly_shown(self, note_id: int, month: str) -> None:
         with self.conn:
-            self.conn.execute(
-                "UPDATE notes SET monthly_shown_for=? WHERE id=?", (str(month), int(note_id)),
-            )
+            self._touch_note(note_id, {"monthly_shown_for": str(month)})
 
     def finish_deadline(self, note_id: int, done: bool = True) -> None:
         """Stop counting without deleting the D-Day; it stays on the list."""
         self._require_note(note_id)
         stamp = self._now_key() if done else ""
         with self.conn:
-            self.conn.execute(
-                "UPDATE notes SET d_day_done_at=?,updated_at=? WHERE id=?",
-                (stamp, self._now_key(), int(note_id)),
-            )
+            self._touch_note(note_id, {"d_day_done_at": stamp, "updated_at": self._now_key()})
 
     def clear_deadline(self, note_id: int) -> None:
         rows = list(self.conn.execute(
@@ -586,10 +817,10 @@ class NoteReminderStore(ReminderStoreMixin, ReminderRecurrenceStoreMixin):
             (int(note_id),),
         ))
         with self.conn:
-            self.conn.execute(
-                "UPDATE notes SET d_day_at='',d_day_label='',d_day_alert=0,d_day_done_at='',updated_at=? WHERE id=?",
-                (self._now_key(), int(note_id)),
-            )
+            self._touch_note(note_id, {
+                "d_day_at": "", "d_day_label": "", "d_day_alert": 0,
+                "d_day_done_at": "", "updated_at": self._now_key(),
+            })
             self.conn.execute(
                 "DELETE FROM reminders WHERE note_id=? AND occurrence_kind IN ('deadline','deadline_prior') "
                 "AND status='pending'",
@@ -604,11 +835,7 @@ class NoteReminderStore(ReminderStoreMixin, ReminderRecurrenceStoreMixin):
         targets = [int(note_id)] + self.note_descendants(note_id)
         with self.conn:
             for target in targets:
-                self.conn.execute(
-                    "UPDATE notes SET deleted_at=?,postit_visible=0,updated_at=? "
-                    "WHERE id=? AND deleted_at=''",
-                    (stamp, stamp, target),
-                )
+                self._touch_note(target, {"deleted_at": stamp, "postit_visible": 0, "updated_at": stamp})
                 self.conn.execute(
                     "UPDATE schedule_items SET deleted_at=? WHERE note_id=? AND deleted_at=''",
                     (stamp, target),
@@ -640,27 +867,28 @@ class NoteReminderStore(ReminderStoreMixin, ReminderRecurrenceStoreMixin):
         now = self._now_key()
         with self.conn:
             for target in targets:
-                self.conn.execute(
-                    "UPDATE notes SET deleted_at='',updated_at=? WHERE id=?", (now, target),
-                )
+                self._touch_note(target, {"deleted_at": "", "updated_at": now})
                 self.conn.execute(
                     "UPDATE schedule_items SET deleted_at='' WHERE note_id=? AND deleted_at=?",
                     (target, stamp),
                 )
             if parent_gone:
                 # 부모가 아직 휴지통에 있으면 되살려도 보이지 않는다.  맨 위로 올린다.
-                self.conn.execute(
-                    "UPDATE notes SET parent_id=?,sort_order=0 WHERE id=?",
-                    (TOP_LEVEL_PARENT, int(note_id)),
-                )
+                self._touch_note(int(note_id), {"parent_id": TOP_LEVEL_PARENT, "sort_order": 0})
 
     def purge_expired_trash(self, days: int = 7) -> int:
         cutoff = (datetime.now() - timedelta(days=max(1, days))).strftime(DATETIME_FMT)
         rows = self.conn.execute(
-            "SELECT id FROM notes WHERE deleted_at!='' AND deleted_at<?", (cutoff,)
+            "SELECT id,sync_id,revision FROM notes WHERE deleted_at!='' AND deleted_at<?", (cutoff,)
         ).fetchall()
         with self.conn:
             for row in rows:
+                attachments = self.conn.execute(
+                    "SELECT sync_id,revision FROM note_attachments WHERE note_id=?", (int(row["id"]),)
+                ).fetchall()
+                for attachment in attachments:
+                    self._write_tombstone("attachment", attachment["sync_id"], int(attachment["revision"]) + 1)
+                self._write_tombstone("note", row["sync_id"], int(row["revision"]) + 1)
                 self.conn.execute("DELETE FROM notes WHERE id=?", (int(row["id"]),))
             # 부모가 영구 삭제된 메모가 사라진 번호를 붙들고 있으면 어디에도
             # 뜨지 않는다.  맨 위층으로 올려 둔다.

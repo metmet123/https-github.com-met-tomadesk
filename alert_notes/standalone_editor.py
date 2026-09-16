@@ -1,8 +1,10 @@
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QGuiApplication
-from PyQt6.QtWidgets import QFrame, QMainWindow, QScrollArea
+from PyQt6.QtCore import QPoint, Qt
+from PyQt6.QtGui import QGuiApplication, QKeySequence, QShortcut, QTextCursor
+from PyQt6.QtWidgets import QFrame, QMainWindow, QScrollArea, QToolTip
 
+from .block_identity import stored_ids
 from .editor import MemoEditor
+from .outline_model import resolve_block
 from .text_format_toolbar import TextFormatToolbar
 from .window_geometry import WindowGeometryController
 
@@ -30,6 +32,9 @@ class StandaloneMemoEditorWindow(QMainWindow):
         had_saved_geometry = bool(store.setting(self.GEOMETRY_KEY, ""))
 
         self.editor = MemoEditor(store)
+        self.escape_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Escape), self.editor)
+        self.escape_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self.escape_shortcut.activated.connect(self._escape_editor_tools)
         self.scroll = QScrollArea()
         self.scroll.setObjectName("standaloneMemoEditorScroll")
         self.scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -38,6 +43,7 @@ class StandaloneMemoEditorWindow(QMainWindow):
         self.scroll.setWidget(self.editor)
         self.setCentralWidget(self.scroll)
         self.editor.save_requested.connect(self._save)
+        self.editor.block_link_open_requested.connect(self._open_block_link)
         self.editor.delete_requested.connect(self._delete)
         self.editor.reminder_save_requested.connect(self._save_reminder)
         self.editor.reminder_clear_requested.connect(self._clear_reminder)
@@ -69,6 +75,40 @@ class StandaloneMemoEditorWindow(QMainWindow):
         self.raise_()
         self.activateWindow()
         self.editor.content_edit.setFocus()
+
+    def _escape_editor_tools(self) -> None:
+        if self.editor.close_compact_panel():
+            return
+        body = self.editor.content_edit
+        if body.character_selection.count():
+            body.character_selection.clear()
+        elif body.block_selection.count():
+            body.block_selection.clear()
+        elif body.insert_popup_visible():
+            body.close_insert_popup()
+        elif body.textCursor().hasSelection():
+            cursor = body.textCursor()
+            cursor.clearSelection()
+            body.setTextCursor(cursor)
+
+    def _open_block_link(self, note_id: int, block_id: str) -> None:
+        row = self.store.note(int(note_id))
+        body = self.editor.content_edit
+        if row is None or row["deleted_at"]:
+            QToolTip.showText(body.mapToGlobal(QPoint(12, 12)), "연결된 메모를 찾을 수 없습니다", body)
+            return
+        if int(note_id) != self.note_id:
+            if block_id not in stored_ids(str(row["content"] or "")):
+                QToolTip.showText(body.mapToGlobal(QPoint(12, 12)), "연결된 블록을 찾을 수 없습니다", body)
+                return
+            self.open_note(int(note_id))
+        block = resolve_block(body, block_id)
+        if block is None or not block.isValid():
+            QToolTip.showText(body.mapToGlobal(QPoint(12, 12)), "연결된 블록을 찾을 수 없습니다", body)
+            return
+        body.setTextCursor(QTextCursor(block))
+        body.ensureCursorVisible()
+        body.setFocus()
 
     def closeEvent(self, event) -> None:
         self.editor.flush_pending_save()

@@ -3,13 +3,13 @@ from datetime import datetime
 from html import escape
 from pathlib import Path
 
-from PyQt6.QtCore import QMimeData, Qt, pyqtSignal
-from PyQt6.QtGui import QKeySequence, QShortcut
+from PyQt6.QtCore import QMimeData, QPoint, Qt, pyqtSignal
+from PyQt6.QtGui import QKeySequence, QShortcut, QTextCursor
 from datetime import date, datetime, timedelta
 
 from PyQt6.QtWidgets import (
     QApplication, QFileDialog, QFrame, QLabel, QMessageBox, QScrollArea, QSizePolicy, QSplitter,
-    QTabWidget, QVBoxLayout, QWidget,
+    QTabWidget, QToolTip, QVBoxLayout, QWidget,
 )
 
 from .editor import MemoEditor
@@ -29,7 +29,7 @@ from .schedule_postit import SchedulePostitWindow
 from .calendar import CalendarPanel
 from .calendar_dialog import CalendarDialog
 from .reminder_history import ReminderHistoryPanel
-from .rich_text import plain_text_from_content
+from .rich_text import display_plain_text_from_content, plain_text_from_content
 from .standalone_editor import StandaloneMemoEditorWindow
 from .text_format_toolbar import TextFormatToolbar
 from .today_summary import TodaySummaryPanel
@@ -40,6 +40,8 @@ from .memo_archive import (
 from .rich_memo_edit import RichMemoTextEdit
 from .memo_clipboard import NOTES_MIME, get_json, set_json
 from .note_clone_service import NoteCloneService
+from .block_identity import stored_ids
+from .outline_model import resolve_block
 from .structured_import import (
     MAX_IMPORT_FILES, SUPPORTED_IMPORT_SUFFIXES, heading_levels_for_strategy,
     import_strategy, load_clipboard, load_import_file, unique_title,
@@ -48,6 +50,7 @@ from .structured_import import (
 
 class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
     shortcuts_changed = pyqtSignal()
+    editor_fullscreen_changed = pyqtSignal(bool)
     HORIZONTAL_BREAKPOINT = 1080
     LIST_MINIMUM_WIDTH = 480
     EDITOR_MINIMUM_WIDTH = 560 - TextFormatToolbar.WIDTH_REDUCTION
@@ -73,6 +76,8 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         self._horizontal_splitter_restored = False
         self.hotkey_validator = None
         self.current_id: int | None = None
+        self._session_version_hash: str | None = None
+        self._session_start_version_created = False
         self._list_clone_undo: list[dict] = []
         self._list_clone_redo: list[dict] = []
         # Esc 로 돌아갈 길.  페이지를 타고 들어간 만큼만 얕게 쌓는다.
@@ -95,6 +100,7 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         self.editor_remainder = TodaySummaryPanel(self.store)
         self.editor_remainder.setObjectName("memoEditorRemainder")
         self.editor_remainder.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.editor_remainder.setMaximumWidth(360)
         self.summary = self.editor_remainder
         self.schedule_postit = SchedulePostitWindow(self.store, self)
         self.editor_remainder.monthly_suggestion_accepted.connect(self.accept_monthly_suggestion)
@@ -104,17 +110,18 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         self.splitter.addWidget(self.editor_remainder)
         self.splitter.setChildrenCollapsible(False)
         self.splitter.setStretchFactor(0, 0)
-        self.splitter.setStretchFactor(1, 0)
-        self.splitter.setStretchFactor(2, 1)
+        self.splitter.setStretchFactor(1, 1)
+        self.splitter.setStretchFactor(2, 0)
         self.list_panel.setMinimumWidth(self._list_minimum_width())
         self.editor_scroll.setMinimumWidth(self.EDITOR_MINIMUM_WIDTH)
-        self.splitter.setSizes([700, 640, 560])
+        self.splitter.setSizes([520, 980, 320])
         self.splitter.handle(1).setAccessibleName("메모 목록과 편집 영역 너비 조절선")
         self.splitter.handle(2).setAccessibleName("메모 편집 영역 너비 조절선")
         self.calendar = CalendarPanel(self.store)
         self.reminder_history = ReminderHistoryPanel(self.store)
         self.tabs = QTabWidget()
         self.tabs.setObjectName("alertNotesTabs")
+        self.tabs.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
         self.tabs.addTab(self.splitter, "메모 편집")
         self.tabs.addTab(self.calendar, "캘린더")
         self.tabs.addTab(self.reminder_history, "알림내역")
@@ -137,18 +144,91 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         self.fullscreen_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self.fullscreen_shortcut.activated.connect(self.toggle_editor_fullscreen)
         self.editor.fullscreen_requested.connect(self.toggle_editor_fullscreen)
+        self.tabs.currentChanged.connect(
+            lambda index: self.toggle_editor_fullscreen(False)
+            if index != 0 and self.editor_fullscreen else None
+        )
         self.editor.sidebar_requested.connect(self.toggle_memo_list)
+        self.editor.shortcuts_reloaded.connect(
+            lambda: [window.reload_time_shortcuts() for window in self.postits.values()]
+        )
+        self.editor.status_requested.connect(self._editor_status)
+        self.editor.category_changed.connect(self._categories_changed)
         self.sidebar_shortcut = QShortcut(QKeySequence("Ctrl+\\"), self)
         self.sidebar_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self.sidebar_shortcut.activated.connect(self.toggle_memo_list)
         self.memo_list_hidden = False
+        self._narrow_auto_hidden = False
+        self._summary_has_content = True
+        self._summary_manually_open = False
+        self._summary_manually_closed = False
+        self.editor_remainder.content_presence_changed.connect(self._summary_content_changed)
+        self.editor.summary_requested.connect(self._toggle_summary)
         # Esc 로 왔던 메모로 돌아간다.  메모 편집 구역 안에서만 듣는다.
         self.back_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Escape), self.editor)
         self.back_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
-        self.back_shortcut.activated.connect(self.go_back)
+        self.back_shortcut.activated.connect(self._escape_editor_or_go_back)
         self._connect()
+        self._sync_status_visibility()
         self.refresh()
         self.restore_postits()
+
+    def _escape_editor_or_go_back(self) -> None:
+        body = self.editor.content_edit
+        if self.editor.close_compact_panel():
+            return
+        if body.character_selection.count():
+            body.character_selection.clear()
+            return
+        if body.block_selection.count():
+            body.block_selection.clear()
+            return
+        if body.insert_popup_visible():
+            body.close_insert_popup()
+            return
+        if body.textCursor().hasSelection():
+            cursor = body.textCursor()
+            cursor.clearSelection()
+            body.setTextCursor(cursor)
+            return
+        self.go_back()
+
+    def _summary_content_changed(self, has_content: bool) -> None:
+        self._summary_has_content = has_content
+        if has_content:
+            self._summary_manually_open = False
+        self._sync_summary_visibility()
+
+    def _toggle_summary(self) -> None:
+        if self.editor_remainder.isVisible():
+            self._summary_manually_open = False
+            self._summary_manually_closed = True
+        else:
+            self._summary_manually_open = True
+            self._summary_manually_closed = False
+        self._sync_summary_visibility()
+
+    def _sync_summary_visibility(self) -> None:
+        narrow = self.splitter.orientation() == Qt.Orientation.Vertical
+        show = not narrow and not self.editor_fullscreen and (
+            self._summary_has_content or self._summary_manually_open
+        ) and not self._summary_manually_closed
+        was_visible = self.editor_remainder.isVisible()
+        self.editor_remainder.setVisible(show)
+        self.splitter.setStretchFactor(1, 1)
+        self.splitter.setStretchFactor(2, 0)
+        if show and not was_visible and self.splitter.width() > 0:
+            # A hidden QSplitter child forgets its width.  Reapply the saved
+            # proportions when the summary is reopened; its 360 px maximum is
+            # then honoured and the editor receives the remainder.
+            self.editor_remainder.setMaximumWidth(360)
+            ratios = self._horizontal_splitter_ratios()
+            available = self.splitter.width() - (self.splitter.handleWidth() * 2)
+            self.splitter.setSizes([max(1, round(value * available)) for value in ratios])
+        self.editor.summary_button.setText("요약 ‹" if show else "요약 ›")
+        self.editor.summary_button.setToolTip("오늘 요약 접기" if show else "오늘 요약 열기")
+        self.editor.summary_button.setAccessibleName("오늘 요약 접기" if show else "오늘 요약 열기")
+        self.editor.summary_button.setVisible(not narrow and not self.editor_fullscreen)
 
     def _connect(self) -> None:
         self.list_panel.search.textChanged.connect(self.refresh)
@@ -159,12 +239,15 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         self.list_panel.note_moved.connect(self.move_note)
         self.list_panel.child_requested.connect(self.create_child_note)
         self.list_panel.pin_toggled.connect(self.set_note_pinned)
+        self.list_panel.filters_changed.connect(self.refresh)
+        self.list_panel.category_assign_requested.connect(self.assign_note_categories)
         self.list_panel.copy_requested.connect(self.copy_selected_notes)
         self.list_panel.paste_requested.connect(self.paste_copied_notes)
         self.list_panel.clone_undo_requested.connect(self.undo_note_clone)
         self.list_panel.clone_redo_requested.connect(self.redo_note_clone)
         self.list_panel.recent_chosen.connect(self.show_note)
         self.editor.note_open_requested.connect(self.show_note)
+        self.editor.block_link_open_requested.connect(self._open_block_link)
         self.editor.page_created.connect(self._page_created)
         self.editor.page_removed.connect(self._page_removed)
         self.editor.save_requested.connect(self.save_note)
@@ -258,7 +341,7 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         self.list_panel.search.clear()
         self.refresh()
         self.show_note(created[-1])
-        self._status(f"문서 {len(created)}개를 새 메모로 가져왔습니다.", "success")
+        self._list_status(f"문서 {len(created)}개를 새 메모로 가져왔습니다.", "success")
 
     def _insert_import_document(self, editor: MemoEditor, document, source_kind: str) -> None:
         if editor.note_id is None:
@@ -272,7 +355,7 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         editor.flush_pending_save()
         self.current_id = editor.note_id
         self.refresh()
-        self._status("문서 구조를 현재 커서 위치에 가져왔습니다.", "success")
+        self._editor_status("문서 구조를 현재 커서 위치에 가져왔습니다.", "success")
 
     def export_all_memos(self, editor=None) -> None:
         source = editor if isinstance(editor, MemoEditor) else self.editor
@@ -370,6 +453,18 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         self.restore_postits()
         self.shortcuts_changed.emit()
 
+    def _categories_changed(self) -> None:
+        self.list_panel.refresh_category_filters()
+        self.refresh()
+
+    def assign_note_categories(self, note_ids: list[int], category_id) -> None:
+        if self.current_id in {int(value) for value in note_ids}:
+            self.editor.flush_pending_save()
+        self.store.set_notes_category(note_ids, category_id)
+        self.list_panel._set_all_checked(False)
+        self._list_status(f"{len(note_ids)}개 메모의 카테고리를 저장했습니다.", "success")
+        self.refresh()
+
     def _schedule_postit_changed(self) -> None:
         self.refresh()
         self.calendar.refresh()
@@ -393,7 +488,7 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         except (TypeError, ValueError, json.JSONDecodeError):
             values = []
         if len(values) != 3 or any(value < 0 for value in values) or sum(values) <= 0:
-            values = [700.0, 640.0, 560.0]
+            values = [520.0, 980.0, 320.0]
         total = sum(values)
         return [value / total for value in values]
 
@@ -415,6 +510,7 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         super().showEvent(event)
         if not self._horizontal_splitter_restored:
             self._restore_horizontal_splitter_ratios()
+        self._sync_status_visibility()
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -449,9 +545,14 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         self.list_panel.set_rows(rows, self.current_id)
         if self.current_id is None:
             self.editor.set_note(None)
+            self._session_version_hash = None
+            self._session_start_version_created = False
         else:
             self.list_panel.select_id(self.current_id)
             self.editor.set_note(self.store.note(self.current_id))
+            if self._session_version_hash is None:
+                self._session_version_hash = self.store.memo_data.snapshot_hash(self.current_id)
+                self._session_start_version_created = False
         self.calendar.refresh()
         self.reminder_history.refresh()
         self.summary.refresh()
@@ -479,6 +580,8 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         self.calendar.refresh()
         self.editor.title_edit.setFocus()
         self.editor.title_edit.selectAll()
+        if self.store.setting("memo_new_note_focus_mode", "false").lower() == "true":
+            self.toggle_editor_fullscreen(True)
 
     def copy_selected_notes(self) -> bool:
         ids = self.list_panel.deletion_ids()
@@ -535,20 +638,47 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         return True
 
     def select_note(self, note_id: int) -> None:
+        self._finish_version_session()
         self._remember_visit(int(note_id))
         self._remember_recent(int(note_id))
         self.current_id = note_id
         self.editor.set_note(self.store.note(note_id))
+        self._session_version_hash = self.store.memo_data.snapshot_hash(note_id)
+        self._session_start_version_created = False
         self.refresh_recent_chips()
 
     def show_note(self, note_id: int) -> None:
+        self._finish_version_session()
         self.list_panel.search.clear()
         self._remember_visit(int(note_id))
         self._remember_recent(int(note_id))
         self.current_id = int(note_id)
         self.refresh()
+        self._session_version_hash = self.store.memo_data.snapshot_hash(note_id)
+        self._session_start_version_created = False
         self.calendar.refresh()
         self.editor.content_edit.setFocus()
+
+    def _open_block_link(self, note_id: int, block_id: str) -> None:
+        row = self.store.note(int(note_id))
+        body = self.editor.content_edit
+        if row is None or row["deleted_at"]:
+            QToolTip.showText(body.mapToGlobal(QPoint(12, 12)), "연결된 메모를 찾을 수 없습니다", body)
+            return
+        if int(note_id) == self.current_id:
+            block = resolve_block(body, block_id)
+        else:
+            if block_id not in stored_ids(str(row["content"] or "")):
+                QToolTip.showText(body.mapToGlobal(QPoint(12, 12)), "연결된 블록을 찾을 수 없습니다", body)
+                return
+            self.show_note(int(note_id))
+            block = resolve_block(body, block_id)
+        if block is None or not block.isValid():
+            QToolTip.showText(body.mapToGlobal(QPoint(12, 12)), "연결된 블록을 찾을 수 없습니다", body)
+            return
+        body.setTextCursor(QTextCursor(block))
+        body.ensureCursorVisible()
+        body.setFocus()
 
     def show_schedule(self, item_id: int) -> None:
         self.tabs.setCurrentIndex(1)
@@ -618,12 +748,26 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
             values.update(postit_visible=True, postit_startup=True)
         elif not wants_postit:
             values.update(postit_visible=False, postit_startup=False)
+        session_start_id = None
+        if (
+            target_id == self.current_id and self._session_version_hash is not None
+            and not self._session_start_version_created
+            and self._note_values_changed(existing, values)
+        ):
+            session_start_id = self.store.memo_data.create_version(
+                target_id, kind="session_start", force=True,
+            )
         try:
             self.store.update_note(target_id, **values)
         except Exception as exc:
+            if session_start_id is not None:
+                with self.store.conn:
+                    self.store.conn.execute("DELETE FROM memo_versions WHERE id=?", (session_start_id,))
             QMessageBox.warning(editor, "메모 저장", str(exc))
             editor.mark_saved(False)
             return None
+        if session_start_id is not None:
+            self._session_start_version_created = True
         self._sync_postit(target_id)
         rows = self.store.notes(self.list_panel.search.text())
         self.list_panel.set_rows(rows, self.current_id)
@@ -634,13 +778,33 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
             and not self.editor.title_edit.hasFocus() and not self.editor.content_edit.hasFocus()
         ):
             self.editor.set_note(self.store.note(target_id))
-        self._status("메모를 저장했습니다.", "success")
         if (
             str(values.get("hotkey") or "") != previous_hotkey
             or str(values.get("hotkey_action") or "") != previous_hotkey_action
         ):
             self.shortcuts_changed.emit()
         return target_id
+
+    def _note_values_changed(self, existing, values: dict) -> bool:
+        if existing is None:
+            return False
+        boolean_keys = {"postit", "postit_visible", "postit_startup", "always_on_top", "input_locked", "d_day_alert", "pinned"}
+        for key, value in values.items():
+            if key not in existing.keys():
+                continue
+            current = existing[key]
+            if key == "title":
+                value = str(value).strip() or self.store.default_title
+            elif key in boolean_keys:
+                value = int(bool(value))
+                current = int(bool(current))
+            elif key in {"opacity", "background_transparency"}:
+                value, current = int(value), int(current)
+            elif current is not None:
+                value = str(value) if isinstance(current, str) else value
+            if value != current:
+                return True
+        return False
 
     def delete_note(self) -> None:
         self.delete_note_by_id(self.current_id, self)
@@ -657,7 +821,7 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         if self.current_id == note_id:
             self.current_id = None
         self.refresh()
-        self._status("메모를 삭제했습니다.", "success")
+        self._list_status("메모를 삭제했습니다.", "success")
         self.shortcuts_changed.emit()
         return True
 
@@ -667,6 +831,11 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         if wanted == self.memo_list_hidden:
             return self.memo_list_hidden
         self.memo_list_hidden = wanted
+        if self.splitter.orientation() == Qt.Orientation.Vertical:
+            self._narrow_auto_hidden = False
+            self.list_panel.setVisible(not wanted)
+            self.editor.set_wide_body(wanted)
+            return wanted
         if wanted:
             self._sizes_before_hiding = self.splitter.sizes()
         self.list_panel.setVisible(not wanted)
@@ -678,11 +847,12 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
             self.splitter.setSizes([0, sizes[1] + sizes[0], sizes[2]])
         elif getattr(self, "_sizes_before_hiding", None):
             self.splitter.setSizes(self._sizes_before_hiding)
-        self._status(
+        self._editor_status(
             "메모 목록을 접었습니다.  Ctrl+백슬래시 로 다시 폅니다." if wanted
             else "메모 목록을 폈습니다.",
             "info",
         )
+        self._sync_status_visibility()
         return self.memo_list_hidden
 
     def toggle_editor_fullscreen(self, on: bool | None = None) -> bool:
@@ -695,15 +865,21 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
             self._saved_splitter_sizes = self.splitter.sizes()
         self.list_panel.setVisible(not wanted)
         self.editor_remainder.setVisible(not wanted)
+        self.editor.summary_button.setVisible(False if wanted else not self.editor_remainder.isVisible())
         self.tabs.tabBar().setVisible(not wanted)
+        self.status_label.setVisible(not wanted)
         self.editor.set_fullscreen(wanted)
+        self.editor_fullscreen_changed.emit(wanted)
         if not wanted and getattr(self, "_saved_splitter_sizes", None):
             self.splitter.setSizes(self._saved_splitter_sizes)
-        self._status(
+        if not wanted:
+            self._sync_summary_visibility()
+        self._editor_status(
             "편집 구역만 크게 봅니다.  F11 로 돌아옵니다." if wanted
             else "원래 화면으로 돌아왔습니다.",
             "info",
         )
+        self._sync_status_visibility()
         self.editor.content_edit.setFocus()
         return self.editor_fullscreen
 
@@ -786,7 +962,7 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         self.store.update_note(int(note_id), pinned=bool(pinned))
         self.refresh()
         self.list_panel.select_id(int(note_id))
-        self._status(
+        self._list_status(
             "메모를 목록 맨 위에 고정했습니다." if pinned else "고정을 풀었습니다.",
             "success",
         )
@@ -801,12 +977,12 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         self.list_panel.select_id(note_id)
         self.editor.title_edit.setFocus()
         self.editor.title_edit.selectAll()
-        self._status("메모 안에 새 메모를 만들었습니다. 제목을 적어 주세요.", "success")
+        self._list_status("메모 안에 새 메모를 만들었습니다. 제목을 적어 주세요.", "success")
         self.shortcuts_changed.emit()
 
     def _page_removed(self, _note_id: int) -> None:
         """본문에서 페이지 줄을 지웠을 때.  그 페이지도 휴지통으로 갔다."""
-        self._status("페이지를 휴지통으로 옮겼습니다. 되돌리기로 되살릴 수 있습니다.", "info")
+        self._editor_status("페이지를 휴지통으로 옮겼습니다. 되돌리기로 되살릴 수 있습니다.", "info")
         self.shortcuts_changed.emit()
 
     def _page_created(self, _note_id: int) -> None:
@@ -815,19 +991,19 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         본문 페이지는 목록에 내놓지 않으므로 목록은 그대로 두고, 본문만 저장한다.
         """
         self.editor.flush_pending_save()
-        self._status("메모 안에 페이지를 넣었습니다. 줄을 누르면 열립니다.", "success")
+        self._editor_status("메모 안에 페이지를 넣었습니다. 줄을 누르면 열립니다.", "success")
         self.shortcuts_changed.emit()
 
     def move_note(self, note_id: int, parent_id: int, position: int) -> None:
         """목록에서 끌어 놓은 자리로 메모를 옮긴다."""
         if not self.store.set_note_parent(note_id, parent_id, position):
-            self._status("메모를 자기 자신이나 그 안의 메모 밑으로는 옮길 수 없습니다.", "warning")
+            self._list_status("메모를 자기 자신이나 그 안의 메모 밑으로는 옮길 수 없습니다.", "warning")
             return
         self.refresh()
         if parent_id:
             self.list_panel.expand_to(note_id)
         self.list_panel.select_id(note_id)
-        self._status("메모를 옮겼습니다.", "success")
+        self._list_status("메모를 옮겼습니다.", "success")
         self.shortcuts_changed.emit()
 
     def delete_selected_notes(self) -> None:
@@ -859,7 +1035,7 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
             self.standalone_window.note_id = None
             self.standalone_window.hide()
         self.refresh()
-        self._status(f"메모 {len(ids)}건을 휴지통으로 옮겼습니다.", "success")
+        self._list_status(f"메모 {len(ids)}건을 휴지통으로 옮겼습니다.", "success")
         self.shortcuts_changed.emit()
 
     def export_memos(self) -> None:
@@ -875,13 +1051,19 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         output_rows = [
             [
                 index, "포스트잇" if row["postit"] else "일반", str(row["title"]),
-                display_datetime(row["updated_at"]), plain_text_from_content(str(row["content"])),
+                (
+                    str(self.store.category(int(row["category_id"]))["name"])
+                    if row["category_id"] is not None and self.store.category(int(row["category_id"])) is not None
+                    else "미지정"
+                ),
+                str(row["sync_id"]), display_datetime(row["updated_at"]),
+                display_plain_text_from_content(str(row["content"])),
             ]
             for index, row in enumerate(rows, start=1)
         ]
         try:
             output = export_table_xlsx(
-                "메모목록", ["번호", "표시", "제목", "수정 시간", "내용"], output_rows, path,
+                "메모목록", ["번호", "표시", "제목", "카테고리", "메모 UUID", "수정 시간", "내용"], output_rows, path,
             )
         except Exception as exc:
             QMessageBox.warning(self, "Excel 내보내기 실패", str(exc))
@@ -892,6 +1074,9 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         self.editor.flush_pending_save()
         if self.standalone_window is None:
             self.standalone_window = StandaloneMemoEditorWindow(self.store, self)
+            scale = getattr(self, "_ui_scale", 1.0)
+            if scale != 1.0:
+                self.standalone_window.editor.format_toolbar.apply_ui_scale(scale)
         self.standalone_window.open_note(note_id)
 
     def set_auto_save_enabled(self, enabled: bool) -> None:
@@ -918,7 +1103,7 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
             self.store.set_monthly_rule(note_id, rule)
             message = f"{describe(rule)}에 포스트잇으로 띄웁니다."
         self.refresh()
-        self._status(message, "success")
+        self._editor_status(message, "success")
 
     def monthly_suggestions(self, today: date | None = None) -> list[dict]:
         """Repeats the user already makes by hand, offered — never applied."""
@@ -964,7 +1149,7 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         titles = sorted(self._dismissed_suggestions() | {title})
         self.store.set_setting(SUGGEST_DISMISSED_SETTING, json.dumps(titles, ensure_ascii=False))
         self.refresh_monthly_suggestion()
-        self._status("이 제안은 다시 띄우지 않습니다.", "info")
+        self._editor_status("이 제안은 다시 띄우지 않습니다.", "info")
 
     def accept_monthly_suggestion(self, suggestion: dict) -> int | None:
         """Turn the spotted repeat into a monthly checklist memo, ready to edit."""
@@ -978,7 +1163,7 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         self.refresh()
         self.tabs.setCurrentIndex(0)
         self.show_note(note_id)
-        self._status(f"{describe(rule)}에 ‘{title}’ 포스트잇을 띄웁니다.", "success")
+        self._editor_status(f"{describe(rule)}에 ‘{title}’ 포스트잇을 띄웁니다.", "success")
         return int(note_id)
 
     def refresh_monthly_suggestion(self) -> None:
@@ -1101,7 +1286,7 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         self.store.add_reminder(note_id, due, memo)
         self._sync_postit(note_id)
         self.refresh()
-        self._status(f"{minutes}분 후 알림을 설정했습니다.", "success")
+        self._editor_status(f"{minutes}분 후 알림을 설정했습니다.", "success")
 
     def edit_deadline(self, note_id: int | None, parent=None) -> None:
         if note_id is None:
@@ -1128,7 +1313,7 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         if self.standalone_window is not None and self.standalone_window.note_id == note_id:
             self.standalone_window.editor.set_note(self.store.note(note_id))
         self.refresh()
-        self._status(message, "success")
+        self._editor_status(message, "success")
 
     def _cycle_postits(self, current_id: int, backwards: bool) -> None:
         visible = [window for window in self.postits.values() if window.isVisible()]
@@ -1211,7 +1396,15 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         ceiling = round(available * self.STACKED_LIST_MAX_SHARE)
         return max(210, min(needed, ceiling))
 
+    def apply_ui_scale(self, scale: float) -> None:
+        """Keep fixed-size editor controls in step with the scaled app stylesheet."""
+        self._ui_scale = float(scale)
+        self.editor.format_toolbar.apply_ui_scale(self._ui_scale)
+        if self.standalone_window is not None:
+            self.standalone_window.editor.format_toolbar.apply_ui_scale(self._ui_scale)
+
     def update_responsive_layout(self, width: int) -> None:
+        self.editor.set_narrow_layout(width < self.HORIZONTAL_BREAKPOINT)
         desired = (
             Qt.Orientation.Vertical
             if width < self.HORIZONTAL_BREAKPOINT
@@ -1232,32 +1425,94 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
                 self.editor.setMinimumHeight(320)
                 available = self.splitter.height() or (list_height + 410)
                 self.splitter.setSizes([list_height, max(1, available - list_height), 0])
+                if self.editor.layout_mode == "compact":
+                    self._narrow_auto_hidden = not self.memo_list_hidden
+                    self.memo_list_hidden = True
+                    self.list_panel.hide()
+                    self.editor.set_wide_body(True)
             else:
-                self.editor_remainder.show()
+                if self._narrow_auto_hidden:
+                    self.memo_list_hidden = False
+                    self.list_panel.show()
+                    self.editor.set_wide_body(False)
+                    self._narrow_auto_hidden = False
+                self._sync_summary_visibility()
                 self.list_panel.setMinimumHeight(0)
                 self.editor.setMinimumHeight(0)
                 self.list_panel.setMinimumWidth(self._list_minimum_width())
                 self.editor_scroll.setMinimumWidth(self.EDITOR_MINIMUM_WIDTH)
                 self._horizontal_splitter_restored = False
                 self._restore_horizontal_splitter_ratios()
+        self._sync_summary_visibility()
         self.calendar.update_responsive_layout(width)
 
     def shutdown(self) -> None:
         if self.standalone_window is not None:
             self.standalone_window.shutdown()
         self.editor.shutdown()
+        self._finish_version_session(flush=False)
         for note_id in list(self.postits):
             self._close_postit(note_id)
         self.schedule_postit.shutdown()
         self.calendar.shutdown()
         self.summary.shutdown()
 
+    def _finish_version_session(self, flush: bool = True) -> None:
+        note_id = self.current_id
+        if note_id is None or self._session_version_hash is None:
+            return
+        if flush:
+            self.editor.flush_pending_save()
+        try:
+            current_hash = self.store.memo_data.snapshot_hash(note_id)
+        except ValueError:
+            self._session_version_hash = None
+            self._session_start_version_created = False
+            return
+        if current_hash != self._session_version_hash:
+            self.store.memo_data.create_version(note_id, kind="auto")
+        self._session_version_hash = None
+        self._session_start_version_created = False
+
     def _show_tab_status_hint(self, index: int) -> None:
         if 0 <= index < len(self.TAB_STATUS_HINTS):
             self._status(self.TAB_STATUS_HINTS[index], "info")
+        self._sync_status_visibility()
+
+    def _sync_status_visibility(self) -> None:
+        """Show list feedback in its footer and keep a fallback when it is hidden."""
+        memo_tab = hasattr(self, "tabs") and self.tabs.currentIndex() == 0
+        list_available = memo_tab and self.list_panel.isVisible() and not self.editor_fullscreen
+        list_status = getattr(self, "_status_target", "app") == "list"
+        self.list_panel.action_status.setVisible(list_available and list_status)
+        if memo_tab and list_status and list_available:
+            self._apply_status_style(self.status_label, self.TAB_STATUS_HINTS[0], "info")
+        self.status_label.setVisible(not self.editor_fullscreen)
+
+    def _apply_status_style(self, label, message: str, level: str) -> None:
+        label.setText(message)
+        label.setProperty("level", level)
+        label.style().unpolish(label)
+        label.style().polish(label)
+
+    def _editor_status(self, message: str, level: str = "info") -> None:
+        stamp = datetime.now().strftime("%H:%M")
+        self.editor.saved_status.setText(f"● {stamp} {message}")
+        self.editor.saved_status.setToolTip(message)
+        self.editor.saved_status.setProperty("level", level)
+        self.editor.saved_status.style().unpolish(self.editor.saved_status)
+        self.editor.saved_status.style().polish(self.editor.saved_status)
+
+    def _list_status(self, message: str, level: str = "info") -> None:
+        self._status_target = "list"
+        self._apply_status_style(self.list_panel.action_status, message, level)
+        memo_tab = hasattr(self, "tabs") and self.tabs.currentIndex() == 0
+        list_available = memo_tab and self.list_panel.isVisible() and not self.editor_fullscreen
+        if not list_available:
+            self._apply_status_style(self.status_label, message, level)
+        self._sync_status_visibility()
 
     def _status(self, message: str, level: str) -> None:
-        self.status_label.setText(message)
-        self.status_label.setProperty("level", level)
-        self.status_label.style().unpolish(self.status_label)
-        self.status_label.style().polish(self.status_label)
+        self._status_target = "app"
+        self._apply_status_style(self.status_label, message, level)
+        self._sync_status_visibility()

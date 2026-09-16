@@ -12,6 +12,7 @@ from .insert_menu import build_insert_menu
 from .deadline import countdown_text, deadline_badge_text, reminder_display_text
 from .rich_memo_edit import RichMemoTextEdit
 from .rich_text import plain_text_from_content
+from .note_shortcuts import bind_time_shortcuts
 from .window_geometry import WindowGeometryController
 
 
@@ -573,6 +574,16 @@ class PostitWindow(QWidget):
             shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
             shortcut.activated.connect(callback)
             self.shortcuts.append(shortcut)
+        self.reload_time_shortcuts()
+
+    def reload_time_shortcuts(self) -> None:
+        for shortcut in getattr(self, "time_shortcuts", []):
+            shortcut.setEnabled(False)
+            shortcut.deleteLater()
+        self.time_shortcuts = bind_time_shortcuts(
+            self, self.store,
+            lambda minutes, _label="": self.quick_reminder_requested.emit(self.note_id, minutes),
+        )
 
     def _install_window_event_filters(self) -> None:
         for widget in (self, *self.findChildren(QWidget)):

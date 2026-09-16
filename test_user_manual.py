@@ -20,6 +20,8 @@ from user_manual_content import MANUAL_SECTIONS, slide_list
 class UserManualContentTest(unittest.TestCase):
     def test_every_slide_has_a_picture_on_disk(self):
         for _section, slide in slide_list():
+            if not slide.get("image"):
+                continue
             path = IMAGE_DIR / slide["image"]
             self.assertTrue(path.exists(), f"그림이 없습니다: {path}")
 
@@ -42,6 +44,27 @@ class UserManualContentTest(unittest.TestCase):
         for section in MANUAL_SECTIONS:
             self.assertTrue(section["title"].strip())
             self.assertTrue(section["slides"])
+
+    def test_memo_format_help_matches_compact_preset_controls(self):
+        memo_slides = next(section["slides"] for section in MANUAL_SECTIONS
+                           if section["title"] == "메모")
+        text = "\n".join(
+            part
+            for slide in memo_slides[:2]
+            for part in (
+                [slide["title"], slide["lead"]]
+                + [marker["title"] + " " + marker["body"] for marker in slide["markers"]]
+            )
+        )
+        for phrase in (
+            "제목 아래", "서식 ▾", "26px", "24px", "가", "우클릭",
+            "현재 서식 저장", "이름 바꾸기", "초기화", "편집 단축키 설정",
+            "본문 아래 고정 줄", "메인 서식과 선택 상태",
+            "카테고리", "모두 접기", "Shift+Tab", "크기·줄 간격·색",
+        ):
+            self.assertIn(phrase, text)
+        self.assertNotIn("아래 「서식 ▾」", text)
+        self.assertNotIn("휴지통으로 이동", text)
 
 
 class UserManualDialogTest(unittest.TestCase):
@@ -73,8 +96,9 @@ class UserManualDialogTest(unittest.TestCase):
             self.app.processEvents()
             _section, slide = self.dialog._slides[index]
             shots = self._page_widgets(AnnotatedShot)
-            self.assertEqual(len(shots), 1)
-            self.assertEqual(len(shots[0]._markers), len(slide["markers"]))
+            self.assertEqual(len(shots), 1 if slide.get("image") else 0)
+            if shots:
+                self.assertEqual(len(shots[0]._markers), len(slide["markers"]))
             self.assertEqual(len(self._page_widgets(MarkerNote)), len(slide["markers"]))
 
     def test_next_and_previous_walk_the_whole_manual(self):

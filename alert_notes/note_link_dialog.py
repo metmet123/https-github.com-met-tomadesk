@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
     QListWidgetItem, QVBoxLayout,
 )
 
-from .rich_text import plain_text_from_content
+from .rich_text import display_plain_text_from_content
 
 
 class NoteLinkDialog(QDialog):
@@ -55,7 +55,7 @@ class NoteLinkDialog(QDialog):
                 # 자기 자신으로 가는 링크는 쓸모가 없다.
                 continue
             title = str(row["title"] or "제목 없음")
-            preview = plain_text_from_content(str(row["content"])).replace("\n", " ").strip()
+            preview = display_plain_text_from_content(str(row["content"])).replace("\n", " ").strip()
             item = QListWidgetItem(title if not preview else f"{title}    {preview[:40]}")
             item.setData(self.ID_ROLE, note_id)
             item.setToolTip(title)

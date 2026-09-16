@@ -1,0 +1,669 @@
+<title>제목 이모지·단어 필터</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
+<style>
+  :root{
+    --bg:#F5F6F8; --surface:#FFFFFF; --panel:#FAFBFC; --ink:#171B21; --ink-2:#5B6472; --ink-3:#8A93A3;
+    --accent:#3651E0; --accent-soft:#EEF1FD; --on-accent:#FFFFFF;
+    --border:#E2E5EA; --code-bg:#F1F2F5;
+    --bad:#D93A3F; --bad-soft:#FDEEEE; --on-bad:#FFFFFF;
+    --cat-dev:#2FA84F; --cat-work:#1F7AE0;
+    --shadow:0 8px 24px rgba(15,20,35,.07);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#111418; --surface:#1A1E24; --panel:#1F242B; --ink:#E7EAF0; --ink-2:#A6AEBB; --ink-3:#747D8B;
+      --accent:#8596FF; --accent-soft:#222A48; --on-accent:#0E1220;
+      --border:#2E343D; --code-bg:#232830;
+      --bad:#FF6F6F; --bad-soft:#3A2023; --on-bad:#1A0C0C;
+      --cat-dev:#5BD37A; --cat-work:#6AA8FF;
+      --shadow:0 8px 24px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#111418; --surface:#1A1E24; --panel:#1F242B; --ink:#E7EAF0; --ink-2:#A6AEBB; --ink-3:#747D8B;
+    --accent:#8596FF; --accent-soft:#222A48; --on-accent:#0E1220;
+    --border:#2E343D; --code-bg:#232830;
+    --bad:#FF6F6F; --bad-soft:#3A2023; --on-bad:#1A0C0C;
+    --cat-dev:#5BD37A; --cat-work:#6AA8FF;
+    --shadow:0 8px 24px rgba(0,0,0,.35);
+  }
+
+  html{scroll-behavior:smooth;}
+  @media (prefers-reduced-motion: reduce){html{scroll-behavior:auto;}}
+  *{box-sizing:border-box;}
+  body{background:var(--bg);color:var(--ink);
+    font-family:'Pretendard Variable','Pretendard','IBM Plex Sans KR',-apple-system,BlinkMacSystemFont,'Malgun Gothic',sans-serif;
+    line-height:1.65;-webkit-font-smoothing:antialiased;}
+  .doc{max-width:860px;margin:0 auto;padding-block:60px 96px;padding-inline:32px;}
+  a{color:var(--accent);}
+  a:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:3px;}
+
+  .crumb{display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;color:var(--ink-2);margin-bottom:16px;letter-spacing:.02em;}
+  .crumb .dot{color:var(--accent);}
+  h1{font-size:30px;line-height:1.38;font-weight:700;margin:0 0 20px;letter-spacing:-0.015em;text-wrap:balance;}
+  .subtitle{font-size:15.5px;color:var(--ink-2);max-width:680px;margin:0;}
+  .subtitle b{color:var(--ink);}
+  .subtitle .ref{color:var(--accent);font-weight:600;}
+  hr.div{border:none;border-top:1px solid var(--border);margin:26px 0;}
+  .meta{display:flex;gap:14px 40px;flex-wrap:wrap;}
+  .meta div{display:flex;flex-direction:column;gap:2px;}
+  .meta b{color:var(--ink-3);font-weight:600;font-size:11px;letter-spacing:.04em;}
+  .meta span{color:var(--ink-2);font-size:13.5px;}
+  .toc{display:flex;flex-wrap:wrap;gap:10px 28px;padding:0;margin:0;list-style:none;}
+  .toc a{display:flex;gap:8px;align-items:baseline;text-decoration:none;color:var(--ink);font-size:14px;}
+  .toc a:hover{color:var(--accent);}
+  .toc .num{color:var(--accent);font-weight:700;font-size:12px;font-variant-numeric:tabular-nums;}
+
+  section{margin-top:72px;scroll-margin-top:24px;}
+  .sec-label{font-size:12.5px;font-weight:700;color:var(--accent);margin-bottom:6px;letter-spacing:.02em;}
+  h2{font-size:23px;line-height:1.4;font-weight:700;margin:0 0 16px;letter-spacing:-0.01em;text-wrap:balance;}
+  h3{text-wrap:balance;}
+  h3.sub{font-size:16.5px;margin:40px 0 10px;}
+  p{font-size:14.5px;color:var(--ink-2);margin:0 0 14px;max-width:680px;}
+  p b, li b, td b{color:var(--ink);font-weight:700;}
+  .pill{background:var(--code-bg);color:var(--ink);border:1px solid var(--border);border-radius:5px;
+    padding:0 6px;font-family:Consolas,'SFMono-Regular',Menlo,monospace;font-size:.84em;white-space:nowrap;}
+
+  blockquote.callout{border-left:3px solid var(--accent);background:var(--accent-soft);color:var(--ink);
+    padding:14px 20px;border-radius:0 8px 8px 0;margin:24px 0;font-size:15px;max-width:680px;}
+  blockquote.callout .big{display:block;font-size:17px;font-weight:700;margin-bottom:4px;font-variant-numeric:tabular-nums;}
+  blockquote.callout.warn{border-left-color:var(--bad);background:var(--bad-soft);}
+
+  /* ── app mockups ── */
+  .mock-scroll{overflow-x:auto;padding:14px 4px 6px;}
+  .app{width:400px;margin:0 auto;background:var(--surface);border:1px solid var(--border);border-radius:10px;
+    overflow:visible;box-shadow:var(--shadow);font-family:'Malgun Gothic','IBM Plex Sans KR',sans-serif;font-size:12px;color:var(--ink);line-height:1.2;position:relative;}
+  .app.sm{width:360px;}
+  .bar{height:24px;background:var(--code-bg);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:5px;padding:0 10px;border-radius:10px 10px 0 0;}
+  .bar i{width:8px;height:8px;border-radius:50%;display:block;}
+  .bar i:nth-child(1){background:#E5484D;} .bar i:nth-child(2){background:#E5A100;} .bar i:nth-child(3){background:#2FA84F;}
+  .bar span{margin-left:8px;font-size:10.5px;color:var(--ink-3);}
+  .r{display:flex;align-items:center;gap:4px;padding:5px 10px;min-height:36px;white-space:nowrap;position:relative;}
+  .ttl{font-weight:700;font-size:13px;}
+  .grow{flex:1;}
+  .b{height:26px;min-width:28px;padding:0 7px;border:1px solid var(--border);border-radius:6px;background:var(--surface);
+    display:inline-flex;align-items:center;justify-content:center;gap:4px;font-size:12px;color:var(--ink);flex:none;}
+  .b.on{background:var(--accent);border-color:var(--accent);color:var(--on-accent);font-weight:600;}
+  .b.fill{background:var(--accent);border-color:var(--accent);color:var(--on-accent);}
+  .b.dd::after{content:"▾";font-size:9px;color:var(--ink-3);}
+  .b.on.dd::after{color:var(--on-accent);}
+  .b.off{color:var(--ink-3);opacity:.55;}
+  .b.squeeze{max-width:52px;overflow:hidden;justify-content:flex-start;}
+  .field{flex:1;min-width:0;height:28px;border:1px solid var(--border);border-radius:6px;display:flex;align-items:center;padding:0 8px;background:var(--surface);color:var(--ink-3);overflow:hidden;}
+  .dot-c{width:7px;height:7px;border-radius:50%;display:inline-block;flex:none;}
+
+  .tree{border-top:1px solid var(--border);margin:2px 0 0;}
+  .tr{display:grid;grid-template-columns:26px 1fr 58px 42px;align-items:center;height:26px;padding:0 10px;font-size:11.5px;border-bottom:1px solid var(--border);}
+  .tr.h{color:var(--ink-3);font-size:10.5px;background:var(--code-bg);height:22px;}
+  .tr .cb{width:11px;height:11px;border:1px solid var(--ink-3);border-radius:2px;display:block;}
+  .tr .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .tr .c{color:var(--ink-2);display:flex;align-items:center;gap:4px;}
+  .tr .d{color:var(--ink-3);font-variant-numeric:tabular-nums;}
+  .tr .ind{display:inline-block;width:16px;color:var(--ink-3);}
+  .tr.hid{color:var(--ink-3);}
+  .tr.hl{background:var(--accent-soft);}
+  .tr:last-child{border-bottom:none;}
+  .foot{height:10px;}
+
+  .mk{position:relative;display:inline-flex;gap:4px;align-items:center;flex:none;border-radius:7px;
+    outline:1.5px dashed var(--bad);outline-offset:2px;}
+  .mk.good{outline-color:var(--accent);}
+  .mk.wide{flex:1;min-width:0;}
+  .nb{position:absolute;top:-10px;left:-10px;width:18px;height:18px;border-radius:50%;background:var(--bad);color:var(--on-bad);
+    font:700 11px/18px system-ui,sans-serif;text-align:center;z-index:4;box-shadow:0 0 0 2px var(--surface);}
+  .mk.good .nb, .nb.good{background:var(--accent);color:var(--on-accent);}
+  .zone{position:relative;outline:1.5px dashed var(--bad);outline-offset:-3px;}
+  .zone.good{outline-color:var(--accent);}
+  .zone > .nb{top:-8px;left:-8px;}
+  td.nw{white-space:nowrap;}
+
+  .cap{font-size:12px;color:var(--ink-3);text-align:center;margin:10px auto 0;max-width:620px;}
+
+  .issues{list-style:none;padding:0;margin:20px 0 0;max-width:680px;}
+  .issues li{display:grid;grid-template-columns:22px 1fr;gap:10px;padding:11px 0;border-top:1px solid var(--border);font-size:14px;color:var(--ink-2);}
+  .issues li:first-child{border-top:none;}
+  .issues .n{width:20px;height:20px;border-radius:50%;background:var(--bad);color:var(--on-bad);font:700 11px/20px system-ui,sans-serif;text-align:center;margin-top:1px;}
+  .issues.good .n{background:var(--accent);color:var(--on-accent);}
+  .issues b{display:block;margin-bottom:1px;}
+
+  /* popup */
+  .pop{position:absolute;background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:var(--shadow);padding:4px;min-width:150px;z-index:5;font-size:12px;}
+  .pop .ph{font-size:10.5px;color:var(--ink-3);padding:4px 8px 2px;}
+  .pop .it{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:5px 8px;border-radius:4px;}
+  .pop .it.hi{background:var(--accent-soft);}
+  .pop .it .cnt{color:var(--ink-3);font-variant-numeric:tabular-nums;font-size:11px;}
+  .pop .it.dim{color:var(--ink-3);}
+  .pop .sep{border-top:1px solid var(--border);margin:3px 2px;}
+  .pop .note{font-size:10.5px;color:var(--ink-3);padding:3px 8px 4px;}
+  .tip{position:absolute;background:var(--ink);color:var(--surface);font-size:10.5px;padding:5px 8px;border-radius:5px;white-space:nowrap;line-height:1.4;z-index:6;}
+
+  /* options */
+  .opts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:22px 0 8px;}
+  .opt{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:18px;display:flex;flex-direction:column;gap:10px;min-width:0;}
+  .opt.rec{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent);}
+  .opt-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap;}
+  .opt h3{font-size:15.5px;margin:0;line-height:1.4;}
+  .opt .refp{font-size:12px;color:var(--ink-3);margin-top:2px;}
+  .rec-tag{font-size:11px;font-weight:700;color:var(--on-accent);background:var(--accent);border-radius:4px;padding:1px 7px;white-space:nowrap;}
+  .stage{background:var(--code-bg);border-radius:8px;position:relative;padding:14px 10px;overflow-x:auto;}
+  .stage.tall{min-height:230px;}
+  .stage .app{width:320px;box-shadow:none;}
+  .opt p{font-size:13.5px;margin:0;}
+  .width{font-size:12.5px;font-weight:700;color:var(--accent);font-variant-numeric:tabular-nums;}
+
+  /* tables */
+  .tbl{overflow-x:auto;margin:18px 0 8px;}
+  table{width:100%;min-width:600px;border-collapse:collapse;font-size:13.5px;}
+  th,td{padding:10px 12px;border-bottom:1px solid var(--border);text-align:left;vertical-align:top;}
+  thead th{color:var(--ink-3);font-size:11.5px;font-weight:600;background:var(--code-bg);letter-spacing:.02em;}
+  tbody th{color:var(--ink);font-weight:600;white-space:nowrap;}
+  td{color:var(--ink-2);font-variant-numeric:tabular-nums;}
+  td.em{font-size:15px;}
+  .rc{background:var(--accent-soft);}
+  thead th.rc{color:var(--accent);}
+  .no{color:var(--ink-3);}
+  .warn-t{color:var(--bad);font-weight:600;}
+
+  .rules{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:18px 0;}
+  .rule{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:16px 18px;}
+  .rule h3{font-size:15px;margin:0 0 8px;}
+  .rule ol{margin:0;padding-left:18px;font-size:13.5px;color:var(--ink-2);display:flex;flex-direction:column;gap:6px;}
+
+  .state{display:block;text-align:center;font-size:11.5px;font-weight:700;color:var(--ink-3);letter-spacing:.06em;margin-top:14px;}
+
+  .qs{display:flex;flex-direction:column;gap:22px;margin-top:20px;max-width:720px;}
+  .q-title{font-size:15px;font-weight:700;color:var(--ink);margin-bottom:8px;display:flex;gap:10px;align-items:baseline;}
+  .q-title .qn{color:var(--accent);font-size:12.5px;font-variant-numeric:tabular-nums;}
+  .q-opts{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;}
+  .q-opts li{display:grid;grid-template-columns:24px 1fr;gap:8px;padding:8px 0;border-top:1px solid var(--border);font-size:14px;color:var(--ink-2);}
+  .q-opts li:first-child{border-top:none;}
+  .q-opts .ol{font-weight:700;color:var(--ink-3);}
+  .q-opts li.pick .ol{color:var(--accent);}
+  .closing{font-size:15px;color:var(--ink);max-width:680px;margin-top:30px;}
+
+  .done{display:flex;flex-wrap:wrap;gap:6px 14px;margin:14px 0 0;padding:0;list-style:none;font-size:13px;color:var(--ink-2);}
+  .done li::before{content:"✓ ";color:var(--accent);font-weight:700;}
+
+  @media (max-width:760px){
+    .opts,.rules{grid-template-columns:1fr;}
+  }
+  @media (max-width:600px){
+    .doc{padding-inline:16px;padding-block:36px 72px;}
+    h1{font-size:24px;}
+    h2{font-size:20px;}
+  }
+
+  /* v2 additions */
+  .opts.three{grid-template-columns:repeat(3,minmax(0,1fr));}
+  .b .cntg{color:var(--ink-3);font-size:10.5px;font-variant-numeric:tabular-nums;}
+  .b.empty{color:var(--ink-3);border-style:dashed;min-width:30px;padding:0 6px;}
+  .b.dot-badge{position:relative;}
+  .b.dot-badge::before{content:"";position:absolute;top:-3px;right:-3px;width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 2px var(--surface);}
+  .rchip{height:22px;padding:0 8px;border-radius:11px;background:var(--accent-soft);color:var(--ink-2);font-size:11px;display:inline-flex;align-items:center;gap:3px;flex:none;max-width:120px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}
+  .pop .it .sub{color:var(--ink-3);font-size:10.5px;}
+  .pop .it .chk{width:12px;color:var(--accent);font-weight:700;}
+  .pop .grp{font-size:10px;color:var(--ink-3);padding:4px 8px 1px;letter-spacing:.02em;}
+  .explain{position:absolute;background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow);padding:12px 14px;width:230px;z-index:6;font-size:11.5px;line-height:1.5;color:var(--ink-2);white-space:normal;}
+  .explain b{color:var(--ink);font-size:12.5px;display:block;margin-bottom:4px;}
+  .explain .ex{background:var(--code-bg);border-radius:6px;padding:6px 8px;margin:8px 0;color:var(--ink);font-size:11px;line-height:1.6;}
+  .explain .ok{display:flex;justify-content:flex-end;}
+  .dlg{width:360px;margin:0 auto;background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow);font-family:'Malgun Gothic','IBM Plex Sans KR',sans-serif;font-size:12px;color:var(--ink);line-height:1.2;overflow:hidden;}
+  .dlg .lst{margin:10px;border:1px solid var(--border);border-radius:6px;}
+  .dlg .li{display:grid;grid-template-columns:18px 14px 1fr auto;gap:8px;align-items:center;height:30px;padding:0 10px;border-bottom:1px solid var(--border);}
+  .dlg .li:last-child{border-bottom:none;}
+  .dlg .li.sel{background:var(--accent-soft);}
+  .dlg .grip{color:var(--ink-3);font-size:11px;}
+  .dlg .cbx{width:13px;height:13px;border:1px solid var(--ink-3);border-radius:3px;display:inline-flex;align-items:center;justify-content:center;font-size:9px;}
+  .dlg .cbx.on{background:var(--accent);border-color:var(--accent);color:var(--on-accent);}
+  .dlg .hd{display:grid;grid-template-columns:18px 14px 1fr auto;gap:8px;padding:6px 20px 0;font-size:10.5px;color:var(--ink-3);}
+  .dlg .acts{display:flex;gap:4px;padding:0 10px 10px;flex-wrap:wrap;}
+  .versus{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:18px 0 6px;}
+  .versus .col{min-width:0;}
+  .answer{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:16px 18px;max-width:680px;margin:18px 0;}
+  .answer h3{font-size:15px;margin:0 0 6px;}
+  .answer p{margin:0 0 8px;font-size:14px;}
+  .answer p:last-child{margin-bottom:0;}
+  .decided{list-style:none;padding:0;margin:14px 0 0;max-width:720px;}
+  .decided li{display:grid;grid-template-columns:120px 1fr;gap:12px;padding:9px 0;border-top:1px solid var(--border);font-size:14px;color:var(--ink-2);}
+  .decided li:first-child{border-top:none;}
+  .decided .k{color:var(--ink);font-weight:600;}
+  .decided .chg{color:var(--accent);font-weight:600;font-size:12px;margin-left:4px;}
+  @media (max-width:760px){ .opts.three,.versus{grid-template-columns:1fr;} .decided li{grid-template-columns:1fr;gap:2px;} }
+</style>
+
+<div class="doc">
+
+  <div class="crumb"><span class="dot">●</span> TOMADESK · 메모 목록 제목 분류 필터 · 2판</div>
+  <h1>분류는 [대괄호 머리말]로,<br>필터 줄은 칩 · 더보기 두 덩어리로</h1>
+  <p class="subtitle">
+    1판에서는 제목의 <b>첫 단어</b>를 분류로 잡았습니다. 하지만 메모가 많아지면 <b>"오늘", "새", "2026"처럼 우연히 겹친 단어</b>까지 목록에 올라와 길어집니다.
+    이 문서는 첫 단어 방식과 <b>대괄호 머리말 방식</b>을 비교합니다. 이어서 필터 줄 정리(<b>항상 보이는 카테고리 설정</b>, 더보기 오른쪽 끝)와
+    <b>대표값을 보여 주는 이모지·머리말 버튼</b>을 설계합니다. 질문하신 <span class="ref">"보기: 기"</span>가 무엇인지도 03에서 설명합니다.
+  </p>
+  <hr class="div">
+  <div class="meta">
+    <div><b>대상</b><span>메모 목록 필터 · 카테고리 설정 창</span></div>
+    <div><b>스택</b><span>Python · PyQt6</span></div>
+    <div><b>기준 코드</b><span><span class="pill">memo_list.py</span> 09-15판 · <span class="pill">editor.py</span> <span class="pill">panel.py</span>는 오늘 바뀜</span></div>
+    <div><b>작성일</b><span>2026-09-16 (2판)</span></div>
+  </div>
+  <hr class="div">
+  <ul class="toc">
+    <li><a href="#s0"><span class="num">00</span> 정해진 것</a></li>
+    <li><a href="#s1"><span class="num">01</span> 첫 단어 vs 머리말</a></li>
+    <li><a href="#s2"><span class="num">02</span> 이모지·머리말 버튼</a></li>
+    <li><a href="#s3"><span class="num">03</span> 필터 줄 정리</a></li>
+    <li><a href="#s4"><span class="num">04</span> 카테고리 설정</a></li>
+    <li><a href="#s5"><span class="num">05</span> 구현 단계</a></li>
+    <li><a href="#s6"><span class="num">06</span> 결정할 것</a></li>
+  </ul>
+
+  <!-- 00 -->
+  <section id="s0">
+    <div class="sec-label">00 — 지난번에 정해진 것</div>
+    <h2>1판 결정 네 가지</h2>
+    <ul class="decided">
+      <li><span class="k">버튼 자리</span><span>검색 칸 오른쪽에 두 개 따로</span></li>
+      <li><span class="k">대괄호 제목</span><span><span class="pill">[TD]메모기능</span> → <span class="pill">[TD]</span>로 뗌. 이번 01의 비교 대상이 됩니다</span></li>
+      <li><span class="k">앱 재실행 시</span><span><b>이모지·머리말 필터는 매번 풀림</b> <span class="chg">바뀜</span> — 카테고리 필터는 지금처럼 기억</span></li>
+      <li><span class="k">함께 쓸 때</span><span>카테고리 · 검색 · 이모지 · 머리말 모두 AND, 걸리면 목록은 평평하게</span></li>
+    </ul>
+  </section>
+
+  <!-- 01 -->
+  <section id="s1">
+    <div class="sec-label">01 — 분류 규칙 비교</div>
+    <h2>머리말 방식을 권합니다. 목록에 오르는 건 직접 붙인 것뿐입니다</h2>
+    <p><b>첫 단어 방식은 "이 단어로 묶겠다"는 뜻이 없는 단어까지 셉니다.</b> 아래는 흔한 메모 제목 20개로 두 방식을 돌려 본 결과입니다(예시 제목이며, 규칙은 파이썬으로 실제 실행).</p>
+
+    <div class="versus">
+      <div class="col">
+        <span class="state">A. 첫 단어 (1판)</span>
+        <div class="stage" style="min-height:300px;margin-top:8px">
+          <div style="position:relative;width:200px;margin:0 auto;font-family:'Malgun Gothic','IBM Plex Sans KR',sans-serif;color:var(--ink);line-height:1.2;">
+            <div class="pop" style="position:relative;min-width:0;width:200px">
+              <div class="ph">제목 첫 단어 · 2개 이상</div>
+              <div class="it"><span>[TD]</span><span class="cnt">3</span></div>
+              <div class="it"><span>개발</span><span class="cnt">2</span></div>
+              <div class="it"><span>오늘</span><span class="cnt">2</span></div>
+              <div class="it"><span>회의록</span><span class="cnt">2</span></div>
+              <div class="it"><span>새</span><span class="cnt">2</span></div>
+              <div class="it"><span>[토마]</span><span class="cnt">2</span></div>
+              <div class="it"><span>[모리]</span><span class="cnt">2</span></div>
+              <div class="it"><span>2026</span><span class="cnt">2</span></div>
+              <div class="it"><span>업무</span><span class="cnt">2</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="col">
+        <span class="state">B. 대괄호 머리말만 (추천)</span>
+        <div class="stage" style="min-height:300px;margin-top:8px">
+          <div style="position:relative;width:200px;margin:0 auto;font-family:'Malgun Gothic','IBM Plex Sans KR',sans-serif;color:var(--ink);line-height:1.2;">
+            <div class="pop" style="position:relative;min-width:0;width:200px">
+              <div class="ph">제목 앞 [머리말]</div>
+              <div class="it"><span>[TD]</span><span class="cnt">3</span></div>
+              <div class="it"><span>[토마]</span><span class="cnt">2</span></div>
+              <div class="it"><span>[모리]</span><span class="cnt">2</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="cap">같은 20개 제목에서 A는 9개, B는 3개. A의 "개발"·"업무"는 카테고리 이름과 같아 칩과 헷갈립니다.</p>
+
+    <div class="tbl">
+      <table>
+        <thead><tr><th>기준</th><th>A. 첫 단어</th><th class="rc">B. 대괄호 머리말만</th><th>C. 머리말 우선, 없으면 첫 단어</th></tr></thead>
+        <tbody>
+          <tr><th>목록 길이</th><td class="warn-t">메모 수에 따라 계속 늘어남</td><td class="rc"><b>직접 붙인 머리말 수만큼</b></td><td>A와 거의 같음</td></tr>
+          <tr><th>엉뚱한 묶음</th><td>"오늘", "새", "2026"</td><td class="rc">없음</td><td>A와 같음</td></tr>
+          <tr><th>지금 제목 그대로 쓰기</th><td>바로 묶임</td><td class="rc">제목에 <span class="pill">[토마]</span>를 붙여야 함</td><td>바로 묶임</td></tr>
+          <tr><th>1개뿐인 값</th><td>숨겨야 함(2개 이상)</td><td class="rc"><b>보여 줌</b> — 일부러 붙인 것이므로</td><td>규칙이 둘이라 설명이 어려움</td></tr>
+          <tr><th>이모지 버튼과의 일관성</th><td>규칙이 다름</td><td class="rc"><b>같음</b> — "제목 앞에 붙이면 분류"</td><td>다름</td></tr>
+          <tr><th>기존 습관</th><td>—</td><td class="rc"><span class="pill">[TD]</span> 머리말을 이미 씀</td><td>—</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <blockquote class="callout">
+      <span class="big">예시 20개 제목: 목록 9개 → 3개</span>
+      B는 <b>사용자가 [ ]를 붙인 순간에만 분류가 생깁니다.</b> 메모가 1,000개가 되어도 머리말을 10종류 쓰면 목록은 10줄입니다.
+    </blockquote>
+
+    <h3 class="sub">머리말 인식 규칙 (B)</h3>
+    <div class="tbl">
+      <table>
+        <thead><tr><th>제목</th><th>이모지</th><th>머리말</th><th>왜</th></tr></thead>
+        <tbody>
+          <tr><th>[토마] 밥주기</th><td class="no">없음</td><td>[토마]</td><td>기본</td></tr>
+          <tr><th>✨[토마] 밥주기</th><td class="em">✨</td><td>[토마]</td><td>앞 이모지는 이모지 버튼, 그 뒤 괄호는 머리말</td></tr>
+          <tr><th>[ 토마 ]장난감</th><td class="no">없음</td><td>[토마]</td><td>괄호 안 앞뒤 공백 무시</td></tr>
+          <tr><th>[td] 정리</th><td class="no">없음</td><td>[TD]와 같음</td><td>영어 대소문자 무시, 처음 나온 모양으로 표시</td></tr>
+          <tr><th>[토마][병원] 예약</th><td class="no">없음</td><td>[토마]</td><td>첫 머리말만</td></tr>
+          <tr><th>밥주기 [토마]</th><td class="no">없음</td><td class="no">없음</td><td>제목 맨 앞에 있을 때만</td></tr>
+          <tr><th>[토마 밥주기</th><td class="no">없음</td><td class="no">없음</td><td>닫는 괄호 없음</td></tr>
+          <tr><th>[] 빈칸</th><td class="no">없음</td><td class="no">없음</td><td>괄호 안이 비어 있음 (안쪽 1~20자만)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3 class="sub">B의 비용을 줄이는 방법 — 제목 칸 자동완성</h3>
+    <p>B의 약점은 <b>매번 괄호와 이름을 정확히 입력해야 한다</b>는 점입니다(<span class="pill">[토마]</span>와 <span class="pill">[토미]</span>는 다른 머리말). 그래서 제목 칸에서 <span class="pill">[</span>를 치면 <b>이미 쓰고 있는 머리말 목록</b>이 뜨게 합니다. 고르면 <span class="pill">[토마] </span>까지 채워지고 커서가 뒤로 갑니다.</p>
+    <div class="mock-scroll">
+      <div class="app" style="width:360px" role="img" aria-label="제목 칸 머리말 자동완성 목업">
+        <div class="r" style="padding-bottom:120px;align-items:flex-start;padding-top:10px">
+          <span style="color:var(--ink-2);font-size:11.5px;margin-top:7px">제목</span>
+          <span style="position:relative;flex:1;min-width:0">
+            <span class="field" style="color:var(--ink);border-color:var(--accent)">[<span style="display:inline-block;width:1px;height:14px;background:var(--ink);margin-left:1px"></span></span>
+            <span class="pop" style="top:32px;left:0;min-width:180px">
+              <span class="it hi" style="display:flex"><span>[TD]</span><span class="cnt">3</span></span>
+              <span class="it" style="display:flex"><span>[토마]</span><span class="cnt">2</span></span>
+              <span class="it" style="display:flex"><span>[모리]</span><span class="cnt">2</span></span>
+            </span>
+          </span>
+        </div>
+      </div>
+    </div>
+    <p class="cap">많이 쓴 순서로 뜨고, 글자를 더 치면 좁혀집니다. 목록에 없는 새 이름은 그냥 계속 입력하면 됩니다.</p>
+  </section>
+
+  <!-- 02 -->
+  <section id="s2">
+    <div class="sec-label">02 — 이모지·머리말 버튼</div>
+    <h2>버튼에는 가장 많이 쓴 값을, 값이 없으면 빈 아이콘 하나만</h2>
+    <p>버튼은 세 가지 상태를 가집니다. <b>대표값(필터 안 걸림)과 걸린 값이 헷갈리지 않도록</b>, 대표값은 테두리만 두고 옆에 회색 개수를 붙입니다. 걸린 값은 채움색에 개수를 뺍니다.</p>
+
+    <div class="opts three">
+      <div class="opt">
+        <div class="opt-head"><div><h3>① 값 있음</h3><div class="refp">필터 안 걸림</div></div></div>
+        <div class="stage" style="display:flex;justify-content:center;gap:4px;font-family:'Malgun Gothic','IBM Plex Sans KR',sans-serif;font-size:12px;color:var(--ink);line-height:1.2;">
+          <span class="b dd">✨ <span class="cntg">5</span></span><span class="b dd">[TD] <span class="cntg">3</span></span>
+        </div>
+        <p><b>가장 많은 값</b>과 개수. 개수가 같으면 최근에 고친 메모의 값. 누르면 목록이 뜹니다(바로 걸리지 않음).</p>
+      </div>
+      <div class="opt">
+        <div class="opt-head"><div><h3>② 필터 걸림</h3><div class="refp">✨를 고른 뒤</div></div></div>
+        <div class="stage" style="display:flex;justify-content:center;gap:4px;font-family:'Malgun Gothic','IBM Plex Sans KR',sans-serif;font-size:12px;color:var(--ink);line-height:1.2;">
+          <span class="b dd on">✨</span><span class="b dd empty">[ ]</span>
+        </div>
+        <p>고른 값이 <b>채움색</b>으로. ✨ 메모 중에 머리말이 없으면 옆 버튼은 ③ 상태가 됩니다.</p>
+      </div>
+      <div class="opt">
+        <div class="opt-head"><div><h3>③ 값 없음</h3><div class="refp">새로 설치했을 때</div></div></div>
+        <div class="stage" style="display:flex;justify-content:center;gap:4px;font-family:'Malgun Gothic','IBM Plex Sans KR',sans-serif;font-size:12px;color:var(--ink);line-height:1.2;">
+          <span class="b empty">☺</span><span class="b empty">[ ]</span>
+        </div>
+        <p><b>점선 테두리 아이콘 하나만</b>. <span class="pill">▾</span>도 없습니다. 누르면 아래 설명 창이 뜹니다.</p>
+      </div>
+    </div>
+
+    <div class="versus">
+      <div class="col">
+        <span class="state">이모지 버튼 설명 창</span>
+        <div class="stage" style="min-height:250px;margin-top:8px">
+          <div style="position:relative;width:240px;margin:0 auto;font-family:'Malgun Gothic','IBM Plex Sans KR',sans-serif;font-size:12px;color:var(--ink);line-height:1.2;">
+            <div style="display:flex;justify-content:flex-end"><span class="b empty" style="border-color:var(--accent)">☺</span></div>
+            <div class="explain" style="top:34px;right:0">
+              <b>이모지로 모아 보기</b>
+              메모 제목 <b style="display:inline;font-size:11.5px">맨 앞에 이모지</b>를 붙이면 같은 이모지끼리 모아 볼 수 있어요.
+              <div class="ex">✨테스트 메모<br>✨개발용 &nbsp;→&nbsp; ✨ 2</div>
+              <div class="ok"><span class="b fill">확인</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="col">
+        <span class="state">머리말 버튼 설명 창</span>
+        <div class="stage" style="min-height:250px;margin-top:8px">
+          <div style="position:relative;width:240px;margin:0 auto;font-family:'Malgun Gothic','IBM Plex Sans KR',sans-serif;font-size:12px;color:var(--ink);line-height:1.2;">
+            <div style="display:flex;justify-content:flex-end"><span class="b empty" style="border-color:var(--accent)">[ ]</span></div>
+            <div class="explain" style="top:34px;right:0">
+              <b>머리말로 모아 보기</b>
+              제목 맨 앞에 <b style="display:inline;font-size:11.5px">[토마]</b>처럼 대괄호로 머리말을 붙이면 같은 머리말끼리 모아 볼 수 있어요.
+              <div class="ex">[토마] 밥주기<br>[토마] 장난감사기 &nbsp;→&nbsp; [토마] 2</div>
+              <div class="ok"><span class="b fill">확인</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="cap">설명 창은 바깥을 누르거나 확인을 누르면 닫히는 말풍선입니다. 앱을 멈추게 하는 대화 상자가 아닙니다.</p>
+
+    <p>카테고리 칩이나 검색이 걸린 상태에서 해당 값이 없을 때도 ③이 됩니다. 그때 설명 창 첫 줄은 <b>"지금 조건(● 개발)에는 이모지가 붙은 메모가 없어요"</b>로 바꿔, 기능을 모르는 것처럼 안내하지 않습니다.</p>
+
+    <div class="tbl">
+      <table>
+        <thead><tr><th>버튼 폭</th><th>이모지</th><th>머리말</th></tr></thead>
+        <tbody>
+          <tr><th>③ 값 없음</th><td>약 30px</td><td>약 30px</td></tr>
+          <tr><th>① 대표값</th><td>약 50px (<span class="pill">✨ 5 ▾</span>)</td><td>약 60~96px, 넘으면 말줄임 (<span class="pill">[메모기능…] 3 ▾</span>)</td></tr>
+          <tr><th>400px 목록에서 검색 칸</th><td colspan="2">최소 약 190px 남음</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 03 -->
+  <section id="s3">
+    <div class="sec-label">03 — 필터 줄 정리</div>
+    <h2>칩은 왼쪽, 더보기는 오른쪽 끝. 보기·정렬은 더보기 안으로</h2>
+
+    <div class="answer">
+      <h3>"보기: 기"는 무엇인가요?</h3>
+      <p><b>목록 보기 방식 드롭다운</b>입니다. <span class="pill">보기: 기본</span>(부모·자식 계층)과 <span class="pill">보기: 카테고리별</span>(카테고리로 묶기) 두 가지가 있고, 옆에는 <span class="pill">정렬: 기본</span> 드롭다운이 있습니다. 1판 목업에서 폭이 모자라 글자가 잘린 모습을 그대로 그렸습니다.</p>
+      <p>보내 주신 실제 화면에는 이 두 드롭다운이 <b>아예 보이지 않습니다.</b> 칩에 자리를 다 내주고 폭이 0px로 줄어든 상태로, 보완 계획에서 <span class="pill">F9</span>로 적어 둔 문제입니다.</p>
+    </div>
+
+    <div class="versus">
+      <div class="col">
+        <span class="state">지금 (보내 주신 화면)</span>
+        <div class="mock-scroll">
+          <div class="app" style="width:360px" role="img" aria-label="현재 필터 줄">
+            <div class="r"><span class="ttl">메모 목록</span><span class="grow"></span><span class="b">모두 접기</span><span class="b fill">+ 새 메모</span></div>
+            <div class="r"><span class="field">메모 제목과 내용 검색</span></div>
+            <div class="r"><span class="b">전체</span><span class="b">업무</span><span class="b">개발</span><span class="b">자료</span><span class="mk"><span class="nb">1</span><span style="display:inline-block;width:14px;height:22px"></span></span></div>
+            <div class="r" style="min-height:30px"><span class="rchip">↩ 개발</span><span class="rchip">↩ [TD]메모기능 개선…</span><span class="rchip">↩ 개발 명령어 정리</span></div>
+            <div class="foot"></div>
+          </div>
+        </div>
+      </div>
+      <div class="col">
+        <span class="state">바꾸면</span>
+        <div class="mock-scroll">
+          <div class="app" style="width:360px" role="img" aria-label="바꾼 필터 줄">
+            <div class="r"><span class="ttl">메모 목록</span><span class="grow"></span><span class="b">모두 접기</span><span class="b fill">+ 새 메모</span></div>
+            <div class="r"><span class="field">메모 제목과 내용 검색</span><span class="b dd">✨ <span class="cntg">5</span></span><span class="b dd">[TD] <span class="cntg">3</span></span></div>
+            <div class="r"><span class="b on">전체</span><span class="b"><span class="dot-c" style="background:#3b82f6"></span>업무</span><span class="b"><span class="dot-c" style="background:#8b5cf6"></span>개발</span><span class="grow"></span><span class="mk good"><span class="nb">2</span><span class="b dd">더보기</span></span></div>
+            <div class="r" style="min-height:30px"><span class="rchip">↩ 개발</span><span class="rchip">↩ [TD]메모기능 개선…</span><span class="rchip">↩ 개발 명령어 정리</span></div>
+            <div class="foot"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <ol class="issues">
+      <li><span class="n">1</span><div><b>보기·정렬 드롭다운이 폭 0px로 사라짐</b>코드에는 있지만 화면에서는 찾을 수 없습니다. 지금 계층 보기·기본 정렬이 고정된 것처럼 보이는 이유입니다.</div></li>
+    </ol>
+    <ol class="issues good">
+      <li><span class="n">2</span><div><b>더보기는 늘 오른쪽 끝에 있음</b>칩 뒤 빈 공간을 밀어내고 오른쪽에 붙습니다. 카테고리가 모두 칩으로 보여도 보기·정렬·설정이 들어 있어 사라지지 않습니다.</div></li>
+    </ol>
+
+    <div class="versus" style="margin-top:28px">
+      <div class="col">
+        <span class="state">더보기를 누르면</span>
+        <div class="stage" style="min-height:330px;margin-top:8px">
+          <div style="position:relative;width:250px;margin:0 auto;font-family:'Malgun Gothic','IBM Plex Sans KR',sans-serif;font-size:12px;color:var(--ink);line-height:1.2;">
+            <div style="display:flex;justify-content:flex-end"><span class="b dd" style="border-color:var(--accent)">더보기</span></div>
+            <div class="pop" style="top:32px;right:0;min-width:210px">
+              <div class="grp">카테고리</div>
+              <div class="it"><span><span class="chk"></span><span class="dot-c" style="background:#10b981"></span> 자료</span></div>
+              <div class="it"><span><span class="chk"></span>미지정</span></div>
+              <div class="sep"></div>
+              <div class="it"><span>보기</span><span class="sub">기본 ▸</span></div>
+              <div class="it"><span>정렬</span><span class="sub">기본 ▸</span></div>
+              <div class="sep"></div>
+              <div class="it"><span>⚙ 카테고리 설정…</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="col">
+        <span class="state">숨은 카테고리를 골랐거나 보기·정렬을 바꿨을 때</span>
+        <div class="stage" style="min-height:330px;margin-top:8px;display:flex;flex-direction:column;gap:18px;align-items:center;justify-content:center">
+          <div style="display:flex;gap:4px;font-family:'Malgun Gothic','IBM Plex Sans KR',sans-serif;font-size:12px;color:var(--ink);line-height:1.2;">
+            <span class="b">전체</span><span class="b">업무</span><span class="b">개발</span><span style="width:40px"></span><span class="b dd on"><span class="dot-c" style="background:#fff"></span>자료</span>
+          </div>
+          <p style="font-size:12px;text-align:center;margin:0">더보기 자리에 <b>고른 카테고리 이름</b>이 채움색으로</p>
+          <div style="display:flex;gap:4px;font-family:'Malgun Gothic','IBM Plex Sans KR',sans-serif;font-size:12px;color:var(--ink);line-height:1.2;">
+            <span class="b on">전체</span><span class="b">업무</span><span class="b">개발</span><span style="width:40px"></span><span class="b dd dot-badge">더보기</span>
+          </div>
+          <p style="font-size:12px;text-align:center;margin:0">보기·정렬이 기본값이 아니면 <b>파란 점</b></p>
+        </div>
+      </div>
+    </div>
+    <p class="cap">보기·정렬은 자주 바꾸는 설정이 아니라 메뉴 안(2번 클릭)으로 옮기고, 바뀐 상태는 점으로 알려 줍니다.</p>
+  </section>
+
+  <!-- 04 -->
+  <section id="s4">
+    <div class="sec-label">04 — 카테고리 설정</div>
+    <h2>이미 있는 "카테고리 관리" 창에 체크 칸 하나를 더합니다</h2>
+    <p>카테고리 이름·색·순서를 바꾸는 창은 <b>이미 있습니다.</b> 편집기 카테고리 칩(<span class="pill">● 개발 ▾</span>) 메뉴의 <span class="pill">카테고리 관리</span>에서 열리고, 추가·이름 변경·색상·위로·아래로·삭제가 됩니다. 다만 목록 쪽에서는 열 수 없고, 어떤 칩을 보일지 고르는 칸이 없습니다.</p>
+
+    <blockquote class="callout">
+      <span class="big">분류 자체를 바꾸는 기능은 새로 만들 필요가 없습니다</span>
+      이번에 더하는 건 <b>"목록에 항상 보이기" 체크 칸 한 줄</b>과, 더보기에서 같은 창을 여는 입구 하나입니다. 복잡도는 거의 늘지 않습니다.
+    </blockquote>
+
+    <div class="versus">
+      <div class="col">
+        <span class="state">지금</span>
+        <div class="mock-scroll">
+          <div class="dlg" style="width:330px" role="img" aria-label="현재 카테고리 관리 창">
+            <div class="bar"><i></i><i></i><i></i><span>메모 카테고리 관리</span></div>
+            <div class="lst">
+              <div class="li" style="grid-template-columns:1fr"><span style="color:#3b82f6">업무</span></div>
+              <div class="li sel" style="grid-template-columns:1fr"><span style="color:#8b5cf6">개발</span></div>
+              <div class="li" style="grid-template-columns:1fr"><span style="color:#10b981">자료</span></div>
+            </div>
+            <div class="acts"><span class="b">추가</span><span class="b">이름 변경</span><span class="b">색상</span><span class="b">위로</span><span class="b">아래로</span><span class="b">삭제</span></div>
+            <div class="acts" style="justify-content:flex-end"><span class="b">닫기</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="col">
+        <span class="state">바꾸면</span>
+        <div class="mock-scroll">
+          <div class="dlg" style="width:330px" role="img" aria-label="바꾼 카테고리 설정 창">
+            <div class="bar"><i></i><i></i><i></i><span>메모 카테고리 설정</span></div>
+            <div class="hd"><span></span><span></span><span>이름 (끌어서 순서 바꾸기)</span><span>항상 보이기</span></div>
+            <div class="lst">
+              <div class="li"><span class="grip">⋮⋮</span><span class="dot-c" style="background:#3b82f6;width:10px;height:10px"></span><span>업무</span><span class="cbx on">✓</span></div>
+              <div class="li sel"><span class="grip">⋮⋮</span><span class="dot-c" style="background:#8b5cf6;width:10px;height:10px"></span><span>개발</span><span class="cbx on">✓</span></div>
+              <div class="li"><span class="grip">⋮⋮</span><span class="dot-c" style="background:#10b981;width:10px;height:10px"></span><span>자료</span><span class="cbx"></span></div>
+            </div>
+            <div class="acts"><span class="b">+ 추가</span><span class="b">이름 변경</span><span class="b">색상</span><span class="grow"></span><span class="b" style="color:var(--bad)">삭제</span></div>
+            <div class="acts" style="justify-content:flex-end"><span class="b">닫기</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="cap">위로·아래로 버튼은 끌어서 옮기기로 대신하고(지금도 끌기는 됨), 버튼 줄은 한 줄로 줄입니다. 창 이름은 "관리"에서 "설정"으로.</p>
+
+    <div class="tbl">
+      <table>
+        <thead><tr><th>상황</th><th>동작</th></tr></thead>
+        <tbody>
+          <tr><th>처음 설치</th><td>순서상 앞 2개(업무·개발)만 체크. 지금 보시는 화면과 비슷하게 시작</td></tr>
+          <tr><th>체크한 칩이 폭을 넘음</th><td>순서 뒤쪽부터 더보기로 넘김. 폭이 넓어지면 다시 칩으로</td></tr>
+          <tr><th>체크 안 한 카테고리</th><td>폭이 남아도 칩으로 안 나오고 더보기에만</td></tr>
+          <tr><th>새로 추가한 카테고리</th><td>체크 안 된 상태로 추가 (칩 줄이 갑자기 늘지 않음)</td></tr>
+          <tr><th>저장 위치</th><td>앱 설정 <span class="pill">memo_category_pinned</span>(카테고리 ID 목록). <b>DB 표 구조를 바꾸지 않아</b> 백업·동기화 규칙(DECISIONS 09-15)에 영향 없음. 대신 PC마다 따로 정함</td></tr>
+          <tr><th>입구</th><td>① 목록 <span class="pill">더보기 → ⚙ 카테고리 설정…</span> ② 편집기 카테고리 칩 메뉴의 기존 <span class="pill">카테고리 관리</span> → 같은 창</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 05 -->
+  <section id="s5">
+    <div class="sec-label">05 — 구현 단계</div>
+    <h2>일곱 단계, 약 4일</h2>
+    <p>단계마다 <b>해당 테스트 + 전체 회귀 테스트</b>를 통과해야 다음으로 넘어갑니다. <span class="pill">editor.py</span>·<span class="pill">panel.py</span>는 오늘 다른 작업으로 바뀌었으니, E·F 착수 전에 최신 코드를 다시 확인합니다. 기간은 1판과 같은 기준의 대략치입니다.</p>
+
+    <div class="tbl">
+      <table>
+        <thead><tr><th>단계</th><th>파일 · 위치</th><th>변경</th><th>기간</th></tr></thead>
+        <tbody>
+          <tr><th>A. 분류 규칙</th><td><span class="pill">title_tags.py</span> (새)<br><span class="pill">test_memo_title_tags.py</span></td><td><span class="pill">leading_symbol()</span> · <span class="pill">bracket_prefix()</span> · <span class="pill">symbol_counts()</span> · <span class="pill">prefix_counts()</span> · <span class="pill">representative()</span>(대표값, 동률은 최근 수정). 01·1판 표의 사례 + UTF-16 위치 사례</td><td class="nw">반나절</td></tr>
+          <tr><th>B. 목록 거르기</th><td><span class="pill">memo_list.py</span> <span class="pill">set_rows()</span></td><td>카테고리 뒤에 이모지·머리말 AND 거르기. 걸리면 <span class="pill">_set_flat_rows()</span>로 평평하게, 끌어 옮기기·모두 접기 끔. 필터 값은 <b>저장하지 않음</b></td><td class="nw">반나절</td></tr>
+          <tr><th>C. 버튼 두 개</th><td><span class="pill">memo_list.py</span> 검색 줄<br><span class="pill">ui_theme.py</span></td><td>상태 3가지(대표값·걸림·빈 아이콘), 값 목록 팝업, 빈 아이콘용 설명 말풍선. 대표값은 다른 필터가 걸린 범위에서 계산</td><td class="nw">1일</td></tr>
+          <tr><th>D. 필터 줄 정리</th><td><span class="pill">memo_list.py</span> <span class="pill">_layout_category_filters()</span> · <span class="pill">_show_more_categories()</span></td><td>칩 뒤 stretch + 더보기 오른쪽 끝·항상 표시. 보기·정렬 콤보를 더보기 하위 메뉴로 옮기고 설정 키는 그대로 사용. 숨은 카테고리 선택 시 버튼에 이름, 기본값 아닐 때 점</td><td class="nw">반나절</td></tr>
+          <tr><th>E. 카테고리 설정</th><td><span class="pill">category_dialog.py</span> · <span class="pill">editor.py</span> 940행 부근</td><td>"항상 보이기" 체크 칸(<span class="pill">memo_category_pinned</span>), 위로·아래로 버튼 정리, 창 이름 변경, 더보기에서 열기. <span class="pill">changed</span> 신호로 목록 칩 다시 그림</td><td class="nw">반나절</td></tr>
+          <tr><th>F. 머리말 자동완성</th><td><span class="pill">editor.py</span> 제목 칸</td><td>제목 칸 맨 앞에서 <span class="pill">[</span> 입력 시 <span class="pill">QCompleter</span>로 기존 머리말 제안(많이 쓴 순). 고르면 <span class="pill">[토마] </span>까지 채움 · Q2에서 "나중에"를 고르면 빠짐</td><td class="nw">반나절</td></tr>
+          <tr><th>G. 실제 창 확인</th><td>—</td><td>폭 380 · 480px, 배율 100 · 125%에서 캡처. 카테고리 8개로 늘려 넘침 확인</td><td class="nw">반나절</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <blockquote class="callout">
+      <span class="big">합계 약 4일 (F 빼면 약 3.5일) · 새 파일 2개 · 수정 파일 5개</span>
+      DB 표 구조는 바꾸지 않습니다. 새 설정 키는 <span class="pill">memo_category_pinned</span> 하나입니다.
+    </blockquote>
+
+    <p><b>완료 기준</b></p>
+    <ul class="done">
+      <li>예시 20개 제목에서 머리말 목록 3개</li>
+      <li>값 없을 때 버튼 폭 약 30px, 누르면 설명 말풍선</li>
+      <li>✨ 선택 뒤 앱 재실행 → 필터 풀림</li>
+      <li>더보기 버튼 x좌표 = 필터 줄 오른쪽 끝</li>
+      <li>보기·정렬을 더보기에서 바꾸면 목록 반영 + 점 표시</li>
+      <li>"자료" 체크 해제 → 폭이 남아도 칩 없음</li>
+      <li>편집기와 더보기, 두 입구가 같은 창을 엶</li>
+    </ul>
+  </section>
+
+  <!-- 06 -->
+  <section id="s6">
+    <div class="sec-label">06 — 결정할 것</div>
+    <h2>네 가지를 고르면 단계 A부터 시작합니다</h2>
+
+    <div class="qs">
+      <div>
+        <div class="q-title"><span class="qn">Q1</span>두 번째 버튼의 분류 규칙</div>
+        <ul class="q-opts">
+          <li class="pick"><span class="ol">A</span><span><b>대괄호 머리말만 (추천)</b> — 직접 붙인 것만, 1개도 표시, 목록이 짧게 유지</span></li>
+          <li><span class="ol">B</span><span>첫 단어 유지 — 지금 제목 그대로 묶이지만 목록이 계속 길어짐</span></li>
+          <li><span class="ol">C</span><span>머리말 우선, 없으면 첫 단어 — 목록 길이는 B와 비슷</span></li>
+        </ul>
+      </div>
+      <div>
+        <div class="q-title"><span class="qn">Q2</span>제목 칸 머리말 자동완성 (단계 F)</div>
+        <ul class="q-opts">
+          <li class="pick"><span class="ol">A</span><span><b>이번에 같이 (추천)</b> — +반나절, 오타로 머리말이 갈라지는 것을 막음</span></li>
+          <li><span class="ol">B</span><span>나중에 — 먼저 써 보고 불편하면 추가</span></li>
+        </ul>
+      </div>
+      <div>
+        <div class="q-title"><span class="qn">Q3</span>보기·정렬 드롭다운 자리</div>
+        <ul class="q-opts">
+          <li class="pick"><span class="ol">A</span><span><b>더보기 메뉴 안 (추천)</b> — 필터 줄이 칩 + 더보기로 깔끔, 바꾸면 점 표시</span></li>
+          <li><span class="ol">B</span><span>필터 줄 아래 별도 줄 (보완 계획 D2) — 늘 보이지만 목록 높이가 약 30px 줄어듦</span></li>
+        </ul>
+      </div>
+      <div>
+        <div class="q-title"><span class="qn">Q4</span>처음 설치했을 때 항상 보이는 칩</div>
+        <ul class="q-opts">
+          <li class="pick"><span class="ol">A</span><span><b>순서상 앞 2개 (추천)</b> — 업무·개발</span></li>
+          <li><span class="ol">B</span><span>전부 체크 — 지금처럼 폭에 들어가는 만큼 보이고 나머지는 더보기</span></li>
+        </ul>
+      </div>
+    </div>
+
+    <p class="closing">Q1~Q4를 모두 추천안(A)으로 할까요? 다르게 하고 싶은 항목만 알려 주시면 계획에 반영하고, <b>승인해 주시면 단계 A부터 코딩을 시작</b>하겠습니다.</p>
+  </section>
+
+</div>

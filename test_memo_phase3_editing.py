@@ -66,12 +66,39 @@ class MemoPhaseThreeTest(unittest.TestCase):
         clone = self.editor()
         clone.set_content(saved)
         self.assertEqual(clone.heading_level(self.block(clone, 0)), 1)
-        self.assertTrue(self.block(clone, 0).text().startswith(HEADING_FOLDED_PREFIX))
+        self.assertTrue(clone._heading_is_folded(self.block(clone, 0)))
+        self.assertFalse(self.block(clone, 0).text().startswith(HEADING_FOLDED_PREFIX))
         self.assertEqual([self.block(clone, i).isVisible() for i in range(6)],
                          [True, False, False, False, True, True])
         clone.fold_heading(self.block(clone, 0))
         self.assertEqual([self.block(clone, i).isVisible() for i in range(6)],
                          [True, True, True, False, True, True])
+
+    def test_folded_heading_hides_table_grid_and_restores_original_format(self):
+        editor = self.editor()
+        editor.set_content(
+            '<html><body><h1>표 제목</h1><table border="2" cellspacing="3" '
+            'cellpadding="4"><tr><td>A</td><td>B</td></tr></table><p>뒤</p></body></html>'
+        )
+        heading = editor.document().find("표 제목").block()
+        table_block = editor.document().find("A").block()
+        table = QTextCursor(table_block).currentTable()
+        original_border = table.format().border()
+        self.assertGreater(original_border, 0)
+
+        editor.fold_heading(heading)
+        self.assertFalse(table_block.isVisible())
+        self.assertEqual(table.format().border(), 0)
+        self.assertEqual(table.format().width().rawValue(), 0)
+
+        saved = editor.content()
+        reopened = self.editor()
+        reopened.set_content(saved)
+        reopened_heading = reopened.document().find("표 제목").block()
+        reopened_table = QTextCursor(reopened.document().find("A").block()).currentTable()
+        self.assertTrue(reopened._heading_is_folded(reopened_heading))
+        reopened.fold_heading(reopened_heading)
+        self.assertGreater(reopened_table.format().border(), 0)
 
     def test_heading_marker_has_a_mouse_path_to_fold_and_unfold(self):
         editor = self.editor("Heading\nchild")
@@ -82,6 +109,11 @@ class MemoPhaseThreeTest(unittest.TestCase):
         heading = self.block(editor, 0)
         point = editor._heading_marker_rect(heading).center()
         for expected in (False, True):
+            editor.mousePressEvent(QMouseEvent(
+                QMouseEvent.Type.MouseButtonPress, QPointF(point), QPointF(point),
+                Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton,
+                Qt.KeyboardModifier.NoModifier,
+            ))
             event = QMouseEvent(
                 QMouseEvent.Type.MouseButtonRelease, QPointF(point), QPointF(point),
                 Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton,
@@ -115,9 +147,9 @@ class MemoPhaseThreeTest(unittest.TestCase):
         editor.document().clearUndoRedoStacks()
         self.assertFalse(editor.toggle_all_folds())
         self.assertFalse(self.block(editor, 2).isVisible())
-        self.assertTrue(self.block(editor, 0).text().startswith(HEADING_FOLDED_PREFIX))
+        self.assertTrue(editor._heading_is_folded(self.block(editor, 0)))
         editor.undo()
-        self.assertFalse(self.block(editor, 0).text().startswith(HEADING_FOLDED_PREFIX))
+        self.assertFalse(editor._heading_is_folded(self.block(editor, 0)))
         self.assertTrue(self.block(editor, 1).text().startswith("▾ "))
 
     def test_line_spacing_mixed_selection_undo_and_html_round_trip(self):

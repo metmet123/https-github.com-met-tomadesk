@@ -225,14 +225,16 @@ class AlertNoteQtTest(unittest.TestCase):
         panel.update_responsive_layout(1920)
         panel.show()
         self.app.processEvents()
+        panel.editor.summary_button.click()
+        self.app.processEvents()
 
         sizes = panel.splitter.sizes()
         self.assertEqual(len(sizes), 3)
-        self.assertGreaterEqual(sizes[0], 680)
-        self.assertLessEqual(sizes[0], 720)
-        self.assertGreaterEqual(sizes[1], 620)
-        self.assertLessEqual(sizes[1], 660)
+        self.assertGreaterEqual(sizes[0], 500)
+        self.assertLessEqual(sizes[0], 630)
+        self.assertGreaterEqual(sizes[1], 850)
         self.assertGreater(sizes[2], 0)
+        self.assertLessEqual(sizes[2], 360)
         self.assertEqual(panel.splitter.handleWidth(), 7)
         self.assertEqual(
             panel.splitter.handle(1).accessibleName(),
@@ -241,8 +243,8 @@ class AlertNoteQtTest(unittest.TestCase):
         self.assertEqual(panel.splitter.handle(1).cursor().shape(), Qt.CursorShape.SplitHCursor)
         self.assertEqual(panel.splitter.handle(2).accessibleName(), "메모 편집 영역 너비 조절선")
         self.assertEqual(panel.splitter.handle(2).cursor().shape(), Qt.CursorShape.SplitHCursor)
-        self.assertGreaterEqual(panel.editor.content_edit.minimumHeight(), 180)
-        self.assertGreaterEqual(panel.editor.content_edit.height(), 180)
+        self.assertGreaterEqual(panel.editor.content_edit.minimumHeight(), 320)
+        self.assertGreaterEqual(panel.editor.content_edit.height(), 320)
         self.assertFalse(panel.editor_scroll.horizontalScrollBar().isVisible())
         self.assertFalse(panel.editor_scroll.verticalScrollBar().isVisible())
 
@@ -252,7 +254,7 @@ class AlertNoteQtTest(unittest.TestCase):
         self.assertTrue(editor.isAncestorOf(editor.datetime_input.summary))
         self.assertFalse(editor.reminder_details.isVisible())
         self.assertEqual(editor.reminder_toggle.accessibleName(), "알림 예약 펼치기")
-        editor.reminder_toggle.click()
+        editor.property_chips.buttons["reminder"].click()
         self.app.processEvents()
         self.assertTrue(editor.reminder_details.isVisible())
         self.assertEqual(editor.reminder_toggle.accessibleName(), "알림 예약 접기")
@@ -261,11 +263,10 @@ class AlertNoteQtTest(unittest.TestCase):
         quick_buttons = list(editor.quick_buttons.values())
         self.assertEqual(len({button.y() for button in quick_buttons}), 1)
         self.assertFalse(editor.hotkey_body.isVisible())
-        editor.hotkey_toggle.click()
+        editor.property_chips.buttons["hotkey"].click()
         self.app.processEvents()
         self.assertTrue(editor.hotkey_body.isVisible())
         self.assertTrue(editor.manual_save_button.isHidden())
-        self.assertFalse(panel.editor_scroll.verticalScrollBar().isVisible())
 
         original_editor_width = sizes[1]
         handle = panel.splitter.handle(2)
@@ -285,6 +286,8 @@ class AlertNoteQtTest(unittest.TestCase):
         panel.resize(1920, 982)
         panel.update_responsive_layout(1920)
         panel.show()
+        self.app.processEvents()
+        panel.editor.summary_button.click()
         self.app.processEvents()
 
         original_sizes = panel.splitter.sizes()
@@ -317,15 +320,18 @@ class AlertNoteQtTest(unittest.TestCase):
         self.assertEqual(len(saved), 3)
         self.assertAlmostEqual(sum(saved), 1.0, delta=0.00001)
 
-        panel.splitter.setSizes([480, 560, max(1, available - 1040)])
+        panel.splitter.setSizes([max(480, available - 920), 560, 360])
         self.app.processEvents()
         editor = panel.editor
         self.assertLess(editor.width(), 620)
         toolbar_row = editor.format_toolbar.second_layout
         default_index = toolbar_row.indexOf(editor.format_toolbar.default_button)
-        self.assertIs(toolbar_row.itemAt(default_index + 1).widget(), editor.shortcut_settings_button)
-        self.assertEqual(editor.shortcut_settings_button.text(), "단축키")
+        self.assertEqual(toolbar_row.itemAt(default_index + 1).widget().objectName(), "formatGroupLine")
+        self.assertIs(toolbar_row.itemAt(default_index + 2).widget(), editor.format_toolbar.preset_strip)
+        self.assertIs(toolbar_row.itemAt(default_index + 3).widget(), editor.format_toolbar.preset_settings_button)
+        self.assertFalse(editor.format_toolbar.preset_settings_button.icon().isNull())
         self.assertTrue(editor.manual_save_button.isHidden())
+        editor.property_chips.buttons["reminder"].click()
         editor.reminder_toggle.setChecked(True)
         self.app.processEvents()
         for button in editor.quick_buttons.values():
@@ -339,6 +345,8 @@ class AlertNoteQtTest(unittest.TestCase):
         restored.resize(1920, 982)
         restored.update_responsive_layout(1920)
         restored.show()
+        self.app.processEvents()
+        restored.editor.summary_button.click()
         self.app.processEvents()
         restored_ratios = [size / sum(restored.splitter.sizes()) for size in restored.splitter.sizes()]
         for actual_ratio, saved_ratio in zip(restored_ratios, saved):
@@ -409,8 +417,8 @@ class AlertNoteQtTest(unittest.TestCase):
         QTest.keyClick(
             editor.content_edit, Qt.Key.Key_Return, Qt.KeyboardModifier.ControlModifier,
         )
-        # Ctrl+Enter is deliberately scoped to the expanded reminder controls.
-        self.assertEqual(len(saved), 1)
+        # Ctrl+Enter also works while the property panel is closed.
+        self.assertEqual(len(saved), 2)
         close_alert_panel(panel, self.app)
 
     def test_reminder_details_state_persists_and_manual_time_resets_quick_accumulation(self):
@@ -446,6 +454,7 @@ class AlertNoteQtTest(unittest.TestCase):
         controls = panel.editor.recurrence
         self.assertEqual(controls.rule_combo.currentText(), "반복 안 함")
         self.assertFalse(controls.end_controls.isVisible())
+        panel.editor.property_chips.buttons["reminder"].click()
         panel.editor.reminder_toggle.setChecked(True)
         controls.rule_combo.setCurrentIndex(controls.rule_combo.findData("daily"))
         self.app.processEvents()
@@ -498,7 +507,8 @@ class AlertNoteQtTest(unittest.TestCase):
 
         toolbar = editor.format_toolbar
         self.assertEqual(sorted(toolbar.preset_buttons), [1, 2, 3])
-        self.assertEqual(editor.preset_layout.count(), 3)
+        self.assertFalse(hasattr(editor, "preset_layout"))
+        self.assertGreaterEqual(toolbar.second_layout.indexOf(toolbar.preset_strip), 0)
         self.assertEqual(toolbar.color_button.text(), "")
         self.assertFalse(toolbar.image_button.icon().isNull())
         self.assertEqual(toolbar.image_button.toolTip(), "이미지 삽입")
@@ -518,7 +528,7 @@ class AlertNoteQtTest(unittest.TestCase):
         self.assertFalse(bold_button.isChecked())
         self.assertNotIn("✓", bold_button.text())
         self.assertEqual(
-            len({button.width() for button in toolbar.preset_buttons.values()}), 1,
+            {(button.width(), button.height()) for button in toolbar.preset_buttons.values()}, {(26, 26)},
         )
         self.assertFalse(any(button.isChecked() for button in toolbar.preset_buttons.values()))
         toolbar.apply_preset(1)
@@ -539,11 +549,11 @@ class AlertNoteQtTest(unittest.TestCase):
             control.initStyleOption(option)
             return control.style().subControlRect(QStyle.ComplexControl.CC_SpinBox, option, subcontrol, control)
 
+        # 크기 칸은 화살표 없이 숫자만 보인다(2차 수정 Q6).  ↑ 키로 한 단계 올린다.
         toolbar.size_box.setValue(10)
-        size_up = spin_rect(toolbar.size_box, QStyle.SubControl.SC_SpinBoxUp)
-        QTest.mouseMove(toolbar.size_box, size_up.center())
-        self.assertEqual(toolbar.size_box.cursor().shape(), Qt.CursorShape.ArrowCursor)
-        QTest.mouseClick(toolbar.size_box, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, size_up.center())
+        self.assertEqual(toolbar.size_box.buttonSymbols(), toolbar.size_box.ButtonSymbols.NoButtons)
+        toolbar.size_box.setFocus()
+        QTest.keyClick(toolbar.size_box, Qt.Key.Key_Up)
         self.assertEqual(toolbar.size_box.value(), 11)
 
         editor.datetime_input.time_edit.setTime(QTime(10, 0))

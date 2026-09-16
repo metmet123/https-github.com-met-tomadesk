@@ -90,13 +90,13 @@ INSERT_ITEMS = (
 
 HEADING_ITEMS = (
     InsertItem("H1", "제목1", "apply_heading1", ("제목1", "heading1", "h1"),
-               "가장 큰 제목. 다음 줄은 일반 본문으로 시작합니다", "", "# ", "heading1"),
+               "가장 큰 제목. 다음 줄은 일반 본문으로 시작합니다", "Ctrl+Shift+1", "# ", "heading1"),
     InsertItem("H2", "제목2", "apply_heading2", ("제목2", "heading2", "h2"),
-               "큰 제목", "", "## ", "heading2"),
+               "큰 제목", "Ctrl+Shift+2", "## ", "heading2"),
     InsertItem("H3", "제목3", "apply_heading3", ("제목3", "heading3", "h3"),
-               "중간 제목", "", "### ", "heading3"),
+               "중간 제목", "Ctrl+Shift+3", "### ", "heading3"),
     InsertItem("H4", "제목4", "apply_heading4", ("제목4", "heading4", "h4"),
-               "작은 제목", "", "#### ", "heading4"),
+               "작은 제목", "Ctrl+Shift+6", "#### ", "heading4"),
     InsertItem("T", "본문", "apply_body_style", ("본문", "일반", "body"),
                "제목 서식을 일반 본문으로 되돌립니다", "Ctrl+Shift+0", "", "body"),
 )

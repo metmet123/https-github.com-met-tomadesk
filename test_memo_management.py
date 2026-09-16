@@ -147,7 +147,7 @@ class MemoManagementQtTest(unittest.TestCase):
             self.panel.editor._manual_save()
         self.assertEqual(len(self.store.notes()), 1)
         self.assertEqual(self.panel.editor.note_id, int(self.store.notes()[0]["id"]))
-        self.assertTrue(self.panel.editor.saved_status.text().endswith("자동 저장됨"))
+        self.assertTrue(self.panel.editor.saved_status.text().endswith("저장됨 · 직접 저장"))
         self.assertIn("재시도 본문", self.panel.editor.plain_content())
 
     def test_memo_table_sort_check_preview_and_excel(self):
@@ -162,7 +162,7 @@ class MemoManagementQtTest(unittest.TestCase):
         table = self.panel.list_panel.table
         self.assertEqual(
             [table.headerItem().text(i) for i in range(table.columnCount())],
-            ["", "제목", "내용", "일정", "수정시간"],
+            ["", "제목", "카테고리", "수정일"],
         )
         self.assertFalse(hasattr(self.panel.list_panel, "select_all_button"))
         self.panel.list_panel.table_header.toggle_check_state()
@@ -175,8 +175,9 @@ class MemoManagementQtTest(unittest.TestCase):
         # 표시 열이 사라진 자리를 제목 앞 표식이 대신한다.
         self.assertTrue(table.topLevelItem(0).text(1).endswith("최근 메모"))
         self.assertTrue(table.topLevelItem(0).text(1).startswith("📌"))
-        self.assertNotIn("\n", table.topLevelItem(0).text(2))
-        self.assertLessEqual(len(table.topLevelItem(0).text(2)), 80)
+        self.assertEqual(table.topLevelItem(0).text(2), "—")
+        self.assertEqual(table.topLevelItem(0).toolTip(2), "미지정")
+        self.assertIn("둘째 줄 전체 본문", table.topLevelItem(0).toolTip(1))
 
         self.panel.list_panel._set_all_checked(False)
         table.topLevelItem(0).setCheckState(0, Qt.CheckState.Checked)
@@ -192,8 +193,10 @@ class MemoManagementQtTest(unittest.TestCase):
         self.assertEqual(sheet.auto_filter.ref, sheet.dimensions)
         self.assertEqual(sheet.max_row, 2)
         self.assertEqual(sheet.cell(2, 3).value, "최근 메모")
-        self.assertIn("둘째 줄 전체 본문", sheet.cell(2, 5).value)
-        self.assertEqual(sheet.cell(2, 4).value, "2026-08-10 12:30")
+        self.assertEqual(sheet.cell(2, 4).value, "미지정")
+        self.assertTrue(sheet.cell(2, 5).value)
+        self.assertEqual(sheet.cell(2, 6).value, "2026-08-10 12:30")
+        self.assertIn("둘째 줄 전체 본문", sheet.cell(2, 7).value)
 
         with (
             patch("alert_notes.panel.QFileDialog.getSaveFileName", return_value=(str(self.root / "error.xlsx"), "")),

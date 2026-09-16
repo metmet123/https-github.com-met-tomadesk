@@ -81,6 +81,7 @@ class ConfirmedMemoUxTest(unittest.TestCase):
         editor.reminder_save_requested.connect(captured.append)
         editor.time_shortcuts[0].activated.emit()
         self.assertEqual(len(captured), 1)
+        editor.property_chips.buttons["reminder"].click()
         editor.reminder_toggle.setChecked(True)
         editor.recurrence.set_rule(RecurrenceRule(RULE_DAILY))
         self.app.processEvents()

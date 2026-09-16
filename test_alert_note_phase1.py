@@ -240,7 +240,7 @@ class ReminderPhaseOneUiTest(unittest.TestCase):
         QTest.qWait(500)
         self.app.processEvents()
         self.assertEqual(plain_text_from_content(self.store.note(self.note_id)["content"]), "자동 저장 확인")
-        self.assertTrue(self.panel.editor.saved_status.text().endswith("자동 저장됨"))
+        self.assertTrue(self.panel.editor.saved_status.text().endswith("저장됨 · 자동 저장"))
         self.panel.editor.postit_shortcut.activated.emit()
         QTest.qWait(500)
         self.app.processEvents()

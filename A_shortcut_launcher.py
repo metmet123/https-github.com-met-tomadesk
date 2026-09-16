@@ -1,6 +1,8 @@
 import errno
 import sqlite3
 import sys
+import traceback
+from datetime import datetime
 from pathlib import Path
 
 from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox
@@ -26,12 +28,36 @@ def main() -> int:
         store = _open_store_with_recovery()
         if store is None:
             return 1
+        _install_exception_hook(store.data_dir / "tomadesk_error.log")
         window = MainWindow(store)
         window.setWindowIcon(icon)
         window.show_initial_state()
         return app.exec()
     finally:
         guard.release()
+
+
+def _install_exception_hook(log_path: Path) -> None:
+    """Keep an unexpected Qt slot exception visible and leave a local diagnostic."""
+    target = Path(log_path)
+
+    def report(exc_type, exc_value, exc_traceback) -> None:
+        details = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with target.open("a", encoding="utf-8") as handle:
+                handle.write(f"\n[{datetime.now().isoformat(timespec='seconds')}]\n{details}")
+        except OSError:
+            pass
+        message = "예기치 않은 오류가 발생했습니다. 프로그램을 닫기 전에 작업 상태를 확인해 주세요."
+        if target:
+            message += f"\n\n오류 기록: {target}"
+        try:
+            QMessageBox.critical(None, "TomaDesk 오류", message)
+        except Exception:
+            sys.__excepthook__(exc_type, exc_value, exc_traceback)
+
+    sys.excepthook = report
 
 
 def _open_store_with_recovery() -> Store | None:

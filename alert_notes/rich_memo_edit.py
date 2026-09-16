@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import base64
+import json
 import re
 import weakref
 from pathlib import Path
 
+from PyQt6 import sip
 from PyQt6.QtCore import (
     QByteArray, QBuffer, QEvent, QIODevice, QLineF, QMimeData, QPoint, QPointF, QRectF,
     QTimer, Qt, QUrl, pyqtSignal,
@@ -16,7 +18,7 @@ from PyQt6.QtGui import (
     QTextListFormat, QTextTableCellFormat, QTextTableFormat,
 )
 from PyQt6.QtWidgets import (
-    QApplication, QFileDialog, QListWidget, QListWidgetItem, QMessageBox, QTextEdit,
+    QApplication, QFileDialog, QListWidget, QListWidgetItem, QMenu, QMessageBox, QTextEdit, QToolTip,
 )
 
 from .insert_menu import (
@@ -28,12 +30,23 @@ from .line_gutter import LineGutter
 from .rich_text import editor_content, load_editor_content, sanitize_rich_html
 from .memo_clipboard import (
     BLOCK_MIME, apply_block_metadata, attachment_ids_from_html, get_json,
-    page_ids_from_html, selected_block_metadata, set_json,
+    page_ids_from_html, page_sync_ids_from_html, selected_block_metadata, set_json,
 )
 from .note_clone_service import NoteCloneService, rewrite_cloned_content
 from .block_selection import BlockSelectionManager
 from .block_commands import BlockCommandDispatcher
 from .block_action_bar import BlockActionBar
+from .block_identity import (
+    HEADING_FOLDED_PROPERTY, PIN_PROPERTY, block_ids, heading_folded_ids, is_pinned,
+    load_heading_folds, load_ids, load_pins, pinned_ids, restore_ids, set_ids_from,
+    set_pinned, with_heading_folds, with_ids, with_pins,
+    SECTION_BREAK_PROPERTY, is_section_break, load_section_breaks, section_break_ids,
+    with_section_breaks,
+)
+from .block_link import parse_block_url
+from .character_range_selection import CharacterRangeSelection
+from .character_range_action_bar import CharacterRangeActionBar
+from .text_format_range_bar import TextFormatRangeBar
 
 
 IMAGE_URL_PREFIX = "toma-note-image://"
@@ -46,6 +59,7 @@ DEFAULT_PAGE_TITLE = "제목 없음"
 # 메모는 그대로 남는다.  그래서 표시 글자를 달리 둔다.
 LINK_MARK = "🔗 "
 _PAGE_ID_RE = re.compile(r"toma-note://(\d+)", re.IGNORECASE)
+_PAGE_SYNC_RE = re.compile(r"toma-note://v2/([0-9a-fA-F-]{36})", re.IGNORECASE)
 MAX_IMAGE_EDGE = 1920
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 IMAGE_ORIGINAL_WIDTH = QTextCharFormat.Property.UserProperty + 21
@@ -59,6 +73,9 @@ UNCHECKED_PREFIX = "☐ "
 CHECKED_PREFIX = "☑ "
 # 노션식 토글.  펼침/접힘을 글자 하나로 들고 다니므로 저장한 HTML에도 그대로
 # 남고, 다시 열었을 때 접힌 상태가 살아난다.
+# Tab 한 번의 들여쓰기 폭.  Qt 기본값 40px 은 좁은 편집기에서 너무 넓었다.
+# 저장되는 것은 칸 수(-qt-block-indent)라 기존 메모도 새 폭으로 보인다.
+INDENT_WIDTH = 20
 TOGGLE_OPEN_PREFIX = "▾ "
 TOGGLE_CLOSED_PREFIX = "▸ "
 TOGGLE_PREFIXES = (TOGGLE_OPEN_PREFIX, TOGGLE_CLOSED_PREFIX)
@@ -89,9 +106,8 @@ DIVIDER_COLOR = "#cbd5e1"
 _IMAGE_ID_RE = re.compile(r"toma-note-image://(?:attachment/)?(\d+)", re.IGNORECASE)
 _LINK_RE = re.compile(r"(?P<url>(?:https?://|www\.)[^\s<>]+|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,})$")
 HEADING_LEVEL_PROPERTY = QTextBlockFormat.Property.UserProperty + 31
-HEADING_FOLDED_PROPERTY = QTextBlockFormat.Property.UserProperty + 32
 # QTextDocument does not serialize custom block properties to HTML. Keep the
-# closed marker in the title text as well so the state survives reopening.
+# old closed marker readable while migrating it to non-rendered block metadata.
 HEADING_FOLDED_PREFIX = "▶ "
 HEADING_STYLES = {
     1: (22.0, 0.7, 12.0, 6.0),
@@ -114,6 +130,8 @@ class RichMemoTextEdit(QTextEdit):
     save_error = pyqtSignal(str)
     page_created = pyqtSignal(int)
     page_open_requested = pyqtSignal(int)
+    block_link_open_requested = pyqtSignal(int, str)
+    annotation_activated = pyqtSignal(int)
     page_renamed = pyqtSignal(int)
     page_removed = pyqtSignal(int)
     structured_files_dropped = pyqtSignal(object)
@@ -128,6 +146,7 @@ class RichMemoTextEdit(QTextEdit):
         # 사각형을 어디에 그릴지 이 값 하나로 정한다.
         self._hover_marker: int | None = None
         self._syncing_toggle_children = False
+        self._identity_reordered = False
         self._claimed_press = False
         # 본문에 지금 들어 있는 페이지들.  줄이 사라지면 그 페이지도 휴지통으로
         # 보내야 하므로, 직전에 무엇이 있었는지 들고 있어야 한다.
@@ -147,9 +166,21 @@ class RichMemoTextEdit(QTextEdit):
         self._copied_character_format: QTextCharFormat | None = None
         self._composite_edits: list[dict] = []
         self._block_selecting = False
+        self._block_action_bar_height = 0
+        self._left_press_point: QPoint | None = None
+        self._left_press_target: tuple[str, int] | None = None
+        self._left_press_dragged = False
+        self._character_press_point: QPoint | None = None
+        self._character_press_position: int | None = None
+        self._character_dragging = False
         # 본문 찾기로 표시해 둔 자리.  칠할 때 체크리스트 표시와 함께 얹는다.
         self._find_ranges: list[tuple[int, int]] = []
         self._find_current = -1
+        self._annotations: list[dict] = []
+        self.external_undo_handler = None
+        self.external_redo_handler = None
+        self._folded_table_formats: dict[int, QTextTableFormat] = {}
+        self._folded_table_formats: dict[int, QTextTableFormat] = {}
         self.setAcceptRichText(True)
         self.setAccessibleName("메모 본문")
         self.setTabChangesFocus(False)
@@ -169,6 +200,11 @@ class RichMemoTextEdit(QTextEdit):
         self._page_sync_timer.timeout.connect(self.sync_page_titles)
         self.textChanged.connect(self._queue_page_sync)
         self.cursorPositionChanged.connect(self._refresh_insert_popup)
+        self._caret_guard_timer = QTimer(self)
+        self._caret_guard_timer.setSingleShot(True)
+        self._caret_guard_timer.setInterval(0)
+        self._caret_guard_timer.timeout.connect(self._keep_caret_on_visible_line)
+        self.cursorPositionChanged.connect(self._caret_guard_timer.start)
         self.textChanged.connect(lambda: self.gutter.update() if hasattr(self, "gutter") else None)
         self.viewport().setMouseTracking(True)
         self.viewport().setCursor(Qt.CursorShape.IBeamCursor)
@@ -177,16 +213,25 @@ class RichMemoTextEdit(QTextEdit):
         self.setViewportMargins(0, 0, LineGutter.WIDTH, 0)
         self._place_gutter()
         self.block_selection = BlockSelectionManager(self)
+        self.character_selection = CharacterRangeSelection(self)
         self.block_commands = BlockCommandDispatcher(self)
         self.block_action_bar = BlockActionBar(self, self.block_commands)
+        self.character_action_bar = CharacterRangeActionBar(self)
+        self.text_format_bar = TextFormatRangeBar(self)
         self.block_selection.changed.connect(self._block_selection_changed)
+        self.character_selection.changed.connect(self._character_selection_changed)
+        self.block_selection.changed.connect(self.text_format_bar.sync)
+        self.character_selection.changed.connect(self.text_format_bar.sync)
         self.verticalScrollBar().valueChanged.connect(lambda _value: self.block_action_bar.sync())
+        self.verticalScrollBar().valueChanged.connect(lambda _value: self.text_format_bar.sync())
+        self.selectionChanged.connect(self._queue_text_format_bar_sync)
         # 넣을 수 있는 것들의 단축키.  목록 한곳에 적힌 것을 그대로 건다.
         self.insert_shortcuts = install_insert_shortcuts(self)
 
     def set_note_context(self, note_id: int | None) -> None:
         if hasattr(self, "block_selection"):
             self.block_selection.clear()
+            self.character_selection.clear()
         resolved = int(note_id) if note_id is not None else None
         if self.note_id == resolved:
             return
@@ -214,6 +259,9 @@ class RichMemoTextEdit(QTextEdit):
                 setattr(self.store, "_rich_document_views", views)
             views.setdefault(resolved, weakref.WeakSet()).add(self)
         self._configure_document(document)
+        # QTextEdit may delete its previous document inside setDocument().
+        # Disconnect while that document is still alive.
+        self._unwatch_document()
         self.setDocument(document)
         self._watch_document(document)
         if new_document:
@@ -234,20 +282,65 @@ class RichMemoTextEdit(QTextEdit):
         if self._watched_document is document:
             self._block_count = document.blockCount()
             return
-        if self._watched_document is not None:
-            try:
-                self._watched_document.contentsChange.disconnect(self._note_contents_change)
-                self._watched_document.undoCommandAdded.disconnect(self._discard_composite_redos)
-            except (RuntimeError, TypeError):
-                # 앞 문서가 이미 지워졌으면 끊을 것도 없다.
-                pass
+        self._unwatch_document()
         self._watched_document = document
         self._composite_edits = getattr(document, "_toma_composite_edits", [])
         setattr(document, "_toma_composite_edits", self._composite_edits)
         document.contentsChange.connect(self._note_contents_change)
         document.undoCommandAdded.connect(self._discard_composite_redos)
+        document.undoCommandAdded.connect(self._snapshot_block_ids)
         self._block_count = document.blockCount()
         self._structure_dirty = True
+
+    def _unwatch_document(self) -> None:
+        old = self._watched_document
+        self._watched_document = None
+        if old is None or sip.isdeleted(old):
+            return
+        for signal, slot in (
+            (old.contentsChange, self._note_contents_change),
+            (old.undoCommandAdded, self._discard_composite_redos),
+            (old.undoCommandAdded, self._snapshot_block_ids),
+        ):
+            try:
+                signal.disconnect(slot)
+            except (RuntimeError, TypeError):
+                pass
+
+    def _snapshot_block_ids(self) -> None:
+        document = self.document()
+        history = getattr(document, "_toma_block_id_states", None)
+        if history is None:
+            history = {}
+            setattr(document, "_toma_block_id_states", history)
+        step = int(document.availableUndoSteps())
+        for future in [value for value in history if value > step]:
+            del history[future]
+        previous = history.get(step - 1)
+        if previous is None:
+            previous = history.get(max((value for value in history if value < step), default=-1))
+        if (previous is not None and len(previous) == document.blockCount()
+                and not self._identity_reordered):
+            # Character/format edits do not change block ownership. Share the
+            # immutable snapshot instead of scanning a long memo per keystroke.
+            history[step] = previous
+        else:
+            history[step] = tuple(block_ids(document))
+
+    def _restore_block_id_snapshot(self) -> None:
+        document = self.document()
+        history = getattr(document, "_toma_block_id_states", {})
+        ids = history.get(int(document.availableUndoSteps()))
+        if ids is not None:
+            restore_ids(document, ids)
+
+    def undo(self) -> None:
+        super().undo()
+        self._restore_block_id_snapshot()
+
+    def redo(self) -> None:
+        super().redo()
+        self._restore_block_id_snapshot()
 
     def _note_contents_change(self, position: int, removed: int, added: int) -> None:
         """바뀐 자리가 구조를 건드렸는지만 표시해 둔다.
@@ -315,10 +408,11 @@ class RichMemoTextEdit(QTextEdit):
             return
         if source is not None and str(source) == str(content or ""):
             return
+        self.character_selection.clear()
+        self._folded_table_formats.clear()
         self._register_content_images(content)
         load_editor_content(self, content)
-        # 접어 둔 토글은 ▸ 글자에 상태가 남아 있다.  그대로 다시 접는다.
-        self._refresh_toggle_visibility()
+        self._repair_legacy_heading_formats()
         # 이 기능이 생기기 전에 만든 빈 토글에도 안내가 들어갈 자리를 만들어 준다.
         self._ensure_toggle_children()
         # 페이지 줄에 옛 제목이 남아 있으면 지금 제목으로 맞춘다.
@@ -327,12 +421,118 @@ class RichMemoTextEdit(QTextEdit):
         self._remove_orphan_internal_links()
         self._refresh_known_pages()
         self._reset_typing_format()
+        load_ids(self.document(), content)
+        load_pins(self.document(), content)
+        self._load_heading_fold_state(content)
+        load_section_breaks(self.document(), content)
+        # 접어 둔 토글과 제목의 상태를 화면에 적용한다.
+        self._refresh_toggle_visibility()
+        setattr(self.document(), "_toma_block_id_states", {
+            int(self.document().availableUndoSteps()): tuple(block_ids(self.document())),
+        })
         self.document().setProperty("tomaSourceContent", str(content or ""))
         self.document().setModified(False)
         self._refit_timer.start(0)
 
+    def _repair_legacy_heading_formats(self) -> None:
+        """Restore headings saved with block margins but default-size text."""
+        legacy = []
+        for block in self._iter_blocks():
+            standard_level = int(block.blockFormat().headingLevel())
+            if standard_level in HEADING_STYLES:
+                fmt = block.blockFormat()
+                fmt.setLeftMargin(max(18.0, fmt.leftMargin()))
+                fmt.setProperty(HEADING_LEVEL_PROPERTY, standard_level)
+                QTextCursor(block).setBlockFormat(fmt)
+                continue
+            level = self.heading_level(block)
+            if level not in HEADING_STYLES:
+                continue
+            start = block.position() + (len(HEADING_FOLDED_PREFIX)
+                                        if self._heading_is_folded(block) else 0)
+            probe = QTextCursor(self.document())
+            probe.setPosition(start)
+            if start < block.position() + len(block.text()):
+                probe.movePosition(QTextCursor.MoveOperation.NextCharacter,
+                                   QTextCursor.MoveMode.KeepAnchor)
+            if abs(probe.charFormat().fontPointSize() - HEADING_STYLES[level][0]) >= 0.1:
+                legacy.append((block.position(), level))
+        if not legacy:
+            return
+        document = self.document()
+        undo_enabled = document.isUndoRedoEnabled()
+        # Loading content establishes a new document baseline.  Repairing its
+        # old presentation must not become the first user-visible Undo step.
+        document.setUndoRedoEnabled(False)
+        try:
+            for position, level in legacy:
+                block = document.findBlock(position)
+                fmt = block.blockFormat()
+                fmt.setHeadingLevel(level)
+                fmt.setProperty(HEADING_LEVEL_PROPERTY, level)
+                QTextCursor(block).setBlockFormat(fmt)
+                point_size, spacing, _top, _bottom = HEADING_STYLES[level]
+                char_format = QTextCharFormat()
+                char_format.setFontPointSize(point_size)
+                char_format.setFontWeight(QFont.Weight.Bold)
+                char_format.setFontLetterSpacingType(QFont.SpacingType.AbsoluteSpacing)
+                char_format.setFontLetterSpacing(spacing)
+                cursor = QTextCursor(block)
+                cursor.setPosition(position + (len(HEADING_FOLDED_PREFIX)
+                                               if self._heading_is_folded(block) else 0))
+                cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock,
+                                    QTextCursor.MoveMode.KeepAnchor)
+                cursor.mergeCharFormat(char_format)
+        finally:
+            document.setUndoRedoEnabled(undo_enabled)
+
+    def _load_heading_fold_state(self, content: str) -> None:
+        """Load new invisible fold metadata and migrate old visible ▶ prefixes."""
+        load_heading_folds(self.document(), content)
+        block = self.document().begin()
+        while block.isValid():
+            if self.heading_level(block) and block.text().startswith(HEADING_FOLDED_PREFIX):
+                cursor = QTextCursor(block)
+                cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock)
+                cursor.movePosition(
+                    QTextCursor.MoveOperation.NextCharacter,
+                    QTextCursor.MoveMode.KeepAnchor,
+                    len(HEADING_FOLDED_PREFIX),
+                )
+                cursor.removeSelectedText()
+                fmt = block.blockFormat()
+                fmt.setProperty(HEADING_FOLDED_PROPERTY, True)
+                fmt.setLeftMargin(max(18.0, fmt.leftMargin()))
+                QTextCursor(block).setBlockFormat(fmt)
+            block = block.next()
+
     def content(self) -> str:
-        return editor_content(self)
+        html = self._html_with_original_table_formats()
+        if not html:
+            return ""
+        html = with_ids(html, block_ids(self.document()))
+        html = with_pins(html, pinned_ids(self.document()))
+        html = with_heading_folds(html, heading_folded_ids(self.document()))
+        return with_section_breaks(html, section_break_ids(self.document()))
+
+    def _html_with_original_table_formats(self) -> str:
+        """Store real table formatting while folded tables use a zero-size frame."""
+        html = editor_content(self)
+        if not html or not self._folded_table_formats:
+            return html
+        copy = QTextDocument()
+        copy.setHtml(html)
+        seen = set()
+        block = copy.begin()
+        while block.isValid():
+            table = QTextCursor(block).currentTable()
+            if table is not None:
+                key = int(table.firstPosition())
+                if key not in seen and key in self._folded_table_formats:
+                    table.setFormat(QTextTableFormat(self._folded_table_formats[key]))
+                    seen.add(key)
+            block = block.next()
+        return copy.toHtml()
 
     def insert_structured_html(self, html: str, toggle_heading_levels=()) -> None:
         """Insert one sanitized external document as one undoable native edit."""
@@ -418,7 +618,6 @@ class RichMemoTextEdit(QTextEdit):
         """A new edit after Undo invalidates the matching database redo batch."""
         self._composite_edits[:] = [entry for entry in self._composite_edits if entry["active"]]
         self._refresh_structure()
-        self.setFocus()
 
     def mark_document_saved(self, content: str | None = None) -> None:
         resolved = self.content() if content is None else str(content)
@@ -432,6 +631,7 @@ class RichMemoTextEdit(QTextEdit):
         font = QFont("Malgun Gothic")
         font.setPointSizeF(10.5)
         document.setDefaultFont(font)
+        document.setIndentWidth(INDENT_WIDTH)
         document.setDefaultStyleSheet(
             "body, p, li { font-family:'Segoe UI Variable','Malgun Gothic'; "
             "font-size:14px; line-height:140%; }"
@@ -451,12 +651,78 @@ class RichMemoTextEdit(QTextEdit):
             fmt.setFontStrikeOut(not current.fontStrikeOut())
         else:
             return
-        cursor = self.textCursor()
-        cursor.mergeCharFormat(fmt)
-        self.mergeCurrentCharFormat(fmt)
+        self.apply_character_format(fmt)
         self.setFocus()
 
+    def apply_character_format(self, fmt: QTextCharFormat) -> None:
+        """Apply a toolbar format to all saved ranges as one undoable edit."""
+        ranges = self.character_selection.ranges()
+        if not ranges:
+            cursor = self.textCursor()
+            cursor.mergeCharFormat(fmt)
+            self.mergeCurrentCharFormat(fmt)
+            return
+        transaction = QTextCursor(self.document())
+        transaction.beginEditBlock()
+        try:
+            for start, end in ranges:
+                cursor = QTextCursor(self.document())
+                cursor.setPosition(start)
+                cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+                cursor.mergeCharFormat(fmt)
+        finally:
+            transaction.endEditBlock()
+        self._refresh_checklist_display()
+
+    def add_current_character_selection(self) -> bool:
+        cursor = self.textCursor()
+        if not cursor.hasSelection():
+            return False
+        added = self.character_selection.add_cursor(cursor)
+        if added:
+            cursor.clearSelection()
+            self.setTextCursor(cursor)
+        return added
+
+    def unlink_selected_character_ranges(self) -> bool:
+        """Remove only anchors in selected text, never page/block structure."""
+        ranges = self.character_selection.ranges()
+        if not ranges:
+            return False
+        runs: list[tuple[int, int]] = []
+        for start, end in ranges:
+            block = self.document().findBlock(start)
+            while block.isValid() and block.position() < end:
+                # An embedded page is a DB-backed block, not an inline link.
+                if self.page_id_of_block(block) is None:
+                    iterator = block.begin()
+                    while not iterator.atEnd():
+                        fragment = iterator.fragment()
+                        iterator += 1
+                        if fragment.isValid() and fragment.charFormat().isAnchor():
+                            left = max(start, fragment.position())
+                            right = min(end, fragment.position() + fragment.length())
+                            if left < right:
+                                runs.append((left, right))
+                block = block.next()
+        if not runs:
+            return False
+        transaction = QTextCursor(self.document())
+        transaction.beginEditBlock()
+        try:
+            for start, end in runs:
+                cursor = QTextCursor(self.document())
+                cursor.setPosition(start)
+                cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+                self._clear_anchor_in_cursor(cursor)
+        finally:
+            transaction.endEditBlock()
+        self._refresh_checklist_display()
+        return True
+
     def toggle_bullet_list(self) -> None:
+        if self.character_selection.count():
+            return
         cursor = self.textCursor()
         cursor.beginEditBlock()
         current = cursor.currentList()
@@ -479,6 +745,8 @@ class RichMemoTextEdit(QTextEdit):
         return bool(current is not None and current.format().style() == QTextListFormat.Style.ListDisc)
 
     def toggle_checklist(self) -> None:
+        if self.character_selection.count():
+            return
         cursor = self.textCursor()
         start, end = cursor.selectionStart(), cursor.selectionEnd()
         first = self.document().findBlock(start)
@@ -573,9 +841,49 @@ class RichMemoTextEdit(QTextEdit):
                     completed.format.setForeground(QColor(71, 85, 105, 145))
                     selections.append(completed)
         selections.extend(self._find_selections())
+        selections.extend(self._annotation_selections())
         selections.extend(self._block_selection_highlights())
+        selections.extend(self._character_selection_highlights())
         self.setExtraSelections(selections)
         self.viewport().update()
+
+    def set_annotations(self, rows) -> None:
+        self._annotations = [dict(row) for row in rows]
+        self._refresh_checklist_display()
+
+    def _annotation_selections(self):
+        selections = []
+        document_end = max(0, self.document().characterCount() - 1)
+        for row in self._annotations:
+            if str(row.get("location_status") or "") != "resolved":
+                continue
+            start = max(0, min(int(row.get("start_offset") or 0), document_end))
+            end = max(start, min(int(row.get("end_offset") or start), document_end))
+            cursor = QTextCursor(self.document())
+            cursor.setPosition(start)
+            if end > start:
+                cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+            else:
+                cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
+            mark = QTextEdit.ExtraSelection()
+            mark.cursor = cursor
+            mark.format.setBackground(QColor(254, 240, 138, 150))
+            mark.format.setUnderlineStyle(QTextCharFormat.UnderlineStyle.SingleUnderline)
+            mark.format.setUnderlineColor(QColor("#ca8a04"))
+            if not cursor.hasSelection():
+                mark.format.setProperty(QTextCharFormat.Property.FullWidthSelection, True)
+            selections.append(mark)
+        return selections
+
+    def annotation_at_position(self, position: int):
+        for row in reversed(self._annotations):
+            if str(row.get("location_status") or "") != "resolved":
+                continue
+            start = int(row.get("start_offset") or 0)
+            end = int(row.get("end_offset") or start)
+            if start <= int(position) <= max(start, end):
+                return row
+        return None
 
     def _block_selection_highlights(self):
         if not hasattr(self, "block_selection"):
@@ -593,9 +901,45 @@ class RichMemoTextEdit(QTextEdit):
         return selections
 
     def _block_selection_changed(self) -> None:
+        if self.block_selection.count():
+            self.character_selection.clear()
         self._refresh_checklist_display()
         self.block_action_bar.sync()
         self.gutter.update()
+
+    def _character_selection_highlights(self):
+        if not hasattr(self, "character_selection"):
+            return []
+        selections = []
+        for start, end in self.character_selection.ranges():
+            mark = QTextEdit.ExtraSelection()
+            mark.cursor = QTextCursor(self.document())
+            mark.cursor.setPosition(start)
+            mark.cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+            mark.format.setBackground(QColor(191, 219, 254, 215))
+            selections.append(mark)
+        return selections
+
+    def _character_selection_changed(self) -> None:
+        if self.character_selection.count():
+            self.block_selection.clear()
+        self._refresh_checklist_display()
+        self.character_action_bar.sync()
+
+    def _sync_selection_bar_height(self) -> None:
+        height = self.block_action_bar.HEIGHT + 4 if self.block_selection.count() else 0
+        if self.character_selection.count():
+            height = self.character_action_bar.HEIGHT + 4
+        elif height == 0 and self.text_format_bar.is_reserved:
+            height = self.text_format_bar.HEIGHT + 4
+        self._set_block_action_bar_height(height)
+
+    def set_format_toolbar(self, toolbar, open_more) -> None:
+        self.text_format_bar.bind(toolbar, open_more)
+        self._queue_text_format_bar_sync()
+
+    def _queue_text_format_bar_sync(self) -> None:
+        QTimer.singleShot(0, self.text_format_bar.sync)
 
     # ------------------------------------------------------------ 본문 찾기 --
     FIND_BACKGROUND = "#fde68a"
@@ -1155,6 +1499,8 @@ class RichMemoTextEdit(QTextEdit):
 
     def apply_heading(self, level: int) -> None:
         """Apply one persisted line-level title style to every selected block."""
+        if self.character_selection.count():
+            return
         if level not in HEADING_STYLES:
             return
         point_size, spacing, top, bottom = HEADING_STYLES[level]
@@ -1170,6 +1516,7 @@ class RichMemoTextEdit(QTextEdit):
                 block_format.setBottomMargin(bottom)
                 block_format.setLeftMargin(max(18.0, block_format.leftMargin()))
                 block_format.setProperty(HEADING_LEVEL_PROPERTY, level)
+                block_format.setHeadingLevel(level)
                 block_cursor.setBlockFormat(block_format)
                 block_cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock,
                                           QTextCursor.MoveMode.KeepAnchor)
@@ -1183,6 +1530,10 @@ class RichMemoTextEdit(QTextEdit):
             if not self._typing_transaction:
                 transaction.endEditBlock()
         self.setTextCursor(original)
+        if not original.hasSelection():
+            # A zero-length selection on an empty heading cannot style future
+            # characters.  Keep the heading's typing format at the caret too.
+            self.setCurrentCharFormat(char_format)
         self.setFocus()
 
     def apply_heading1(self) -> None:
@@ -1198,6 +1549,8 @@ class RichMemoTextEdit(QTextEdit):
         self.apply_heading(4)
 
     def apply_body_style(self) -> None:
+        if self.character_selection.count():
+            return
         original = self.textCursor()
         transaction = QTextCursor(original)
         transaction.beginEditBlock()
@@ -1211,6 +1564,7 @@ class RichMemoTextEdit(QTextEdit):
                 if abs(block_format.leftMargin() - 18.0) < 0.1:
                     block_format.setLeftMargin(0)
                 block_format.clearProperty(HEADING_LEVEL_PROPERTY)
+                block_format.setHeadingLevel(0)
                 block_cursor.setBlockFormat(block_format)
                 block_cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock,
                                           QTextCursor.MoveMode.KeepAnchor)
@@ -1229,6 +1583,9 @@ class RichMemoTextEdit(QTextEdit):
             level = 0
         if level in HEADING_STYLES:
             return level
+        level = int(block.blockFormat().headingLevel())
+        if level in HEADING_STYLES:
+            return level
         probe = QTextCursor(block)
         if block.text().startswith(HEADING_FOLDED_PREFIX):
             probe.setPosition(block.position() + len(HEADING_FOLDED_PREFIX))
@@ -1239,6 +1596,13 @@ class RichMemoTextEdit(QTextEdit):
         for candidate, (point_size, _spacing, top, _bottom) in HEADING_STYLES.items():
             if abs(size - point_size) < 0.1 and abs(block.blockFormat().topMargin() - top) < 0.1:
                 return candidate
+        # Recover headings created on an empty line before typing format was
+        # persisted.  Their distinctive block margins survived the HTML save.
+        if abs(block.blockFormat().leftMargin() - 18.0) < 0.1:
+            for candidate, (_size, _spacing, top, bottom) in HEADING_STYLES.items():
+                if (abs(block.blockFormat().topMargin() - top) < 0.1
+                        and abs(block.blockFormat().bottomMargin() - bottom) < 0.1):
+                    return candidate
         return 0
 
     def _convert_to_toggle(self, block) -> None:
@@ -1287,26 +1651,16 @@ class RichMemoTextEdit(QTextEdit):
 
     @staticmethod
     def _heading_is_folded(block) -> bool:
-        return block.isValid() and block.text().startswith(HEADING_FOLDED_PREFIX)
+        return block.isValid() and bool(
+            block.blockFormat().property(HEADING_FOLDED_PROPERTY)
+            or block.text().startswith(HEADING_FOLDED_PREFIX)
+        )
 
     def _set_heading_folded(self, block, folded: bool) -> None:
         if not block.isValid() or self._heading_is_folded(block) == folded:
             return
-        cursor = QTextCursor(block)
-        cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock)
-        if folded:
-            marker_format = QTextCharFormat()
-            marker_format.setFontPointSize(10)
-            marker_format.setFontWeight(QFont.Weight.Normal)
-            marker_format.setForeground(QColor("#64748b"))
-            cursor.insertText(HEADING_FOLDED_PREFIX, marker_format)
-        else:
-            cursor.movePosition(
-                QTextCursor.MoveOperation.NextCharacter, QTextCursor.MoveMode.KeepAnchor,
-                len(HEADING_FOLDED_PREFIX),
-            )
-            cursor.removeSelectedText()
         block_format = block.blockFormat()
+        block_format.setLeftMargin(max(18.0, block_format.leftMargin()))
         if folded:
             block_format.setProperty(HEADING_FOLDED_PROPERTY, True)
         else:
@@ -1325,6 +1679,9 @@ class RichMemoTextEdit(QTextEdit):
             while child.isValid() and not (
                 self.heading_level(child) and self.heading_level(child) <= level
                 and self._block_indent(child) <= depth
+            ) and not (
+                not self.heading_level(child) and self._block_indent(child) <= depth
+                and is_section_break(child)
             ):
                 if child.contains(self.textCursor().position()):
                     self.setTextCursor(QTextCursor(block))
@@ -1369,6 +1726,142 @@ class RichMemoTextEdit(QTextEdit):
         self.setTextCursor(QTextCursor(child))
         self.ensureCursorVisible()
         return True
+
+    # ------------------------------------------------------ 제목 끝 표시 --
+    def _heading_section_owner(self, block):
+        """이 본문 줄이 속한 제목(끝 표시로 끊기지 않은 가장 가까운 위 제목)."""
+        if not block.isValid() or self.heading_level(block):
+            return None
+        depth = self._block_indent(block)
+        if depth > 0 and self._parent_toggle(block) is not None:
+            return None
+        probe = block
+        while probe.isValid():
+            if probe != block and self.heading_level(probe):
+                if self._block_indent(probe) <= depth and self.page_id_of_block(probe) is None:
+                    return probe
+            elif self._block_indent(probe) <= depth and is_section_break(probe):
+                return None
+            probe = probe.previous()
+        return None
+
+    def mark_section_break(self, block) -> bool:
+        """제목 아래 맨 앞 줄에서 Shift+Tab: 이 줄부터 제목 밖으로 뺀다."""
+        if (self._block_indent(block) != 0 or is_section_break(block)
+                or self._is_toggle_block(block) or self._heading_section_owner(block) is None):
+            return False
+        fmt = block.blockFormat()
+        fmt.setProperty(SECTION_BREAK_PROPERTY, True)
+        QTextCursor(block).setBlockFormat(fmt)
+        self._refresh_toggle_visibility()
+        self.viewport().update()
+        return True
+
+    def clear_section_break(self, block) -> bool:
+        """끝 표시 줄 맨 앞 Backspace: 표시만 지워 다시 제목에 넣는다."""
+        if not is_section_break(block):
+            return False
+        fmt = block.blockFormat()
+        fmt.clearProperty(SECTION_BREAK_PROPERTY)
+        QTextCursor(block).setBlockFormat(fmt)
+        self._refresh_toggle_visibility()
+        self.viewport().update()
+        return True
+
+    def _open_line_after_folded_heading(self, heading) -> None:
+        """접힌 제목에서 Enter: 숨은 본문 뒤, 제목 밖에 새 줄을 연다."""
+        level = self.heading_level(heading)
+        depth = self._block_indent(heading)
+        last = heading
+        probe = heading.next()
+        while probe.isValid() and not probe.isVisible():
+            if self.heading_level(probe) and self.heading_level(probe) <= level \
+                    and self._block_indent(probe) <= depth:
+                break
+            last = probe
+            probe = probe.next()
+        cursor = QTextCursor(last)
+        cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+        cursor.beginEditBlock()
+        try:
+            self._open_clean_block(cursor, depth)
+            if last != heading:
+                fmt = cursor.blockFormat()
+                fmt.setProperty(SECTION_BREAK_PROPERTY, True)
+                cursor.setBlockFormat(fmt)
+        finally:
+            cursor.endEditBlock()
+        self.setTextCursor(cursor)
+        self.setCurrentCharFormat(QTextCharFormat())
+        self._refresh_toggle_visibility()
+
+    def _keep_caret_on_visible_line(self) -> None:
+        """Ctrl+End·↓ 등으로 숨은 줄에 들어간 커서를 보이는 줄로 데려온다."""
+        cursor = self.textCursor()
+        block = cursor.block()
+        if block.isVisible() or cursor.hasSelection():
+            return
+        probe = block.previous()
+        while probe.isValid() and not probe.isVisible():
+            probe = probe.previous()
+        if not probe.isValid():
+            return
+        moved = QTextCursor(probe)
+        moved.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+        self.setTextCursor(moved)
+
+    def _paint_section_breaks(self, painter: QPainter, viewport_rect) -> None:
+        painter.save()
+        pen = QPen(QColor("#cbd5e1"), 1.0, Qt.PenStyle.DashLine)
+        painter.setPen(pen)
+        for block in self._visible_blocks():
+            if not block.isVisible() or not is_section_break(block):
+                continue
+            rect = self.cursorRect(QTextCursor(block))
+            y = rect.top() - 1.5
+            if y < viewport_rect.top() - 4 or y > viewport_rect.bottom() + 4:
+                continue
+            painter.drawLine(QLineF(rect.left(), y, viewport_rect.right() - 8, y))
+        painter.restore()
+
+    def _nearest_fold_parent(self, block):
+        """커서 줄을 품은 가장 가까운 토글이나 제목."""
+        toggle = self._parent_toggle(block)
+        heading = None
+        probe = block.previous()
+        while probe.isValid():
+            if self.heading_level(probe) and self.page_id_of_block(probe) is None:
+                heading = probe
+                break
+            probe = probe.previous()
+        if toggle is not None and (heading is None or toggle.position() > heading.position()):
+            return toggle
+        return heading
+
+    def fold_nearest_parent(self) -> bool:
+        """제목·토글이 아닌 줄에서 누른 접기: 이 줄을 품은 제목·토글을 접는다."""
+        parent = self._nearest_fold_parent(self.textCursor().block())
+        if parent is None:
+            return False
+        if self._is_toggle_block(parent):
+            self.fold_toggle(parent)
+            return True
+        return self.fold_heading(parent)
+
+    def fold_summary(self) -> tuple[bool, bool]:
+        """(접을 수 있는 제목·토글이 있는가, 모두 접혀 있는가)."""
+        found = False
+        for block in self._iter_blocks():
+            if self._is_toggle_block(block):
+                found = True
+                if self._toggle_is_open(block):
+                    return True, False
+            elif (self.heading_level(block) and self.page_id_of_block(block) is None
+                  and block.text().removeprefix(HEADING_FOLDED_PREFIX).strip()):
+                found = True
+                if not self._heading_is_folded(block):
+                    return True, False
+        return found, found
 
     def exit_current_fold(self) -> bool:
         block = self.textCursor().block()
@@ -1420,6 +1913,10 @@ class RichMemoTextEdit(QTextEdit):
             if (folded_heading is not None and level and level <= folded_heading[0]
                     and indent <= folded_heading[1]):
                 folded_heading = None
+            if (folded_heading is not None and not level and indent <= folded_heading[1]
+                    and is_section_break(block)):
+                # 제목 끝 표시가 있는 줄부터는 제목 밖이다.
+                folded_heading = None
             if hidden_depth is not None and indent <= hidden_depth:
                 hidden_depth = None
             visible = hidden_depth is None and folded_heading is None
@@ -1431,9 +1928,44 @@ class RichMemoTextEdit(QTextEdit):
             if visible and self._is_toggle_block(block) and not self._toggle_is_open(block):
                 hidden_depth = indent
             block = block.next()
+        if self._sync_folded_table_frames():
+            changed = True
         if changed:
             document.markContentsDirty(0, max(1, document.characterCount()))
             self.viewport().update()
+
+    def _sync_folded_table_frames(self) -> bool:
+        """Hide the empty grid when every cell belongs to a folded section."""
+        tables: dict[int, tuple[object, bool]] = {}
+        block = self.document().begin()
+        while block.isValid():
+            table = self._table_at_block(block)
+            if table is not None:
+                key = int(table.firstPosition())
+                previous = tables.get(key)
+                tables[key] = (
+                    table,
+                    block.isVisible() or (previous[1] if previous is not None else False),
+                )
+            block = block.next()
+        changed = False
+        for key, (table, any_visible) in tables.items():
+            if not any_visible and key not in self._folded_table_formats:
+                self._folded_table_formats[key] = QTextTableFormat(table.format())
+                hidden = QTextTableFormat(table.format())
+                hidden.setBorder(0)
+                hidden.setCellPadding(0)
+                hidden.setCellSpacing(0)
+                hidden.setWidth(QTextLength(QTextLength.Type.FixedLength, 0))
+                table.setFormat(hidden)
+                changed = True
+            elif any_visible and key in self._folded_table_formats:
+                table.setFormat(self._folded_table_formats.pop(key))
+                changed = True
+        live = set(tables)
+        for key in set(self._folded_table_formats).difference(live):
+            self._folded_table_formats.pop(key, None)
+        return changed
 
     def _shift_indent(self, block, amount: int) -> None:
         """Tab 으로 안으로, Shift+Tab 으로 밖으로.  들여쓰기가 곧 토글의 내용이다."""
@@ -1580,6 +2112,9 @@ class RichMemoTextEdit(QTextEdit):
         if not source.isValid() or not target.isValid():
             return False
         family = self._block_family(source)
+        current_ids = block_ids(document)
+        source_ids = [current_ids[block.blockNumber()] for block in family]
+        source_pins = [is_pinned(block) for block in family]
         span = range(family[0].position(), family[-1].position() + family[-1].length())
         if target.position() in span:
             # 자기 자신이나 자기 안으로는 옮기지 않는다.
@@ -1590,6 +2125,7 @@ class RichMemoTextEdit(QTextEdit):
         depth = self._block_indent(target) + (1 if inside else 0)
         shift = depth - self._block_indent(source)
         cut = QTextCursor(document)
+        self._identity_reordered = True
         cut.beginEditBlock()
         try:
             cut.setPosition(family[0].position())
@@ -1613,12 +2149,18 @@ class RichMemoTextEdit(QTextEdit):
             start = place.position()
             place.insertHtml(fragment)
             self._reindent_range(start, indents)
+            set_ids_from(document, start, source_ids)
+            moved_block = document.findBlock(start)
+            for pinned in source_pins:
+                set_pinned(moved_block, pinned)
+                moved_block = moved_block.next()
             if inside:
                 # 토글 안내가 떠 있던 빈 줄은 이제 쓸모가 없다.  같이 걷어낸다.
                 # 옮기면서 자리가 밀렸으므로 지금 자리로 다시 찾는다.
                 self._drop_empty_placeholder(document.findBlock(landing_at))
         finally:
             cut.endEditBlock()
+            self._identity_reordered = False
         self._refresh_toggle_visibility()
         return True
 
@@ -1667,7 +2209,7 @@ class RichMemoTextEdit(QTextEdit):
         page_snapshot = {"version": 1, "roots": [], "notes": [], "attachments": []}
         attachments = []
         if self.store is not None:
-            page_ids = [value for value in page_ids_from_html(html) if self.store.note(value) is not None]
+            page_ids = self._page_ids_for_html(html)
             page_snapshot = NoteCloneService(self.store).snapshot(page_ids)
             for attachment_id in attachment_ids_from_html(html):
                 row = self.store.attachment(attachment_id)
@@ -1736,15 +2278,45 @@ class RichMemoTextEdit(QTextEdit):
             family[-1].position() + family[-1].length() - 1,
             QTextCursor.MoveMode.KeepAnchor,
         )
+        source_all_ids = block_ids(self.document())
+        moved_ids = [source_all_ids[block.blockNumber()] for block in family]
+        moved_pins = [is_pinned(block) for block in family]
         moved = cut.selection().toHtml()
         carrier = QTextDocument()
-        carrier.setHtml(str(row["content"] or ""))
+        target_content = str(row["content"] or "")
+        carrier.setHtml(target_content)
+        load_ids(carrier, target_content)
+        load_pins(carrier, target_content)
         landing = QTextCursor(carrier)
         landing.movePosition(QTextCursor.MoveOperation.End)
         if carrier.characterCount() > 1:
             landing.insertBlock()
         landing.insertHtml(moved)
-        self.store.update_note(page_id, content=carrier.toHtml())
+        # Rich HTML transports visible format, not QTextBlockUserData. Reattach
+        # identity/pin metadata to the appended family only when the boundary
+        # survived the paste intact; otherwise let missing blocks get new IDs.
+        appended = []
+        candidate = carrier.lastBlock()
+        for _ in family:
+            if not candidate.isValid():
+                break
+            appended.append(candidate)
+            candidate = candidate.previous()
+        appended.reverse()
+        existing = set(block_ids(carrier))
+        existing.difference_update(
+            getattr(block.userData(), "block_id", "") for block in appended
+        )
+        if (len(appended) == len(family)
+                and [block.text() for block in appended] == [block.text() for block in family]
+                and not existing.intersection(moved_ids)):
+            set_ids_from(carrier, appended[0].position(), moved_ids)
+            for block, pinned in zip(appended, moved_pins):
+                if pinned:
+                    set_pinned(block, True)
+        target_html = with_ids(carrier.toHtml(), block_ids(carrier))
+        target_html = with_pins(target_html, pinned_ids(carrier))
+        self.store.update_note(page_id, content=target_html)
         cut.beginEditBlock()
         try:
             self._remove_with_separator(cut, family)
@@ -1806,7 +2378,19 @@ class RichMemoTextEdit(QTextEdit):
             return
         _start, query = found
         matches = list(matching_items(self, query))
-        if not matches:
+        template_matches = []
+        if self.store is not None:
+            normalized = query.casefold()
+            template_query = "" if normalized in {"template", "템플릿"} else normalized
+            template_mode = normalized.startswith("template") or normalized.startswith("템플릿")
+            for row in self.store.memo_data.templates():
+                trigger = str(row["trigger"])
+                name = str(row["name"])
+                if template_mode or not normalized or normalized in trigger.casefold() or normalized in name.casefold():
+                    if template_mode and template_query and template_query not in trigger.casefold() and template_query not in name.casefold():
+                        continue
+                    template_matches.append((f"템플릿 · {name}", int(row["id"])))
+        if not matches and not template_matches:
             self.close_insert_popup()
             return
         popup = self._ensure_insert_popup()
@@ -1816,6 +2400,11 @@ class RichMemoTextEdit(QTextEdit):
             trigger = self.insert_preferences.triggers.get(item.item_id or item.method, item.typing)
             entry.setToolTip(item_tooltip(item, trigger))
             entry.setData(Qt.ItemDataRole.UserRole, item[2])
+            popup.addItem(entry)
+        for label, template_id in template_matches:
+            entry = QListWidgetItem(label)
+            entry.setToolTip("저장한 블록 템플릿을 새 UUID로 삽입합니다")
+            entry.setData(Qt.ItemDataRole.UserRole, f"template:{template_id}")
             popup.addItem(entry)
         popup.setCurrentRow(0)
         # 스크롤을 내리지 않아도 다 보이게 항목 수만큼 편다.  줄 높이는 글꼴에
@@ -1907,8 +2496,50 @@ class RichMemoTextEdit(QTextEdit):
             cursor.removeSelectedText()
             self.setTextCursor(cursor)
         handler = getattr(self, method, None)
-        if callable(handler):
-            handler()
+        try:
+            if callable(handler):
+                handler()
+            elif method.startswith("template:"):
+                self._insert_template(int(method.split(":", 1)[1]))
+        except ValueError as exc:
+            QMessageBox.warning(self, "삽입할 수 없음", str(exc))
+            return False
+        return True
+
+    def _insert_template(self, template_id: int) -> bool:
+        row = self.store.conn.execute("SELECT * FROM memo_templates WHERE id=?", (int(template_id),)).fetchone()
+        if row is None or int(row["payload_version"]) != 1:
+            raise ValueError("지원하지 않는 템플릿 형식입니다.")
+        try:
+            payload = json.loads(str(row["payload_json"]))
+        except json.JSONDecodeError as exc:
+            raise ValueError("템플릿 데이터를 읽을 수 없습니다.") from exc
+        if not isinstance(payload, dict) or int(payload.get("version", 0)) != 1:
+            raise ValueError("지원하지 않는 템플릿 형식입니다.")
+        return self._paste_internal_blocks(payload)
+
+    def save_selection_as_template(self) -> bool:
+        if self.store is None:
+            return False
+        mime = (
+            self.mime_for_blocks(self.block_commands.blocks())
+            if self.block_selection.count() else self.createMimeDataFromSelection()
+        )
+        payload = get_json(mime, BLOCK_MIME) if mime is not None else None
+        if payload is None:
+            return False
+        from PyQt6.QtWidgets import QInputDialog
+        name, ok = QInputDialog.getText(self, "블록 템플릿 저장", "템플릿 이름")
+        if not ok or not name.strip():
+            return False
+        trigger, ok = QInputDialog.getText(self, "블록 템플릿 저장", "호출어 (/ 제외)")
+        if not ok or not trigger.strip():
+            return False
+        try:
+            self.store.memo_data.save_template(name, trigger, payload, payload_version=1)
+        except ValueError as exc:
+            QMessageBox.warning(self, "템플릿을 저장할 수 없음", str(exc))
+            return False
         return True
 
     # --------------------------------------------------- 강조 상자·구분선 --
@@ -2215,6 +2846,8 @@ class RichMemoTextEdit(QTextEdit):
 
     def apply_line_spacing(self, multiplier: float) -> bool:
         """Apply a proportional line height to selected paragraphs in one undo."""
+        if self.character_selection.count():
+            return False
         percent = int(round(float(multiplier) * 100))
         if percent not in {100, 115, 150, 200}:
             return False
@@ -2277,10 +2910,25 @@ class RichMemoTextEdit(QTextEdit):
             block = block.next()
 
     # ------------------------------------------------------------- 페이지 --
-    @staticmethod
-    def page_id_at(anchor: str) -> int | None:
-        match = _PAGE_ID_RE.fullmatch(str(anchor or "").strip())
-        return int(match.group(1)) if match is not None else None
+    def page_id_at(self, anchor: str | None = None) -> int | None:
+        # Keep the old class-style numeric parser call working for extensions.
+        owner = self if isinstance(self, RichMemoTextEdit) else None
+        value = self if owner is None and anchor is None else anchor
+        match = _PAGE_ID_RE.fullmatch(str(value or "").strip())
+        if match is not None:
+            return int(match.group(1))
+        match = _PAGE_SYNC_RE.fullmatch(str(value or "").strip())
+        if match is None or owner is None or owner.store is None:
+            return None
+        row = owner.store.note_by_sync_id(match.group(1), include_trashed=True)
+        return None if row is None else int(row["id"])
+
+    def _note_href(self, note_id: int) -> str:
+        row = self.store.note(int(note_id)) if self.store is not None else None
+        return (
+            f"{PAGE_URL_PREFIX}v2/{row['sync_id']}" if row is not None and str(row["sync_id"] or "")
+            else f"{PAGE_URL_PREFIX}{int(note_id)}"
+        )
 
     def insert_note_link(self) -> bool:
         """이미 있는 메모를 가리키는 링크를 넣는다.  새 메모를 만들지 않는다."""
@@ -2292,6 +2940,7 @@ class RichMemoTextEdit(QTextEdit):
         note_id, title = dialog.chosen_id(), dialog.chosen_title()
         if note_id is None:
             return False
+        self.character_selection.clear()
         cursor = self.textCursor()
         self._write_link_run(cursor, note_id, title or DEFAULT_PAGE_TITLE)
         self.setTextCursor(cursor)
@@ -2302,7 +2951,7 @@ class RichMemoTextEdit(QTextEdit):
     def _write_link_run(self, cursor, note_id: int, title: str) -> None:
         fmt = QTextCharFormat()
         fmt.setAnchor(True)
-        fmt.setAnchorHref(f"{PAGE_URL_PREFIX}{int(note_id)}")
+        fmt.setAnchorHref(self._note_href(note_id))
         fmt.setForeground(QColor("#2438b8"))
         fmt.setFontUnderline(True)
         cursor.insertText(f"{LINK_MARK}{title}", fmt)
@@ -2360,6 +3009,7 @@ class RichMemoTextEdit(QTextEdit):
                 self, "페이지 추가", "메모를 먼저 저장한 뒤 페이지를 넣어 주세요.",
             )
             return False
+        self.character_selection.clear()
         # 본문 안에만 사는 페이지다.  메모 목록에는 내놓지 않는다.
         page_id = self.store.create_child_note(
             self.note_id, DEFAULT_PAGE_TITLE, embedded=True,
@@ -2447,7 +3097,7 @@ class RichMemoTextEdit(QTextEdit):
     def _write_page_link(self, cursor, page_id: int, title: str) -> None:
         fmt = QTextCharFormat()
         fmt.setAnchor(True)
-        fmt.setAnchorHref(f"{PAGE_URL_PREFIX}{int(page_id)}")
+        fmt.setAnchorHref(self._note_href(page_id))
         fmt.setForeground(QColor("#2438b8"))
         fmt.setFontUnderline(True)
         cursor.insertText(f"{PAGE_MARK}{title}", fmt)
@@ -2539,6 +3189,37 @@ class RichMemoTextEdit(QTextEdit):
                 return int(note_id)
         return None
 
+    def _block_link_at_position(self, position: int) -> tuple[int, str] | None:
+        block = self.document().findBlock(max(0, int(position)))
+        if not block.isValid():
+            return None
+        runs = []
+        iterator = block.begin()
+        while not iterator.atEnd():
+            fragment = iterator.fragment()
+            iterator += 1
+            if not fragment.isValid():
+                continue
+            target = parse_block_url(fragment.charFormat().anchorHref())
+            if target is None:
+                continue
+            memo_ref, block_id = target
+            if isinstance(memo_ref, str):
+                row = self.store.note_by_sync_id(memo_ref) if self.store is not None else None
+                if row is None:
+                    continue
+                target = (int(row["id"]), block_id)
+            start = fragment.position()
+            end = start + fragment.length()
+            if runs and runs[-1][1] == start and runs[-1][2] == target:
+                runs[-1] = (runs[-1][0], end, target, runs[-1][3] + fragment.text())
+            else:
+                runs.append((start, end, target, fragment.text()))
+        for start, end, target, text in runs:
+            if start <= position < end and text.startswith(LINK_MARK):
+                return target
+        return None
+
     def _remove_orphan_internal_links(self) -> None:
         """Strip stale toma-note anchors that no longer carry a link marker."""
         stale = []
@@ -2581,10 +3262,7 @@ class RichMemoTextEdit(QTextEdit):
 
     def _heading_marker_rect(self, block) -> QRectF:
         glyph = self.cursorRect(QTextCursor(block))
-        if self._heading_is_folded(block):
-            left = glyph.left() - 2
-        else:
-            left = max(0.0, glyph.left() - 18)
+        left = max(0.0, glyph.left() - 18)
         return QRectF(left, glyph.top(), 18.0, max(glyph.height(), 20))
 
     def _heading_block_at(self, point):
@@ -2629,6 +3307,22 @@ class RichMemoTextEdit(QTextEdit):
             self.viewport().update()
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if (self._character_press_point is not None
+                and event.buttons() & Qt.MouseButton.LeftButton):
+            if ((event.position().toPoint() - self._character_press_point).manhattanLength()
+                    > QApplication.startDragDistance()):
+                self._character_dragging = True
+            if self._character_dragging:
+                cursor = self.textCursor()
+                cursor.clearSelection()
+                self.setTextCursor(cursor)
+                event.accept()
+                return
+        if (self._left_press_point is not None
+                and event.buttons() & Qt.MouseButton.LeftButton
+                and (event.position().toPoint() - self._left_press_point).manhattanLength()
+                > QApplication.startDragDistance()):
+            self._left_press_dragged = True
         if self._block_selecting and event.buttons() & Qt.MouseButton.LeftButton:
             self.update_block_selection(self.cursorForPosition(event.position().toPoint()).block())
             event.accept()
@@ -2647,7 +3341,23 @@ class RichMemoTextEdit(QTextEdit):
             return
         block = self._marker_block_at(event.position())
         self._set_hover_marker(block)
-        if block is None and self._page_link_at(event.position()) is not None:
+        annotation = self.annotation_at_position(
+            self.cursorForPosition(event.position().toPoint()).position()
+        )
+        if annotation is not None:
+            if self.viewport().cursor().shape() != Qt.CursorShape.PointingHandCursor:
+                self.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
+            QToolTip.showText(
+                event.globalPosition().toPoint(), str(annotation.get("comment") or "주석"),
+                self.viewport(), self.viewport().rect(), 2500,
+            )
+            return
+        if block is None and (
+            self._page_link_at(event.position()) is not None
+            or self._block_link_at_position(
+                self.cursorForPosition(event.position().toPoint()).position()
+            ) is not None
+        ):
             # 페이지 줄도 눌러서 여는 자리다.
             if self.viewport().cursor().shape() != Qt.CursorShape.PointingHandCursor:
                 self.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
@@ -2689,6 +3399,7 @@ class RichMemoTextEdit(QTextEdit):
             painter.setBrush(Qt.BrushStyle.NoBrush)
         self._paint_empty_toggle_hints(painter, viewport_rect)
         self._paint_dividers(painter, viewport_rect)
+        self._paint_section_breaks(painter, viewport_rect)
         self._paint_quote_bars(painter, viewport_rect)
         self._paint_heading_markers(painter, viewport_rect)
         self._paint_drop_marker(painter)
@@ -2719,13 +3430,14 @@ class RichMemoTextEdit(QTextEdit):
         painter.save()
         painter.setPen(QColor("#64748b"))
         for block in self._visible_blocks():
-            if not block.isVisible() or not self.heading_level(block) or self._heading_is_folded(block):
+            if not block.isVisible() or not self.heading_level(block):
                 continue
             if self.page_id_of_block(block) is not None:
                 continue
             rect = self._heading_marker_rect(block)
             if rect.intersects(QRectF(viewport_rect)):
-                painter.drawText(rect, int(Qt.AlignmentFlag.AlignCenter), "▾")
+                marker = "▶" if self._heading_is_folded(block) else "▾"
+                painter.drawText(rect, int(Qt.AlignmentFlag.AlignCenter), marker)
         painter.restore()
 
     def _paint_dividers(self, painter: QPainter, viewport_rect) -> None:
@@ -2783,6 +3495,7 @@ class RichMemoTextEdit(QTextEdit):
         if self.store is None or self.note_id is None:
             QMessageBox.information(self, "이미지 삽입", "메모를 먼저 저장한 뒤 이미지를 삽입해 주세요.")
             return False
+        self.character_selection.clear()
         prepared = image
         if max(image.width(), image.height()) > MAX_IMAGE_EDGE:
             prepared = image.scaled(
@@ -2825,6 +3538,7 @@ class RichMemoTextEdit(QTextEdit):
         return bytes(payload)
 
     def insertFromMimeData(self, source: QMimeData) -> None:
+        self.character_selection.clear()
         self._move_caret_past_table_boundary()
         payload = get_json(source, BLOCK_MIME)
         if payload is not None and self._paste_internal_blocks(payload):
@@ -2870,7 +3584,7 @@ class RichMemoTextEdit(QTextEdit):
         page_snapshot = {"version": 1, "roots": [], "notes": [], "attachments": []}
         attachments = []
         if self.store is not None:
-            page_ids = [value for value in page_ids_from_html(html) if self.store.note(value) is not None]
+            page_ids = self._page_ids_for_html(html)
             page_snapshot = NoteCloneService(self.store).snapshot(page_ids)
             for attachment_id in attachment_ids_from_html(html):
                 row = self.store.attachment(attachment_id)
@@ -2887,6 +3601,16 @@ class RichMemoTextEdit(QTextEdit):
         })
         return mime
 
+    def _page_ids_for_html(self, html: str) -> list[int]:
+        if self.store is None:
+            return []
+        found = [value for value in page_ids_from_html(html) if self.store.note(value) is not None]
+        for sync_id in page_sync_ids_from_html(html):
+            row = self.store.note_by_sync_id(sync_id)
+            if row is not None:
+                found.append(int(row["id"]))
+        return list(dict.fromkeys(found))
+
     @staticmethod
     def _set_block_heading_metadata(block, level: int) -> None:
         cursor = QTextCursor(block)
@@ -2896,8 +3620,10 @@ class RichMemoTextEdit(QTextEdit):
             fmt.setTopMargin(top)
             fmt.setBottomMargin(bottom)
             fmt.setProperty(HEADING_LEVEL_PROPERTY, level)
+            fmt.setHeadingLevel(level)
         else:
             fmt.clearProperty(HEADING_LEVEL_PROPERTY)
+            fmt.setHeadingLevel(0)
         cursor.setBlockFormat(fmt)
 
     def _paste_internal_blocks(self, payload: dict) -> bool:
@@ -2965,6 +3691,8 @@ class RichMemoTextEdit(QTextEdit):
         return True
 
     def _undo_composite_or_document(self) -> None:
+        if callable(self.external_undo_handler) and self.external_undo_handler():
+            return
         steps = int(self.document().availableUndoSteps())
         entry = next(
             (value for value in reversed(self._composite_edits)
@@ -2981,6 +3709,8 @@ class RichMemoTextEdit(QTextEdit):
         self._refresh_known_pages()
 
     def _redo_composite_or_document(self) -> None:
+        if callable(self.external_redo_handler) and self.external_redo_handler():
+            return
         steps = int(self.document().availableUndoSteps())
         entry = next(
             (value for value in self._composite_edits
@@ -3051,6 +3781,8 @@ class RichMemoTextEdit(QTextEdit):
                     fmt = block.blockFormat()
                     fmt.setObjectIndex(-1)
                     fmt.clearProperty(HEADING_LEVEL_PROPERTY)
+                    fmt.clearProperty(PIN_PROPERTY)
+                    fmt.setHeadingLevel(0)
                     fmt.clearBackground()
                     fmt.setLeftMargin(0)
                     fmt.setTopMargin(0)
@@ -3123,18 +3855,63 @@ class RichMemoTextEdit(QTextEdit):
 
     def _copy_or_apply_character_format(self) -> None:
         cursor = self.textCursor()
+        if self.character_selection.count():
+            if self._copied_character_format is None:
+                self._show_format_feedback("복사된 서식이 없습니다")
+            else:
+                self.apply_character_format(self._copied_character_format)
+                self._show_format_feedback("서식 적용됨")
+            return
         if cursor.hasSelection() and self._copied_character_format is not None:
             cursor.mergeCharFormat(self._copied_character_format)
             self.mergeCurrentCharFormat(self._copied_character_format)
+            self._show_format_feedback("서식 적용됨")
             return
         if cursor.hasSelection():
+            self._show_format_feedback("복사된 서식이 없습니다")
             return
         probe = QTextCursor(cursor)
         if probe.atBlockEnd() and probe.position() > probe.block().position():
             probe.movePosition(QTextCursor.MoveOperation.PreviousCharacter)
         self._copied_character_format = self._visual_character_format(probe.charFormat())
+        self._show_format_feedback("서식 복사됨")
+
+    def _show_format_feedback(self, message: str) -> None:
+        # One native, non-activating popup; subsequent Alt+C replaces it rather
+        # than stacking modal dialogs over the editor.
+        QToolTip.showText(
+            self.mapToGlobal(QPoint(max(8, self.width() - 180), -12)),
+            message, self, self.rect(), 1800,
+        )
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
+        key = QKeySequence(event.keyCombination()).toString()
+        format_handler = getattr(self, "format_shortcut_handlers", {}).get(key)
+        if format_handler is not None:
+            format_handler()
+            event.accept()
+            return
+        if (event.key() in {Qt.Key.Key_Return, Qt.Key.Key_Enter}
+                and event.modifiers() == Qt.KeyboardModifier.ControlModifier
+                and getattr(self, "reminder_save_handler", None) is not None):
+            self.reminder_save_handler()
+            event.accept()
+            return
+        if event.key() == Qt.Key.Key_M and event.modifiers() == (
+            Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier
+        ):
+            self.add_current_character_selection()
+            return
+        if self.character_selection.count():
+            if event.key() == Qt.Key.Key_Escape:
+                self.character_selection.clear()
+                return
+            # The ranges are transient. Text and structural edits return to
+            # ordinary single-caret editing; formatting shortcuts stay active.
+            if event.modifiers() == Qt.KeyboardModifier.NoModifier or event.key() in (
+                Qt.Key.Key_V, Qt.Key.Key_X, Qt.Key.Key_Backspace, Qt.Key.Key_Delete,
+            ):
+                self.character_selection.clear()
         if event.modifiers() == Qt.KeyboardModifier.AltModifier:
             if event.key() == Qt.Key.Key_Right and self.enter_current_fold():
                 return
@@ -3175,6 +3952,17 @@ class RichMemoTextEdit(QTextEdit):
             if event.key() == Qt.Key.Key_Escape:
                 self.close_insert_popup()
                 return
+        if event.key() in {Qt.Key.Key_Tab, Qt.Key.Key_Backtab} and self.block_selection.count():
+            amount = 1 if event.key() == Qt.Key.Key_Tab else -1
+            transaction = QTextCursor(self.document())
+            transaction.beginEditBlock()
+            try:
+                for selected_block in self.block_selection.blocks():
+                    if amount < 0 or self._block_indent(selected_block) < 8:
+                        self._shift_indent(selected_block, amount)
+            finally:
+                transaction.endEditBlock()
+            return
         if event.key() == Qt.Key.Key_V and event.modifiers() == (
             Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier
         ):
@@ -3214,14 +4002,22 @@ class RichMemoTextEdit(QTextEdit):
                 return
             if event.key() == Qt.Key.Key_Backtab and self.step_table_cell(False):
                 return
-            if event.key() == Qt.Key.Key_Tab and offset == 0 and self._block_indent(block) < 8:
+            if event.key() == Qt.Key.Key_Tab and self._block_indent(block) < 8:
                 self._shift_indent(block, 1)
                 return
             if event.key() == Qt.Key.Key_Backtab:
+                if self._block_indent(block) == 0 and self.mark_section_break(block):
+                    return
                 self._shift_indent(block, -1)
+                return
+            if (event.key() == Qt.Key.Key_Backspace and offset == 0
+                    and is_section_break(block) and self.clear_section_break(block)):
                 return
         if not cursor.hasSelection() and event.key() in {Qt.Key.Key_Return, Qt.Key.Key_Enter}:
             if self.heading_level(block):
+                if self._heading_is_folded(block):
+                    self._open_line_after_folded_heading(block)
+                    return
                 cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock)
                 self._open_clean_block(cursor)
                 self.setTextCursor(cursor)
@@ -3343,6 +4139,18 @@ class RichMemoTextEdit(QTextEdit):
     def contextMenuEvent(self, event) -> None:
         point_cursor = self.cursorForPosition(event.pos())
         point_block = point_cursor.block()
+        if self.character_selection.count():
+            if self.character_selection.contains(point_cursor.position()):
+                menu = QMenu(self)
+                heading = menu.addAction(
+                    f"{self.character_selection.count()}개 글자 구간 선택 · 서식 도구로 일괄 적용"
+                )
+                heading.setEnabled(False)
+                menu.addAction("선택 글자 링크 기능 해제", self.unlink_selected_character_ranges)
+                menu.addAction("선택 해제", self.character_selection.clear)
+                menu.exec(self._context_menu_position(menu, event.globalPos()))
+                return
+            self.character_selection.clear()
         if self.block_selection.count() and not self.block_selection.contains(point_block):
             self.block_selection.select_only(point_block)
         elif not self.block_selection.count():
@@ -3351,23 +4159,67 @@ class RichMemoTextEdit(QTextEdit):
                 current.selectionStart() <= point_cursor.position() <= current.selectionEnd()
             ):
                 self.setTextCursor(point_cursor)
-        menu = self.createStandardContextMenu()
-        self._wire_context_history_actions(menu)
+        block_mode = self.block_selection.count() > 0
+        menu = QMenu(self) if block_mode else self.createStandardContextMenu()
+        if block_mode:
+            heading = menu.addAction(f"{self.block_selection.count()}개 블록 선택")
+            heading.setEnabled(False)
+        else:
+            self._wire_context_history_actions(menu)
         menu.addSeparator()
         self._populate_block_context_menu(menu)
-        menu.addSeparator()
-        paste_menu = menu.addMenu("붙여넣기 방식")
-        source = QApplication.clipboard().mimeData()
-        original = paste_menu.addAction("원본 서식 유지\tCtrl+V")
-        original.setEnabled(bool(source and (source.hasText() or source.hasImage() or source.hasUrls())))
-        original.triggered.connect(self.paste)
-        matching = paste_menu.addAction("현재 서식에 맞추기")
-        matching.setEnabled(bool(QApplication.clipboard().text()))
-        matching.triggered.connect(self.paste_matching_format)
-        plain = paste_menu.addAction("텍스트만\tCtrl+Shift+V")
-        plain.setEnabled(bool(QApplication.clipboard().text()))
-        plain.triggered.connect(self.paste_as_plain_text)
-        menu.exec(event.globalPos())
+        if not block_mode:
+            menu.addSeparator()
+            paste_menu = menu.addMenu("붙여넣기 방식")
+            source = QApplication.clipboard().mimeData()
+            original = paste_menu.addAction("원본 서식 유지\tCtrl+V")
+            original.setEnabled(bool(source and (source.hasText() or source.hasImage() or source.hasUrls())))
+            original.triggered.connect(self.paste)
+            matching = paste_menu.addAction("현재 서식에 맞추기")
+            matching.setEnabled(bool(QApplication.clipboard().text()))
+            matching.triggered.connect(self.paste_matching_format)
+            plain = paste_menu.addAction("텍스트만\tCtrl+Shift+V")
+            plain.setEnabled(bool(QApplication.clipboard().text()))
+            plain.triggered.connect(self.paste_as_plain_text)
+        menu.exec(self._context_menu_position(menu, event.globalPos()))
+
+    def _context_menu_position(self, menu: QMenu, requested: QPoint) -> QPoint:
+        if not (self.block_selection.count() or self.character_selection.count()
+                or self.textCursor().hasSelection()):
+            return requested
+        screen = QApplication.screenAt(requested) or self.screen()
+        bounds = screen.availableGeometry()
+        size = menu.sizeHint()
+        top_left = self.mapToGlobal(QPoint(0, 0))
+        y = max(bounds.top(), min(requested.y(), bounds.bottom() - size.height()))
+        right = top_left.x() + self.width() + 8
+        if right + size.width() <= bounds.right():
+            return QPoint(right, y)
+        left = top_left.x() - size.width() - 8
+        if left >= bounds.left():
+            return QPoint(left, y)
+        x = max(bounds.left(), min(requested.x(), bounds.right() - size.width()))
+        below = top_left.y() + self.height() + 6
+        if below + size.height() <= bounds.bottom():
+            return QPoint(x, below)
+        above = top_left.y() - size.height() - 6
+        if above >= bounds.top():
+            return QPoint(x, above)
+        return QPoint(x, y)
+
+    def toggle_selected_block_pins(self, _checked: bool = False) -> bool:
+        blocks = self.block_commands.blocks()
+        if not blocks:
+            return False
+        wanted = not all(is_pinned(block) for block in blocks)
+        transaction = QTextCursor(self.document())
+        transaction.beginEditBlock()
+        try:
+            for block in blocks:
+                set_pinned(block, wanted)
+        finally:
+            transaction.endEditBlock()
+        return True
 
     def _populate_block_context_menu(self, menu) -> None:
         block_menu = menu.addMenu("블록")
@@ -3380,6 +4232,13 @@ class RichMemoTextEdit(QTextEdit):
             action = block_menu.addAction(label)
             action.triggered.connect(lambda _checked=False, name=command: self.block_commands.execute(name))
         block_menu.addSeparator()
+        template_action = block_menu.addAction("선택을 템플릿으로 저장")
+        template_action.setEnabled(self.block_selection.count() > 0 or self.textCursor().hasSelection())
+        template_action.triggered.connect(self.save_selection_as_template)
+        pin = block_menu.addAction("본문 블록 고정")
+        pin.setCheckable(True)
+        pin.setChecked(all(is_pinned(block) for block in self.block_commands.blocks()))
+        pin.triggered.connect(self.toggle_selected_block_pins)
         fold = block_menu.addAction("현재 제목·토글 접기/펴기\tCtrl+Alt+Space")
         fold.setEnabled(bool(self.heading_level(self.textCursor().block()) or self.current_block_is_toggle()))
         fold.triggered.connect(self.toggle_current_fold)
@@ -3465,6 +4324,12 @@ class RichMemoTextEdit(QTextEdit):
     def open_current_link(self) -> bool:
         """Open a real internal link under the caret, never a stale anchor."""
         position = self.textCursor().position()
+        target = self._block_link_at_position(position)
+        if target is None and position > self.textCursor().block().position():
+            target = self._block_link_at_position(position - 1)
+        if target is not None:
+            self.block_link_open_requested.emit(*target)
+            return True
         note_id = self._valid_internal_link_at_position(position)
         if note_id is None and position > self.textCursor().block().position():
             note_id = self._valid_internal_link_at_position(position - 1)
@@ -3481,16 +4346,25 @@ class RichMemoTextEdit(QTextEdit):
         """
         document = self.document()
         last = document.lastBlock()
-        if self._block_indent(last) == 0 and not self._is_toggle_block(last):
+        hidden_heading_tail = not last.isVisible() and self._heading_section_owner(last) is not None
+        if (self._block_indent(last) == 0 and not self._is_toggle_block(last)
+                and not hidden_heading_tail):
             return False
         cursor = QTextCursor(document)
         cursor.movePosition(QTextCursor.MoveOperation.End)
         cursor.insertBlock()
         fmt = cursor.blockFormat()
         fmt.setIndent(0)
+        if hidden_heading_tail:
+            # 접힌 제목 아래 빈 곳을 눌렀다.  새 줄을 제목 밖에 두어야 쓴 글이 보인다.
+            fmt.setProperty(SECTION_BREAK_PROPERTY, True)
+        else:
+            fmt.clearProperty(SECTION_BREAK_PROPERTY)
         cursor.setBlockFormat(fmt)
         cursor.setCharFormat(QTextCharFormat())
         self.setTextCursor(cursor)
+        if hidden_heading_tail:
+            self._refresh_toggle_visibility()
         self.setFocus()
         return True
 
@@ -3502,16 +4376,65 @@ class RichMemoTextEdit(QTextEdit):
             return False
         return point.y() > self.cursorRect(QTextCursor(block)).bottom()
 
+    def _click_target_at(self, point) -> tuple[str, object] | None:
+        block_target = self._block_link_at_position(self.cursorForPosition(point.toPoint()).position())
+        if block_target is not None:
+            return "block", block_target
+        page_id = self._page_link_at(point)
+        if page_id is not None:
+            return "page", int(page_id)
+        for name, finder in (
+            ("toggle", self._toggle_block_at),
+            ("heading", self._heading_block_at),
+            ("checklist", self._checklist_block_at),
+        ):
+            block = finder(point)
+            if block is not None:
+                return name, block.position()
+        return None
+
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton and event.modifiers() & Qt.KeyboardModifier.AltModifier:
+            self.character_selection.clear()
+            self._left_press_point = None
+            self._left_press_target = None
+            self._left_press_dragged = False
+            cursor = self.textCursor()
+            if cursor.hasSelection():
+                cursor.clearSelection()
+                self.setTextCursor(cursor)
             self.begin_block_selection(self.cursorForPosition(event.position().toPoint()).block())
             event.accept()
             return
         if event.button() == Qt.MouseButton.LeftButton:
+            self.block_selection.clear()
+            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                self._character_press_point = event.position().toPoint()
+                self._character_press_position = self.cursorForPosition(
+                    event.position().toPoint()
+                ).position()
+                self._character_dragging = False
+            else:
+                self.character_selection.clear()
+                self._character_press_point = None
+                self._character_press_position = None
+            self._left_press_point = event.position().toPoint()
+            self._left_press_target = self._click_target_at(event.position())
+            self._left_press_dragged = False
             grip = self.image_grip_at(event.position())
             if grip is not None:
+                self._character_press_point = None
+                self._character_press_position = None
                 self.begin_image_resize(grip)
                 self._claimed_press = True
+                self._left_press_target = None
+                event.accept()
+                return
+            if self._character_press_point is not None:
+                # Ctrl+drag is wholly ours: QTextEdit must not receive a press
+                # whose matching move/release is consumed by range selection.
+                self._claimed_press = False
+                self.setFocus()
                 event.accept()
                 return
         if (event.button() == Qt.MouseButton.LeftButton
@@ -3519,6 +4442,7 @@ class RichMemoTextEdit(QTextEdit):
                 and self._is_below_last_line(event.position())
                 and self._place_caret_outside_toggles()):
             self._claimed_press = True
+            self._left_press_target = None
             event.accept()
             return
         self._claimed_press = False
@@ -3530,6 +4454,49 @@ class RichMemoTextEdit(QTextEdit):
         return float(self.cursorRect(spot).left())
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        character_press = (
+            event.button() == Qt.MouseButton.LeftButton
+            and self._character_press_point is not None
+        )
+        if event.button() == Qt.MouseButton.LeftButton and self._character_press_point is not None:
+            if ((event.position().toPoint() - self._character_press_point).manhattanLength()
+                    > QApplication.startDragDistance()):
+                self._character_dragging = True
+            if self._character_dragging and self._character_press_position is not None:
+                cursor = QTextCursor(self.document())
+                cursor.setPosition(self._character_press_position)
+                cursor.setPosition(
+                    self.cursorForPosition(event.position().toPoint()).position(),
+                    QTextCursor.MoveMode.KeepAnchor,
+                )
+                self.character_selection.add_cursor(cursor)
+                caret = self.textCursor()
+                caret.clearSelection()
+                self.setTextCursor(caret)
+                self._character_press_point = None
+                self._character_press_position = None
+                self._character_dragging = False
+                self._left_press_point = None
+                self._left_press_target = None
+                self._left_press_dragged = False
+                event.accept()
+                return
+            self._character_press_point = None
+            self._character_press_position = None
+            self._character_dragging = False
+            caret = self.cursorForPosition(event.position().toPoint())
+            self.setTextCursor(caret)
+        clicked_target = None
+        if event.button() == Qt.MouseButton.LeftButton:
+            if (self._left_press_point is not None and not self._left_press_dragged
+                    and (event.position().toPoint() - self._left_press_point).manhattanLength()
+                    <= QApplication.startDragDistance()):
+                target = self._click_target_at(event.position())
+                if target == self._left_press_target:
+                    clicked_target = target
+            self._left_press_point = None
+            self._left_press_target = None
+            self._left_press_dragged = False
         if self._block_selecting:
             self.finish_block_selection()
             event.accept()
@@ -3544,28 +4511,28 @@ class RichMemoTextEdit(QTextEdit):
             self._claimed_press = False
             event.accept()
             return
-        if event.button() == Qt.MouseButton.LeftButton:
-            page_id = self._page_link_at(event.position())
-            if page_id is not None:
-                # 페이지 줄은 그냥 눌러도 열린다.  바깥 주소와 달리 Ctrl 이 필요 없다.
-                self.page_open_requested.emit(page_id)
-                event.accept()
-                return
-        if event.button() == Qt.MouseButton.LeftButton:
-            marker = self._toggle_block_at(event.position())
-            if marker is not None:
-                self.fold_toggle(marker)
-                event.accept()
-                return
-            heading = self._heading_block_at(event.position())
-            if heading is not None:
-                self.fold_heading(heading)
-                event.accept()
-                return
-        if event.button() == Qt.MouseButton.LeftButton:
-            block = self._checklist_block_at(event.position())
-            if block is not None:
-                self._toggle_check_state(block)
+        if clicked_target is not None:
+            kind, value = clicked_target
+            if kind == "page":
+                self.page_open_requested.emit(value)
+            elif kind == "block":
+                self.block_link_open_requested.emit(*value)
+            else:
+                block = self.document().findBlock(value)
+                if kind == "toggle":
+                    self.fold_toggle(block)
+                elif kind == "heading":
+                    self.fold_heading(block)
+                else:
+                    self._toggle_check_state(block)
+            event.accept()
+            return
+        if event.button() == Qt.MouseButton.LeftButton and not event.modifiers():
+            annotation = self.annotation_at_position(
+                self.cursorForPosition(event.position().toPoint()).position()
+            )
+            if annotation is not None:
+                self.annotation_activated.emit(int(annotation["id"]))
                 event.accept()
                 return
         if event.button() == Qt.MouseButton.LeftButton and event.modifiers() & Qt.KeyboardModifier.ControlModifier:
@@ -3575,20 +4542,35 @@ class RichMemoTextEdit(QTextEdit):
                 QDesktopServices.openUrl(url)
                 event.accept()
                 return
+        if character_press:
+            event.accept()
+            return
         super().mouseReleaseEvent(event)
+        self.text_format_bar.sync()
 
     def _place_gutter(self) -> None:
         frame = self.frameWidth()
         self.gutter.setGeometry(
             max(0, self.width() - frame - LineGutter.WIDTH), frame,
-            LineGutter.WIDTH, max(0, self.height() - frame * 2),
+            LineGutter.WIDTH,
+            max(0, self.height() - frame * 2 - self._block_action_bar_height),
         )
+
+    def _set_block_action_bar_height(self, height: int) -> None:
+        height = max(0, int(height))
+        if self._block_action_bar_height == height:
+            return
+        self._block_action_bar_height = height
+        self.setViewportMargins(0, 0, LineGutter.WIDTH, height)
+        self._place_gutter()
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._place_gutter()
         if hasattr(self, "block_action_bar"):
             self.block_action_bar.sync()
+            self.character_action_bar.sync()
+            self.text_format_bar.sync()
         self._refit_timer.start(0)
 
     def refit_images(self) -> None:

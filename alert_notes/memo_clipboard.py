@@ -14,6 +14,10 @@ _PAGE_ANCHOR_RE = re.compile(
     r"<a\b[^>]*\bhref=(['\"])toma-note://(\d+)\1[^>]*>(.*?)</a>",
     re.IGNORECASE | re.DOTALL,
 )
+_PAGE_SYNC_ANCHOR_RE = re.compile(
+    r"<a\b[^>]*\bhref=(['\"])toma-note://v2/([0-9a-fA-F-]{36})\1[^>]*>(.*?)</a>",
+    re.IGNORECASE | re.DOTALL,
+)
 _IMAGE_RE = re.compile(r"toma-note-image://(?:attachment/)?(\d+)", re.IGNORECASE)
 
 
@@ -72,6 +76,15 @@ def page_ids_from_html(html: str) -> list[int]:
         text = html_module.unescape(re.sub(r"<[^>]+>", "", match.group(3))).lstrip()
         if text.startswith("📄"):
             found.append(int(match.group(2)))
+    return list(dict.fromkeys(found))
+
+
+def page_sync_ids_from_html(html: str) -> list[str]:
+    found = []
+    for match in _PAGE_SYNC_ANCHOR_RE.finditer(str(html or "")):
+        text = html_module.unescape(re.sub(r"<[^>]+>", "", match.group(3))).lstrip()
+        if text.startswith("📄"):
+            found.append(match.group(2).lower())
     return list(dict.fromkeys(found))
 
 

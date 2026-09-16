@@ -355,7 +355,7 @@ class RecentNoteChipsTest(unittest.TestCase):
     def _chips(self):
         return [
             button.text() for button in self.panel.list_panel.recent_buttons
-            if button.isVisible()
+            if not button.isHidden()
         ]
 
     def test_no_chips_before_anything_is_opened(self):
@@ -364,6 +364,8 @@ class RecentNoteChipsTest(unittest.TestCase):
 
     def test_it_shows_the_last_three_in_order(self):
         self._visit("가 메모", "나 메모", "다 메모", "라 메모", "마 메모")
+        self.assertTrue(self.panel.list_panel.recent_toggle.isVisible())
+        self.assertFalse(self.panel.list_panel.recent_host.isVisible())
         chips = self._chips()
         self.assertEqual(len(chips), 3)
         self.assertIn("라 메모", chips[0])
@@ -376,6 +378,9 @@ class RecentNoteChipsTest(unittest.TestCase):
 
     def test_pressing_a_chip_opens_that_memo(self):
         self._visit("가 메모", "나 메모", "다 메모")
+        self.panel.list_panel.recent_toggle.click()
+        self.app.processEvents()
+        self.assertTrue(self.panel.list_panel.recent_host.isVisible())
         self.panel.list_panel.recent_buttons[0].click()
         self.app.processEvents()
         self.assertEqual(self.panel.current_id, self.ids["나 메모"])

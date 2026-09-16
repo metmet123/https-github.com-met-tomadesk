@@ -10,13 +10,32 @@ import re
 import zipfile
 
 from .sqlite_store import (
-    ATTACHMENT_COLUMNS, HISTORY_COLUMNS, NOTE_COLUMNS, REMINDER_COLUMNS, SERIES_COLUMNS,
+    ATTACHMENT_COLUMNS, CATEGORY_COLUMNS, HISTORY_COLUMNS, NOTE_COLUMNS, REMINDER_COLUMNS, SERIES_COLUMNS,
 )
+from .sync_identity import new_sync_id, utc_now_ms
+from .link_rewrite import rewrite_internal_links
 
 
 ARCHIVE_FORMAT = "tomadesk-memo-archive"
-ARCHIVE_VERSION = 1
-MEMO_TABLES = ("notes", "note_attachments", "reminder_series", "reminders", "reminder_history")
+ARCHIVE_VERSION = 2
+LEGACY_ARCHIVE_VERSION = 1
+CORE_MEMO_TABLES = ("notes", "note_attachments", "reminder_series", "reminders", "reminder_history")
+MEMO_TABLES = CORE_MEMO_TABLES + (
+    "memo_categories", "sync_tombstones", "memo_annotations", "memo_templates", "memo_versions",
+)
+ANNOTATION_COLUMNS = (
+    "id", "sync_id", "memo_id", "block_id", "start_offset", "end_offset", "quote",
+    "context_before", "context_after", "comment", "location_status", "revision",
+    "created_at_utc", "modified_at_utc", "origin_device_id",
+)
+TEMPLATE_COLUMNS = (
+    "id", "sync_id", "name", "trigger", "sort_order", "payload_version", "payload_json",
+    "revision", "created_at_utc", "modified_at_utc", "origin_device_id",
+)
+VERSION_COLUMNS = (
+    "id", "sync_id", "memo_id", "payload_hash", "payload_json", "kind", "important",
+    "created_at_utc", "origin_device_id",
+)
 MAX_ARCHIVE_ENTRIES = 100_000
 MAX_ARCHIVE_UNCOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024
 MAX_MANIFEST_BYTES = 64 * 1024 * 1024
@@ -49,6 +68,13 @@ def export_memo_archive(store, path: Path) -> Path:
         table: [dict(row) for row in store.conn.execute(f"SELECT * FROM {table}")]
         for table in MEMO_TABLES
     }
+    note_sync = {int(row["id"]): str(row.get("sync_id") or "") for row in tables["notes"]}
+    category_sync = {int(row["id"]): str(row.get("sync_id") or "") for row in tables["memo_categories"]}
+    for row in tables["notes"]:
+        row["parent_sync_id"] = note_sync.get(int(row.get("parent_id") or 0), "")
+        row["category_sync_id"] = category_sync.get(int(row["category_id"])) if row.get("category_id") is not None else ""
+    for row in tables["note_attachments"]:
+        row["note_sync_id"] = note_sync.get(int(row["note_id"]), "")
     attachments = []
     binary_entries: list[tuple[str, bytes]] = []
     for row in tables["note_attachments"]:
@@ -111,12 +137,40 @@ def restore_memo_archive(store, path: Path, mode: str, hotkey_validator=None) ->
             conn.execute(
                 "DELETE FROM settings WHERE key LIKE 'memo_draft_%' OR key='memo_recent_notes'"
             )
-            for table in ("reminder_history", "reminders", "reminder_series", "note_attachments", "notes"):
+            replacement_tables = [
+                "reminder_history", "reminders", "reminder_series", "memo_annotations",
+                "memo_versions", "note_attachments", "notes",
+            ]
+            if int(manifest.get("version", 1)) >= 2:
+                replacement_tables.extend(("memo_templates", "memo_categories", "sync_tombstones"))
+            for table in replacement_tables:
                 conn.execute(f"DELETE FROM {table}")
 
         note_map: dict[int, int] = {}
+        note_sync_map: dict[str, str] = {}
         attachment_map: dict[int, int] = {}
         series_map: dict[int, int] = {}
+        category_map: dict[int, int] = {}
+        category_by_sync = {str(row["sync_id"]): int(row["id"]) for row in store.categories()}
+        category_by_name = {str(row["name"]).casefold(): int(row["id"]) for row in store.categories()}
+        for source in tables.get("memo_categories", []):
+            old_id = int(source["id"])
+            sync_id = str(source.get("sync_id") or "")
+            name = str(source.get("name") or "").strip()
+            existing = category_by_sync.get(sync_id) or category_by_name.get(name.casefold())
+            if existing is not None:
+                category_map[old_id] = existing
+                continue
+            values = dict(source)
+            if mode == "merge":
+                values.pop("id", None)
+            if not sync_id:
+                values["sync_id"] = new_sync_id()
+            values.setdefault("revision", 1)
+            values.setdefault("created_at_utc", utc_now_ms())
+            values.setdefault("modified_at_utc", values["created_at_utc"])
+            values.setdefault("origin_device_id", store.device_id)
+            category_map[old_id] = _insert_row(conn, "memo_categories", CATEGORY_COLUMNS, values)
         used_titles = {
             str(row[0]).strip().casefold()
             for row in conn.execute("SELECT title FROM notes")
@@ -125,10 +179,26 @@ def restore_memo_archive(store, path: Path, mode: str, hotkey_validator=None) ->
             old_id = int(source["id"])
             values = dict(source)
             values["parent_id"] = 0
+            old_category = source.get("category_id")
+            values["category_id"] = category_map.get(int(old_category)) if old_category not in (None, "") else None
             values["content"] = str(values.get("content") or "")
+            if not str(values.get("sync_id") or ""):
+                values.update(
+                    sync_id=new_sync_id(), revision=1, modified_at_utc=utc_now_ms(),
+                    origin_device_id=store.device_id,
+                )
             if mode == "merge":
                 values.pop("id", None)
                 values["title"] = _unique_title(used_titles, str(values.get("title") or "새 메모"))
+                original_sync_id = str(values.get("sync_id") or "")
+                if original_sync_id and conn.execute(
+                    "SELECT 1 FROM notes WHERE sync_id=?", (original_sync_id,)
+                ).fetchone():
+                    values["conflict_of_sync_id"] = original_sync_id
+                    values["sync_id"] = new_sync_id()
+                    values["revision"] = 1
+                    values["modified_at_utc"] = utc_now_ms()
+                    values["origin_device_id"] = store.device_id
             hotkey = str(values.get("hotkey") or "").strip()
             if hotkey and hotkey_validator is not None:
                 try:
@@ -138,6 +208,9 @@ def restore_memo_archive(store, path: Path, mode: str, hotkey_validator=None) ->
                     cleared_hotkeys += 1
             new_id = _insert_row(conn, "notes", NOTE_COLUMNS, values)
             note_map[old_id] = new_id
+            old_sync_id = str(source.get("sync_id") or "")
+            if old_sync_id:
+                note_sync_map[old_sync_id] = str(values.get("sync_id") or old_sync_id)
             used_titles.add(str(values.get("title") or "").strip().casefold())
 
         for source in tables["note_attachments"]:
@@ -145,21 +218,74 @@ def restore_memo_archive(store, path: Path, mode: str, hotkey_validator=None) ->
             values = dict(source)
             values["note_id"] = note_map[int(source["note_id"])]
             values["data_base64"] = base64.b64encode(attachment_payloads[old_id]).decode("ascii")
+            if not str(values.get("sync_id") or ""):
+                values.update(
+                    sync_id=new_sync_id(), revision=1, modified_at_utc=utc_now_ms(),
+                    origin_device_id=store.device_id,
+                )
             for key in ("archive_path", "sha256", "size"):
                 values.pop(key, None)
             if mode == "merge":
                 values.pop("id", None)
+                if values.get("sync_id") and conn.execute(
+                    "SELECT 1 FROM note_attachments WHERE sync_id=?", (str(values["sync_id"]),)
+                ).fetchone():
+                    values["sync_id"] = new_sync_id()
+                    values["revision"] = 1
+                    values["modified_at_utc"] = utc_now_ms()
+                    values["origin_device_id"] = store.device_id
             attachment_map[old_id] = _insert_row(conn, "note_attachments", ATTACHMENT_COLUMNS, values)
 
         for source in tables["notes"]:
             old_id = int(source["id"])
             new_id = note_map[old_id]
             parent = int(source.get("parent_id") or 0)
-            content = _rewrite_content(str(source.get("content") or ""), note_map, attachment_map)
+            content = _rewrite_content(
+                str(source.get("content") or ""), note_map, attachment_map, note_sync_map,
+            )
             conn.execute(
                 "UPDATE notes SET parent_id=?,content=? WHERE id=?",
                 (note_map.get(parent, 0), content, new_id),
             )
+
+        for source in tables.get("sync_tombstones", []):
+            values = dict(source)
+            selected = ["entity_type", "sync_id", "revision", "deleted_at_utc", "origin_device_id"]
+            columns = ",".join(selected)
+            conn.execute(
+                f"INSERT INTO sync_tombstones({columns}) VALUES(?,?,?,?,?) "
+                "ON CONFLICT(entity_type,sync_id) DO UPDATE SET revision=MAX(revision,excluded.revision),"
+                "deleted_at_utc=excluded.deleted_at_utc,origin_device_id=excluded.origin_device_id",
+                [values.get(key, "") for key in selected],
+            )
+
+        for table, columns in (("memo_annotations", ANNOTATION_COLUMNS), ("memo_versions", VERSION_COLUMNS)):
+            for source in tables.get(table, []):
+                values = dict(source)
+                values["memo_id"] = note_map[int(source["memo_id"])]
+                if mode == "merge":
+                    values.pop("id", None)
+                    if values.get("sync_id") and conn.execute(
+                        f"SELECT 1 FROM {table} WHERE sync_id=?", (str(values["sync_id"]),)
+                    ).fetchone():
+                        values["sync_id"] = new_sync_id()
+                _insert_row(conn, table, columns, values)
+
+        for source in tables.get("memo_templates", []):
+            values = dict(source)
+            if mode == "merge":
+                values.pop("id", None)
+                if conn.execute(
+                    "SELECT 1 FROM memo_templates WHERE sync_id=? OR name=? COLLATE NOCASE OR trigger=? COLLATE NOCASE",
+                    (str(values.get("sync_id") or ""), str(values.get("name") or ""), str(values.get("trigger") or "")),
+                ).fetchone():
+                    base = str(values.get("name") or "템플릿")
+                    values["name"] = _unique_title(
+                        {str(row[0]).casefold() for row in conn.execute("SELECT name FROM memo_templates")}, base,
+                    )
+                    values["trigger"] = f"{str(values.get('trigger') or 'template')}-{new_sync_id()[:8]}"
+                    values["sync_id"] = new_sync_id()
+            _insert_row(conn, "memo_templates", TEMPLATE_COLUMNS, values)
 
         for source in tables["reminder_series"]:
             old_id = int(source["id"])
@@ -247,14 +373,16 @@ def _read_archive(path: Path) -> tuple[dict, dict[int, bytes]]:
 def _validate_manifest(manifest: dict) -> None:
     if not isinstance(manifest, dict) or manifest.get("format") != ARCHIVE_FORMAT:
         raise ValueError("TomaDesk 메모 백업 형식이 아닙니다.")
-    if manifest.get("version") != ARCHIVE_VERSION:
+    if manifest.get("version") not in {LEGACY_ARCHIVE_VERSION, ARCHIVE_VERSION}:
         raise ValueError("지원하지 않는 메모 백업 버전입니다.")
     if not isinstance(manifest.get("exported_at"), str):
         raise ValueError("백업 생성 시각이 없습니다.")
     tables = manifest.get("tables")
     counts = manifest.get("counts")
-    if not isinstance(tables, dict) or any(not isinstance(tables.get(table), list) for table in MEMO_TABLES):
+    if not isinstance(tables, dict) or any(not isinstance(tables.get(table), list) for table in CORE_MEMO_TABLES):
         raise ValueError("백업 데이터 표가 누락되었습니다.")
+    for table in MEMO_TABLES:
+        tables.setdefault(table, [])
     if not isinstance(counts, dict) or any(
         key not in counts for key in ("active_notes", "trashed_notes", "attachments", "reminders")
     ):
@@ -343,14 +471,11 @@ def _unique_title(used: set[str], wanted: str) -> str:
     return f"{base} ({index})"
 
 
-def _rewrite_content(content: str, note_map: dict[int, int], attachment_map: dict[int, int]) -> str:
-    content = re.sub(
-        r"toma-note://(\d+)",
-        lambda match: f"toma-note://{note_map.get(int(match.group(1)), int(match.group(1)))}",
-        content, flags=re.IGNORECASE,
-    )
-    return re.sub(
-        r"toma-note-image://(?:attachment/)?(\d+)",
-        lambda match: f"toma-note-image://attachment/{attachment_map.get(int(match.group(1)), int(match.group(1)))}",
-        content, flags=re.IGNORECASE,
+def _rewrite_content(
+    content: str, note_map: dict[int, int], attachment_map: dict[int, int],
+    note_sync_map: dict[str, str] | None = None,
+) -> str:
+    return rewrite_internal_links(
+        content, note_ids=note_map, note_sync_ids=note_sync_map,
+        attachment_ids=attachment_map,
     )

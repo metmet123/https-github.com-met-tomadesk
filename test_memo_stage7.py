@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtCore import QEvent, QPointF, Qt
+from PyQt6.QtCore import QEvent, QPoint, QPointF, Qt
 from PyQt6.QtGui import QImage, QKeySequence, QMouseEvent, QTextCursor
 from PyQt6.QtWidgets import QApplication, QDialog
 
@@ -69,7 +69,9 @@ class NoteLinkTest(unittest.TestCase):
     def test_a_link_carries_the_memo_title(self):
         self.assertTrue(self._insert_link())
         self.assertIn(f"{LINK_MARK}저기 메모", block_texts(self.editor)[0])
-        self.assertIn(f"{PAGE_URL_PREFIX}{self.there}", self.editor.content())
+        self.assertIn(
+            f"{PAGE_URL_PREFIX}v2/{self.store.note(self.there)['sync_id']}", self.editor.content()
+        )
 
     def test_a_link_makes_no_new_memo(self):
         before = len(self.store.notes())
@@ -244,11 +246,12 @@ class EditorFullscreenTest(unittest.TestCase):
         self.assertTrue(self.panel.tabs.tabBar().isHidden())
 
     def test_it_puts_everything_back(self):
+        summary_was_visible = self.panel.editor_remainder.isVisible()
         self.panel.toggle_editor_fullscreen()
         self.panel.toggle_editor_fullscreen()
         self.assertFalse(self.panel.editor_fullscreen)
         self.assertFalse(self.panel.list_panel.isHidden())
-        self.assertFalse(self.panel.editor_remainder.isHidden())
+        self.assertEqual(self.panel.editor_remainder.isVisible(), summary_was_visible)
         self.assertFalse(self.panel.tabs.tabBar().isHidden())
 
     def test_the_editor_gets_the_whole_width(self):
@@ -345,12 +348,11 @@ class SidebarToggleTest(unittest.TestCase):
         self.temp.cleanup()
 
     def test_it_folds_the_list_away(self):
+        summary_was_visible = self.panel.editor_remainder.isVisible()
         self.panel.toggle_memo_list()
         self.assertTrue(self.panel.memo_list_hidden)
         self.assertTrue(self.panel.list_panel.isHidden())
-        self.assertFalse(
-            self.panel.editor_remainder.isHidden(), "오늘 요약까지 접혔습니다",
-        )
+        self.assertEqual(self.panel.editor_remainder.isVisible(), summary_was_visible)
 
     def test_the_body_takes_the_freed_room(self):
         before = self.panel.editor_scroll.width()
@@ -403,6 +405,7 @@ class BottomTwoColumnTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.store = NoteReminderStore(Path(self.temp.name) / "notes.db", "새 메모")
+        self.store.set_setting("memo_editor_layout", "classic")
         self.note = self.store.create_note("여기", "")
         self.editor = MemoEditor(self.store)
         self.editor.resize(520, 620)
@@ -427,7 +430,8 @@ class BottomTwoColumnTest(unittest.TestCase):
         # 서식 도구는 본문 바로 위, 제목 아래에 있다.
         self.assertIs(self.editor.format_toolbar.parentWidget(), self.editor)
         self.assertLess(
-            self.editor.format_toolbar.y(), self.editor.content_edit.y(),
+            self.editor.format_toolbar.mapTo(self.editor, QPoint(0, 0)).y(),
+            self.editor.content_edit.mapTo(self.editor, QPoint(0, 0)).y(),
         )
 
     def test_wide_splits_into_two_columns(self):

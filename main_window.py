@@ -550,6 +550,9 @@ class MainWindow(QMainWindow):
         self.splitter.setSizes([660, 740])
         self.splitter.splitterMoved.connect(self._on_splitter_moved)
         self.alert_panel = AlertNotesPanel(self.note_store)
+        self.alert_panel.editor_fullscreen_changed.connect(
+            lambda on: self.workspace_mode_bar.setVisible(not on)
+        )
         self.alert_panel.hotkey_validator = self._validate_content_hotkey
         self.alert_panel.calendar.schedule_editor.hotkey_validator = self._validate_content_hotkey
         self.alert_panel.shortcuts_changed.connect(self._on_content_shortcuts_changed)
@@ -568,6 +571,8 @@ class MainWindow(QMainWindow):
 
     def _switch_workspace(self, index: int) -> None:
         resolved = max(0, min(1, int(index)))
+        if resolved != 1 and self.alert_panel.editor_fullscreen:
+            self.alert_panel.toggle_editor_fullscreen(False)
         button = self.workspace_mode_group.button(resolved)
         if button is not None:
             button.setChecked(True)
@@ -1982,6 +1987,8 @@ class MainWindow(QMainWindow):
 
     def _apply_ui_scale(self) -> None:
         self.setStyleSheet(theme_scaled_stylesheet(self._ui_scale))
+        if hasattr(self, "alert_panel"):
+            self.alert_panel.apply_ui_scale(self._ui_scale)
         if hasattr(self, "table"):
             self.table.verticalHeader().setDefaultSectionSize(round(42 * self._ui_scale))
             self._apply_table_column_ratios()

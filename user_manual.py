@@ -327,19 +327,20 @@ class UserManualDialog(QDialog):
         layout.addWidget(lead)
 
         markers = slide.get("markers", [])
-        pixmap = self._pixmap(slide["image"])
-        stage = QFrame()
-        stage.setObjectName("manualStage")
-        stage_layout = QVBoxLayout(stage)
-        stage_layout.setContentsMargins(12, 12, 12, 12)
-        if pixmap.isNull():
-            missing = QLabel(f"화면 그림을 찾을 수 없습니다: {slide['image']}")
-            missing.setObjectName("manualLead")
-            missing.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            stage_layout.addWidget(missing)
-        else:
-            stage_layout.addWidget(AnnotatedShot(pixmap, markers))
-        layout.addWidget(stage)
+        if slide.get("image"):
+            pixmap = self._pixmap(slide["image"])
+            stage = QFrame()
+            stage.setObjectName("manualStage")
+            stage_layout = QVBoxLayout(stage)
+            stage_layout.setContentsMargins(12, 12, 12, 12)
+            if pixmap.isNull():
+                missing = QLabel(f"화면 그림을 찾을 수 없습니다: {slide['image']}")
+                missing.setObjectName("manualLead")
+                missing.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                stage_layout.addWidget(missing)
+            else:
+                stage_layout.addWidget(AnnotatedShot(pixmap, markers))
+            layout.addWidget(stage)
 
         for number, marker in enumerate(markers, start=1):
             layout.addWidget(MarkerNote(

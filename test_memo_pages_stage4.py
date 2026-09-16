@@ -75,7 +75,9 @@ class PageLinkTest(unittest.TestCase):
         block = self.editor.textCursor().block()
         self.assertEqual(block.text(), PAGE_MARK, "표시만 남기고 커서를 둬야 합니다")
         self.assertTrue(self.editor.textCursor().atBlockEnd(), "커서가 표시 뒤가 아닙니다")
-        self.assertIn(f"{PAGE_URL_PREFIX}{page_id}", self.editor.content())
+        self.assertIn(
+            f"{PAGE_URL_PREFIX}v2/{self.store.note(page_id)['sync_id']}", self.editor.content()
+        )
 
     def test_what_you_type_on_the_line_becomes_the_title(self):
         self.editor.insert_page_link()

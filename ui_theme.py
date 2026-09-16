@@ -263,7 +263,7 @@ QFrame#memoSectionCard {
     background: @surface; border: 1px solid #dce3eb; border-radius: 10px; padding: 4px;
 }
 QWidget#memoEditorPane { background: @panel; }
-QTextEdit#memoBodyEditor { background: @surface; min-height: 180px; }
+QTextEdit#memoBodyEditor { background: @surface; min-height: 320px; }
 QWidget#memoEditorRemainder { background: @panel; border-left: 1px solid @line; }
 QLabel#summarySectionTitle {
     color: @muted; font-weight: 600; padding: 6px 2px 0 2px;
@@ -492,8 +492,18 @@ QTreeWidget#memoListTable {
 QTreeWidget#memoListTable::item { padding: 4px; border: 0; }
 /* 목록 칸의 단추와 검색칸은 낮게.  기본 min-height 는 setFixedHeight 보다
    세므로, 여기서 풀어 주지 않으면 위쪽 여백이 그대로 남는다. */
-QWidget#memoListPanel QPushButton, QWidget#memoListPanel QLineEdit {
+QWidget#memoListPanel QPushButton, QWidget#memoListPanel QLineEdit,
+QWidget#memoListPanel QComboBox {
     min-height: 0px; padding: 2px 10px;
+}
+QPushButton#memoCategoryFilterChip:checked,
+QPushButton#memoTitleSymbolFilter:checked,
+QPushButton#memoMoreCategoriesButton:checked {
+    background: #dbeafe; border-color: #3b82f6; color: #173b6c;
+}
+QLabel#selectedMemoCountChip {
+    background: #e8efff; border: 1px solid #bfd0f5; border-radius: 10px;
+    color: #294f94; font-weight: 600; padding: 2px 9px;
 }
 QLabel#memoListTitle { font-size: 15px; font-weight: 700; color: @title; }
 /* 최근 본 메모 칩.  목록의 한 줄이 아니라 눌러서 옮겨 가는 단추로 보이게 한다. */
@@ -555,7 +565,7 @@ QPushButton#formatToolButton, QPushButton#formatTextButton {
    한 번에 정한다.  그러지 않으면 단추가 글자 폭까지 쪼그라든다. */
 QPushButton#formatToggleButton, QPushButton#formatInsertButton,
 QPushButton#formatToolButton {
-    min-width: 30px; min-height: 28px; padding: 0;
+    min-width: 28px; min-height: 28px; padding: 0;
 }
 QPushButton#formatToggleButton { font-weight: 700; }
 QPushButton#formatToggleButton:hover, QPushButton#formatInsertButton:hover,
@@ -571,8 +581,8 @@ QPushButton#formatToolButton:pressed, QPushButton#formatTextButton:pressed {
 QPushButton#formatToggleButton:checked {
     background: #e7efff; color: @blue-dark;
 }
-QToolButton#formatPresetButton:checked {
-    background: @blue; border-color: @blue; color: white;
+QToolButton#formatPresetSample:checked {
+    background: #e7efff; border: 1px solid @blue; color: @blue-dark;
 }
 QPushButton#formatTextButton { font-weight: 500; padding: 0 11px; min-height: 28px; }
 QFrame#formatGroupLine {
@@ -594,11 +604,20 @@ QLabel#insertPanelError { color: #b91c1c; font-weight: 600; }
 QLineEdit[invalid="true"] { border: 2px solid #dc2626; background: #fff7f7; }
 QListWidget#insertFeatureList::item { min-height: 30px; padding: 2px 6px; }
 QListWidget#insertFeatureList::item:selected { background: #e7efff; color: @blue-dark; }
-QToolButton#formatPresetButton {
-    background: @surface; border: 1px solid #cbd5e1; border-radius: 7px;
-    color: #334155; padding: 4px 9px;
+QToolButton#formatPresetSample {
+    min-width: 24px; max-width: 24px; min-height: 24px; max-height: 24px;
+    background: @surface; border: 1px solid #cbd5e1; border-radius: 5px;
+    color: #334155; padding: 0;
 }
-QToolButton#formatPresetButton:hover { background: #f1f5f9; border-color: #94a3b8; }
+QToolButton#formatPresetSample:hover { background: #f1f5f9; border-color: #94a3b8; }
+QToolButton#formatPresetSample::menu-indicator { image: none; width: 0; }
+QToolButton#formatPresetSettings {
+    min-width: 28px; max-width: 28px; min-height: 28px; max-height: 28px;
+    background: transparent; border: 0; border-radius: 6px; color: #334155; padding: 0;
+}
+QToolButton#formatPresetSettings:hover { background: #f1f5f9; }
+QToolButton#formatPresetSettings:pressed { background: #e2e8f0; }
+QToolButton#formatPresetSettings::menu-indicator { image: none; width: 0; }
 QPushButton#textColorPickerButton {
     min-width: 30px; max-width: 30px; padding: 1px; border-radius: 7px;
 }

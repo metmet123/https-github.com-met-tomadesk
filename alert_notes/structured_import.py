@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 
 from PyQt6.QtCore import QMimeData
-from PyQt6.QtGui import QTextDocument
+from PyQt6.QtGui import QColor, QFont, QTextBlockFormat, QTextCharFormat, QTextCursor, QTextDocument
 
 from .rich_text import sanitize_rich_html
 
@@ -20,6 +20,8 @@ CLIPBOARD_STRATEGY_KEY = "memo_import_clipboard_strategy_v1"
 FILE_STRATEGY_KEY = "memo_import_file_strategy_v1"
 DETAIL_START_MARKER = "⟦TOMA_DETAILS_START⟧"
 DETAIL_END_MARKER = "⟦TOMA_DETAILS_END⟧"
+MARKDOWN_CODE_BACKGROUND = "#f1f5f9"
+MARKDOWN_CODE_FONT = "Consolas"
 STRATEGIES = {
     STRATEGY_PRESERVE: "제목 구조 유지",
     STRATEGY_TOP_TWO_TOGGLES: "큰 제목 2단계를 토글로",
@@ -158,9 +160,89 @@ def _decode(raw: bytes, allow_cp949: bool) -> str:
 
 
 def _markdown_html(text: str) -> str:
+    prepared, code_tokens = _protect_markdown_code(str(text or ""))
+    # Qt's Markdown reader can interpret a tilde as markup in some dialects.
+    # Only protect the range form outside code, leaving the source file and the
+    # code payload untouched.
+    prepared = re.sub(r"(?<=\d)~(?=\d)", r"\~", prepared)
     document = QTextDocument()
-    document.setMarkdown(text)
+    document.setMarkdown(prepared)
+    _restore_markdown_code(document, code_tokens)
     return sanitize_rich_html(document.toHtml(), remove_external_images=True)
+
+
+def _protect_markdown_code(text: str) -> tuple[str, list[tuple[str, str, bool]]]:
+    """Replace inline/fenced code with inert tokens before Markdown parsing."""
+    tokens: list[tuple[str, str, bool]] = []
+
+    def token_for(value: str, fenced: bool) -> str:
+        token = f"TOMACODETOKEN{len(tokens):06d}X"
+        while token in text:
+            token += "X"
+        tokens.append((token, value, fenced))
+        return token
+
+    output: list[str] = []
+    lines = text.splitlines(keepends=True)
+    index = 0
+    while index < len(lines):
+        raw = lines[index]
+        line = raw.rstrip("\r\n")
+        opening = re.match(r"^ {0,3}(`{3,}|~{3,})[^\r\n]*$", line)
+        if opening:
+            fence = opening.group(1)
+            code: list[str] = []
+            index += 1
+            while index < len(lines):
+                candidate = lines[index]
+                plain = candidate.rstrip("\r\n")
+                if re.match(rf"^ {{0,3}}{re.escape(fence[0])}{{{len(fence)},}}\s*$", plain):
+                    index += 1
+                    break
+                code.append(candidate)
+                index += 1
+            value = "".join(code).rstrip("\r\n")
+            output.append(token_for(value, True) + "\n")
+            continue
+
+        ending = "\n" if raw.endswith(("\n", "\r")) else ""
+        body = line
+        body = re.sub(
+            r"(?<!`)`([^`\r\n]+)`(?!`)",
+            lambda match: token_for(match.group(1), False),
+            body,
+        )
+        output.append(body + ending)
+        index += 1
+    return "".join(output), tokens
+
+
+def _restore_markdown_code(
+    document: QTextDocument, tokens: list[tuple[str, str, bool]],
+) -> None:
+    char_format = QTextCharFormat()
+    char_format.setFontFamily(MARKDOWN_CODE_FONT)
+    char_format.setFontFixedPitch(True)
+    char_format.setBackground(QColor(MARKDOWN_CODE_BACKGROUND))
+    for token, value, fenced in tokens:
+        cursor = document.find(token)
+        if cursor.isNull():
+            continue
+        start = cursor.selectionStart()
+        cursor.insertText(value, char_format)
+        if not fenced:
+            continue
+        end = start + len(value)
+        block = document.findBlock(start)
+        while block.isValid() and block.position() <= end:
+            block_cursor = QTextCursor(block)
+            block_format = block.blockFormat()
+            block_format.setBackground(QColor(MARKDOWN_CODE_BACKGROUND))
+            block_format.setLeftMargin(max(8.0, block_format.leftMargin()))
+            block_format.setTopMargin(max(3.0, block_format.topMargin()))
+            block_format.setBottomMargin(max(3.0, block_format.bottomMargin()))
+            block_cursor.setBlockFormat(block_format)
+            block = block.next()
 
 
 def _details_to_markers(html: str) -> str:

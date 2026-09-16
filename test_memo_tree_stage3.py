@@ -224,18 +224,18 @@ class NarrowListTest(unittest.TestCase):
 
     def test_the_headers_are_short_at_every_width(self):
         self._lay_out(760)
-        self.assertEqual(self.panel.HEADERS, ["", "제목", "내용", "일정", "수정시간"])
+        self.assertEqual(self.panel.HEADERS, ["", "제목", "카테고리", "수정일"])
         self.assertEqual(
-            [self.panel.table.headerItem().text(i) for i in range(5)],
-            ["", "제목", "내용", "일정", "수정시간"],
+            [self.panel.table.headerItem().text(i) for i in range(4)],
+            ["", "제목", "카테고리", "수정일"],
             "넓은 창에서도 같은 머리글이라야 합니다",
         )
 
     def test_a_narrow_list_folds_the_edit_time_column(self):
-        self._lay_out(430)
+        self._lay_out(360)
         self.assertTrue(self.panel.is_narrow())
         self.assertTrue(self.panel.table.isColumnHidden(self.panel.FOLDABLE_COLUMN))
-        self.assertEqual(self.panel.visible_columns(), [0, 1, 2, 3])
+        self.assertEqual(self.panel.visible_columns(), [0, 1, 2])
 
     def test_widening_brings_the_column_back(self):
         self._lay_out(430)
@@ -276,7 +276,7 @@ class NarrowListTest(unittest.TestCase):
     def test_a_narrow_list_never_saves_its_widths(self):
         self._lay_out(760)
         saved = str(self.store.setting(self.panel.COLUMN_RATIOS_SETTING, ""))
-        self._lay_out(430)
+        self._lay_out(360)
         self.panel._on_section_resized(1, 0, self._title_width())
         self.assertEqual(
             str(self.store.setting(self.panel.COLUMN_RATIOS_SETTING, "")), saved,

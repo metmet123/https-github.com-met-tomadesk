@@ -62,6 +62,27 @@ class StructuredImportTest(unittest.TestCase):
         self.assertFalse(self.editor.toPlainText().startswith(TOGGLE_OPEN_PREFIX))
         self.assertIn("bold", self.editor.toPlainText())
 
+    def test_markdown_ranges_and_code_keep_literal_content_and_code_style(self):
+        path = Path(self.temp.name) / "ranges.md"
+        source = "기간 1~4일과 `inline 2~3`\n\n```py\nvalue = 4~5\nnext = 6\n```\n"
+        path.write_text(source, encoding="utf-8")
+
+        imported = load_import_file(path)
+        self.assertEqual(path.read_text(encoding="utf-8"), source)
+        self.editor.setHtml(imported.html)
+        self.assertIn("1~4", self.editor.toPlainText())
+        self.assertIn("inline 2~3", self.editor.toPlainText())
+        self.assertIn("value = 4~5", self.editor.toPlainText())
+
+        ordinary = self.editor.document().find("1~4")
+        inline = self.editor.document().find("inline 2~3")
+        fenced = self.editor.document().find("value = 4~5")
+        self.assertFalse(ordinary.charFormat().fontStrikeOut())
+        self.assertEqual(inline.charFormat().fontFamily(), "Consolas")
+        self.assertEqual(fenced.charFormat().fontFamily(), "Consolas")
+        self.assertEqual(inline.charFormat().background().color().name(), "#f1f5f9")
+        self.assertTrue(fenced.blockFormat().background().color().isValid())
+
     def test_external_html_removes_scripts_and_remote_images(self):
         mime = QMimeData()
         mime.setHtml('<h1>제목</h1><script>alert(1)</script><img src="https://bad/x.png"><p>본문</p>')

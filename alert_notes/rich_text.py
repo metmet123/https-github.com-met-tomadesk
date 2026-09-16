@@ -29,6 +29,11 @@ def plain_text_from_content(content: str) -> str:
     return document.toPlainText().replace("\ufffc", "[이미지]")
 
 
+def display_plain_text_from_content(content: str) -> str:
+    """Remove editor-only fold markers from previews and exports, never storage."""
+    return re.sub(r"(?m)^(?:▶|▾|▸) ", "", plain_text_from_content(content))
+
+
 def html_from_plain_text(content: str) -> str:
     return escape(str(content or "")).replace("\n", "<br>")
 

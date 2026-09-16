@@ -29,6 +29,10 @@ class BlockCommandDispatcher:
         return groups
 
     def execute(self, command: str, **kwargs) -> bool:
+        if self.editor.character_selection.count():
+            # A block command must never silently consume only the caret's
+            # block while disjoint character ranges are highlighted.
+            return False
         handler = getattr(self, f"command_{command}", None)
         if not callable(handler):
             return False
@@ -152,6 +156,8 @@ class BlockCommandDispatcher:
             return False
         transaction = QTextCursor(self.editor.document())
         transaction.beginEditBlock()
+        previous_guard = self.editor._syncing_toggle_children
+        self.editor._syncing_toggle_children = True
         try:
             for group in groups:
                 first = group[0]
@@ -164,7 +170,12 @@ class BlockCommandDispatcher:
                     fmt = block.blockFormat()
                     fmt.setIndent(max(base + 1, int(fmt.indent())))
                     cursor.setBlockFormat(fmt)
+                if next(self.editor._toggle_children(first), None) is None:
+                    marker = QTextCursor(first)
+                    marker.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+                    self.editor._open_clean_block(marker, base + 1)
         finally:
+            self.editor._syncing_toggle_children = previous_guard
             transaction.endEditBlock()
         return True
 

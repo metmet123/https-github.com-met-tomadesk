@@ -79,13 +79,13 @@ class PhaseTwoBlockTest(unittest.TestCase):
         editor.block_selection.select_only(self.block(editor, 0))
         self.assertEqual([block.text() for block in editor.block_selection.blocks()], [f"{TOGGLE_OPEN_PREFIX}부모", "자식"])
 
-    def test_plain_text_selection_is_untouched_until_alt_block_selection(self):
+    def test_alt_block_mode_replaces_plain_text_selection(self):
         editor = self.editor("가나다\n라마바")
         cursor = QTextCursor(editor.document())
         cursor.setPosition(1)
         cursor.setPosition(3, QTextCursor.MoveMode.KeepAnchor)
         editor.setTextCursor(cursor)
-        before = (editor.textCursor().selectionStart(), editor.textCursor().selectionEnd())
+        self.assertTrue(editor.textCursor().hasSelection())
         editor.mousePressEvent(QMouseEvent(
             QMouseEvent.Type.MouseButtonPress, QPointF(5, 5), QPointF(5, 5),
             Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton,
@@ -96,7 +96,7 @@ class PhaseTwoBlockTest(unittest.TestCase):
             Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton,
             Qt.KeyboardModifier.AltModifier,
         ))
-        self.assertEqual(before, (editor.textCursor().selectionStart(), editor.textCursor().selectionEnd()))
+        self.assertFalse(editor.textCursor().hasSelection())
         self.assertEqual(editor.block_selection.count(), 1)
 
     def test_non_contiguous_clipboard_keeps_document_order_and_metadata(self):
@@ -318,7 +318,7 @@ class PhaseTwoBlockTest(unittest.TestCase):
         editor.block_selection.select_only(self.block(editor, 1), include_family=False)
         self.app.processEvents()
         self.assertTrue(editor.block_action_bar.isVisible())
-        self.assertEqual(editor.block_action_bar.count_label.text(), "1개 선택")
+        self.assertEqual(editor.block_action_bar.count_label.text(), "1개 블록 선택")
         press(editor, Qt.Key.Key_Escape)
         self.assertEqual(editor.block_selection.count(), 0)
         self.assertFalse(editor.block_action_bar.isVisible())

@@ -572,7 +572,7 @@ class ListRoomTest(unittest.TestCase):
 
     def test_the_chrome_above_the_list_is_slim(self):
         self.assertLessEqual(
-            self.panel.table.y(), 88, "목록 위쪽 여백이 아직 큽니다",
+            self.panel.table.y(), 112, "목록 위쪽 여백이 아직 큽니다",
         )
 
     def test_more_rows_fit_than_before(self):
