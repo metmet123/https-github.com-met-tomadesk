@@ -47,6 +47,7 @@ HOTKEY_FIELDS = (
     ("memo_search_hotkey", "메모·일정 검색"),
     ("quick_schedule_hotkey", "빠른 일정"),
     ("window_pin_hotkey", "창 고정/해제"),
+    ("shortcut_overlay_hotkey", "단축키 안내"),
 )
 # key, label, help text, default.  Kept here so the dialog and the window agree.
 DEADLINE_OPTIONS = (
@@ -88,6 +89,7 @@ HOTKEY_DEFAULTS = {
     "today_view_hotkey": "Ctrl+Alt+C", "memo_search_hotkey": "Ctrl+Alt+M",
     "quick_schedule_hotkey": "Ctrl+Alt+A",
     "window_pin_hotkey": "Ctrl+Alt+T",
+    "shortcut_overlay_hotkey": "Ctrl+Alt+H",
 }
 
 

@@ -62,6 +62,13 @@ from macro_playback_config import (
 from macro_timing_editor import TimingEditorDialog
 from select_all_header import SelectAllHeader
 from settings_dialog import DEADLINE_OPTIONS, SettingsDialog
+from shortcut_overlay import (
+    GROUP_ACTIONS,
+    GROUP_COMMON,
+    GROUP_CONTENT,
+    ShortcutOverlay,
+    ShortcutOverlayEntry,
+)
 from store import (
     COLUMNS as HOTKEY_COLUMNS,
     EXPLORER_DBLCLICK_SETTING,
@@ -114,6 +121,7 @@ NEW_MEMO_HOTKEY_ID = 991
 QUICK_SCHEDULE_HOTKEY_ID = 990
 SCHEDULE_POSTIT_HOTKEY_ID = 989
 WINDOW_PIN_HOTKEY_ID = 988
+SHORTCUT_OVERLAY_HOTKEY_ID = 987
 MAIN_OPEN_HOTKEY = "Ctrl+Alt+F10"
 TRAY_HIDE_HOTKEY = "Ctrl+Alt+F11"
 EXIT_HOTKEY = "Ctrl+Alt+F9"
@@ -123,6 +131,7 @@ TODAY_VIEW_HOTKEY = "Ctrl+Alt+C"
 MEMO_SEARCH_HOTKEY = "Ctrl+Alt+M"
 QUICK_SCHEDULE_HOTKEY = "Ctrl+Alt+A"
 WINDOW_PIN_HOTKEY = "Ctrl+Alt+T"
+SHORTCUT_OVERLAY_HOTKEY = "Ctrl+Alt+H"
 MAIN_OPEN_HOTKEY_SETTING = "main_open_hotkey"
 TRAY_HIDE_HOTKEY_SETTING = "tray_hide_hotkey"
 EXIT_HOTKEY_SETTING = "exit_hotkey"
@@ -132,6 +141,7 @@ TODAY_VIEW_HOTKEY_SETTING = "today_view_hotkey"
 MEMO_SEARCH_HOTKEY_SETTING = "memo_search_hotkey"
 QUICK_SCHEDULE_HOTKEY_SETTING = "quick_schedule_hotkey"
 WINDOW_PIN_HOTKEY_SETTING = "window_pin_hotkey"
+SHORTCUT_OVERLAY_HOTKEY_SETTING = "shortcut_overlay_hotkey"
 STARTUP_MODE_SETTING = "startup_mode"
 SHOW_START_GUIDE_SETTING = "show_start_guide_on_launch"
 MEMO_AUTO_SAVE_SETTING = "memo_auto_save_enabled"
@@ -398,6 +408,9 @@ class MainWindow(QMainWindow):
         self.window_pin_hotkey = self._hotkey_from_store(
             WINDOW_PIN_HOTKEY_SETTING, WINDOW_PIN_HOTKEY
         )
+        self.shortcut_overlay_hotkey = self._hotkey_from_store(
+            SHORTCUT_OVERLAY_HOTKEY_SETTING, SHORTCUT_OVERLAY_HOTKEY
+        )
         self.schedule_postit_hotkey = SchedulePostitPreferences.load(self.note_store).hotkey
         self.startup_mode = self.store.setting(STARTUP_MODE_SETTING, "window")
         self.runner = ActionRunner(self.playback_stop_hotkey, settings_store=self.store)
@@ -408,6 +421,7 @@ class MainWindow(QMainWindow):
         self.recorder = WindowsHookRecorder()
         self.recorder.ignore_click = self._is_own_window_click
         self._recording = False
+        self._macro_playing = False
         self._explorer_double_click_navigator = None
         self._explorer_double_click_enabled = False
         self._explorer_middle_click_enabled = False
@@ -452,6 +466,8 @@ class MainWindow(QMainWindow):
             count_changed=lambda _count: self._refresh_tray_tooltip(),
         )
         QApplication.instance().aboutToQuit.connect(self.window_pin.shutdown)
+        self.shortcut_overlay = ShortcutOverlay(self)
+        self.shortcut_overlay.item_activated.connect(self._navigate_from_shortcut_overlay)
         self.pet_controller = TomaPetController(
             self.note_store, self.open_today_schedule, self.show_quick_memo,
         )
@@ -768,6 +784,51 @@ class MainWindow(QMainWindow):
         tray_icon = getattr(self, "tray_icon", None)
         if tray_icon is not None:
             tray_icon.showMessage("창 고정/해제", result.message, application_icon(), 3500)
+
+    def show_shortcut_overlay(self) -> bool:
+        current_app = foreground_application()
+        return self.shortcut_overlay.open_overlay(
+            self._shortcut_overlay_entries(),
+            failure_count=len(self._last_hotkey_failures),
+            excluded_app=is_app_excluded(current_app, self.excluded_apps),
+            recording=self._recording,
+            playback=self._macro_playing,
+        )
+
+    def _shortcut_overlay_entries(self) -> list[ShortcutOverlayEntry]:
+        entries = list(getattr(self, "_shortcut_overlay_registered_entries", []))
+        for hotkey_id, row in sorted(self._action_hotkey_rows.items()):
+            if hotkey_id not in self._registered_action_hotkey_ids or not bool(row["active"]):
+                continue
+            entries.append(ShortcutOverlayEntry(
+                GROUP_ACTIONS,
+                str(row["name"]),
+                str(row["hotkey"]),
+                target_kind="action",
+                target_id=int(row["id"]),
+            ))
+        return entries
+
+    def _navigate_from_shortcut_overlay(self, entry: ShortcutOverlayEntry) -> None:
+        if not isinstance(entry, ShortcutOverlayEntry):
+            return
+        if entry.target_kind == "note" and entry.target_id is not None:
+            self.open_alert_note(int(entry.target_id))
+            return
+        if entry.target_kind == "schedule" and entry.target_id is not None:
+            self.open_schedule_item(int(entry.target_id))
+            return
+        self.restore_from_tray()
+        if entry.target_kind == "action" and entry.target_id is not None:
+            self._switch_workspace(0)
+            self._restore_action_selection(int(entry.target_id))
+            self.load_selected()
+            current = self.table.currentItem()
+            if current is not None:
+                self.table.scrollToItem(current)
+            return
+        if entry.target_kind == "settings":
+            self.show_settings()
 
     def _cycle_alert_tab(self) -> None:
         """Move to the next 메모·일정 tab; the shortcut workspace has none."""
@@ -1735,6 +1796,7 @@ class MainWindow(QMainWindow):
                 MEMO_SEARCH_HOTKEY_SETTING: self.memo_search_hotkey,
                 QUICK_SCHEDULE_HOTKEY_SETTING: self.quick_schedule_hotkey,
                 WINDOW_PIN_HOTKEY_SETTING: self.window_pin_hotkey,
+                SHORTCUT_OVERLAY_HOTKEY_SETTING: self.shortcut_overlay_hotkey,
             },
             startup_mode=self.startup_mode,
             data_dir=self.store.data_dir,
@@ -1804,12 +1866,16 @@ class MainWindow(QMainWindow):
         self.window_pin_hotkey = values.get(
             WINDOW_PIN_HOTKEY_SETTING, self.window_pin_hotkey
         )
+        self.shortcut_overlay_hotkey = values.get(
+            SHORTCUT_OVERLAY_HOTKEY_SETTING, self.shortcut_overlay_hotkey
+        )
         values[QUICK_MEMO_HOTKEY_SETTING] = self.quick_memo_hotkey
         values[NEW_MEMO_HOTKEY_SETTING] = self.new_memo_hotkey
         values[TODAY_VIEW_HOTKEY_SETTING] = self.today_view_hotkey
         values[MEMO_SEARCH_HOTKEY_SETTING] = self.memo_search_hotkey
         values[QUICK_SCHEDULE_HOTKEY_SETTING] = self.quick_schedule_hotkey
         values[WINDOW_PIN_HOTKEY_SETTING] = self.window_pin_hotkey
+        values[SHORTCUT_OVERLAY_HOTKEY_SETTING] = self.shortcut_overlay_hotkey
         self.startup_mode = values["startup_mode"]
         for key in (
             EXIT_HOTKEY_SETTING,
@@ -1823,6 +1889,7 @@ class MainWindow(QMainWindow):
             MEMO_SEARCH_HOTKEY_SETTING,
             QUICK_SCHEDULE_HOTKEY_SETTING,
             WINDOW_PIN_HOTKEY_SETTING,
+            SHORTCUT_OVERLAY_HOTKEY_SETTING,
         ):
             self.store.set_setting(key, values[key])
         self.store.set_setting(STARTUP_MODE_SETTING, self.startup_mode)
@@ -2711,6 +2778,7 @@ class MainWindow(QMainWindow):
             self.memo_search_hotkey: "메모·일정 검색",
             self.quick_schedule_hotkey: "빠른 일정",
             self.window_pin_hotkey: "창 고정/해제",
+            self.shortcut_overlay_hotkey: "단축키 안내",
             self.schedule_postit_hotkey: "일정 포스트잇",
         }
         reserved.pop("", None)
@@ -3295,6 +3363,7 @@ class MainWindow(QMainWindow):
             self.memo_search_hotkey,
             self.quick_schedule_hotkey,
             self.window_pin_hotkey,
+            self.shortcut_overlay_hotkey,
             self.schedule_postit_hotkey,
         }
         reserved.discard("")
@@ -3335,6 +3404,7 @@ class MainWindow(QMainWindow):
             self.today_view_hotkey, self.memo_search_hotkey,
             self.quick_schedule_hotkey,
             self.window_pin_hotkey,
+            self.shortcut_overlay_hotkey,
             self.schedule_postit_hotkey,
         }
         controls.discard("")
@@ -3463,6 +3533,7 @@ class MainWindow(QMainWindow):
 
     def register_hotkeys(self, show_message: bool, success_message: str | None = None) -> bool:
         self.hotkeys.unregister_all()
+        self._shortcut_overlay_registered_entries: list[ShortcutOverlayEntry] = []
         self._registered_action_hotkey_ids.clear()
         self._action_hotkey_rows.clear()
         self._foreground_app_signature = None
@@ -3486,6 +3557,7 @@ class MainWindow(QMainWindow):
             (MEMO_SEARCH_HOTKEY_ID, self.memo_search_hotkey, self.show_memo_search, "메모·일정 검색"),
             (QUICK_SCHEDULE_HOTKEY_ID, self.quick_schedule_hotkey, self.show_quick_schedule, "빠른 일정"),
             (WINDOW_PIN_HOTKEY_ID, self.window_pin_hotkey, self.toggle_foreground_window_pin, "창 고정/해제"),
+            (SHORTCUT_OVERLAY_HOTKEY_ID, self.shortcut_overlay_hotkey, self.show_shortcut_overlay, "단축키 안내"),
             (SCHEDULE_POSTIT_HOTKEY_ID, self.schedule_postit_hotkey, self.toggle_schedule_postit, "일정 포스트잇"),
         )
         control_registered = 0
@@ -3495,6 +3567,9 @@ class MainWindow(QMainWindow):
             try:
                 self.hotkeys.register(hotkey_id, hotkey, callback)
                 control_registered += 1
+                self._shortcut_overlay_registered_entries.append(ShortcutOverlayEntry(
+                    GROUP_COMMON, label, hotkey, target_kind="settings",
+                ))
             except HotkeyError as exc:
                 failed.append(f"{label} ({exc})")
         for index, row in enumerate(self.store.active_actions(), start=HOTKEY_ID_START):
@@ -3510,6 +3585,7 @@ class MainWindow(QMainWindow):
                 self.memo_search_hotkey,
                 self.quick_schedule_hotkey,
                 self.window_pin_hotkey,
+                self.shortcut_overlay_hotkey,
                 self.schedule_postit_hotkey,
             }:
                 failed.append(f"{row['name']} (프로그램 제어 단축키와 충돌)")
@@ -3528,6 +3604,10 @@ class MainWindow(QMainWindow):
             try:
                 self.hotkeys.register(content_id, row["hotkey"], lambda r=row: self._run_note_hotkey(r))
                 content_registered += 1
+                self._shortcut_overlay_registered_entries.append(ShortcutOverlayEntry(
+                    GROUP_CONTENT, str(row["title"]), str(row["hotkey"]),
+                    target_kind="note", target_id=int(row["id"]),
+                ))
             except HotkeyError as exc:
                 failed.append(f"메모 '{row['title']}' ({exc})")
             content_id += 1
@@ -3535,6 +3615,10 @@ class MainWindow(QMainWindow):
             try:
                 self.hotkeys.register(content_id, row["hotkey"], lambda r=row: self._run_schedule_hotkey(r))
                 content_registered += 1
+                self._shortcut_overlay_registered_entries.append(ShortcutOverlayEntry(
+                    GROUP_CONTENT, str(row["title"]), str(row["hotkey"]),
+                    target_kind="schedule", target_id=int(row["id"]),
+                ))
             except HotkeyError as exc:
                 failed.append(f"일정 '{row['title']}' ({exc})")
             content_id += 1
