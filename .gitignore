@@ -45,3 +45,14 @@ release/
 data/
 # 테스트 산출물
 **/test/out/
+
+# 2026-09-18 정리: 실행에 쓰이지 않는 자료 (파일은 디스크에 그대로 둔다)
+assets/qa/
+assets/toma_icon_v2.png
+assets/toma_icon_v2.ico
+assets/toma_icon_v2_source.png
+6._캘린더 앱,프로그램 조사결과.pdf
+메모 카테고리 정렬 시안.png
+데이터변환_주소정리_수정본.bas
+ahk_hotkey_import_20260727.xlsx
+단축키 프로그램.code-workspace
