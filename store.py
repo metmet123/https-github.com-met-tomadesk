@@ -18,6 +18,8 @@ COLUMNS = {
     "history": ["id", "action_id", "name", "action_type", "result", "executed_at"],
     "settings": ["key", "value"],
 }
+EXPLORER_DBLCLICK_SETTING = "explorer_double_click_parent_enabled"
+EXPLORER_MIDDLE_CLICK_SETTING = "explorer_middle_click_parent_enabled"
 
 
 class Store:

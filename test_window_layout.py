@@ -37,6 +37,18 @@ class CoordinateConversionTest(unittest.TestCase):
             [1960, 50, 1200, 900],
         )
 
+    def test_work_area_shrink_scales_rect_and_keeps_it_inside_actual_monitor(self):
+        target_work_rect = (0, 0, 1600, 900)
+        scaled = window_layout.scale_rect_for_work_area(
+            (960, 516, 960, 516), (1920, 1032), target_work_rect,
+        )
+
+        self.assertEqual(scaled, [800, 450, 800, 450])
+        self.assertEqual(
+            window_layout.clamp_rect_to_work_area(scaled, target_work_rect),
+            [800, 450, 800, 450],
+        )
+
     def test_visible_frame_is_preferred_and_raw_fallback_is_marked(self):
         visible = window_layout.window_bounds(
             10, FakeWindowBoundsProvider((-7, 0, 1927, 1047), (0, 0, 1920, 1040)),
@@ -100,6 +112,7 @@ class WindowCollectionTest(unittest.TestCase):
         self.assertEqual(entries[0]["explorer_path"], r"D:\제출")
         self.assertEqual(entries[0]["monitor"], 2)
         self.assertEqual(entries[0]["monitor_device"], r"\\.\DISPLAY2")
+        self.assertEqual(entries[0]["work_area"], [1920, 1040])
         self.assertEqual(entries[0]["rect"], [100, 100, 800, 600])
         self.assertEqual(entries[0]["rect_basis"], "visible")
         self.assertEqual(entries[0]["state"], "maximized")
@@ -114,6 +127,26 @@ class WindowCollectionTest(unittest.TestCase):
 
 
 class WindowMovementTest(unittest.TestCase):
+    def test_saved_125_and_150_percent_sizes_restore_at_100_percent(self):
+        monitor = {"work_rect": (0, 0, 1920, 1032), "dpi": 96}
+        for source_dpi, expected_width, expected_height in (
+            (120, 640, 480),
+            (144, 533, 400),
+        ):
+            with self.subTest(source_dpi=source_dpi), patch.object(
+                window_layout._USER32, "ShowWindow", return_value=True,
+            ), patch.object(
+                window_layout._USER32, "SetWindowPos", return_value=True,
+            ) as set_position:
+                self.assertTrue(window_layout.move_window(
+                    305, (20, 30, 800, 600), monitor,
+                    source_dpi=source_dpi, rect_basis="visible",
+                ))
+            self.assertEqual(
+                set_position.call_args.args[2:6],
+                (20, 30, expected_width, expected_height),
+            )
+
     def test_visible_edge_rect_adds_live_borders_after_clamping(self):
         monitor = {"work_rect": (0, 0, 1920, 1040), "dpi": 96}
         bounds = FakeWindowBoundsProvider(
@@ -188,6 +221,27 @@ class WindowMovementTest(unittest.TestCase):
         ):
             self.assertFalse(window_layout.move_window(302, (0, 0, 500, 400), monitor))
         show.assert_called_once_with(302, window_layout.SW_RESTORE)
+
+    def test_restores_maximized_and_minimized_states(self):
+        monitor = {"work_rect": (0, 0, 1920, 1032), "dpi": 96}
+        for state, command in (
+            ("maximized", window_layout.SW_SHOWMAXIMIZED),
+            ("minimized", window_layout.SW_SHOWMINIMIZED),
+        ):
+            with self.subTest(state=state), patch.object(
+                window_layout._USER32, "ShowWindow", return_value=True,
+            ) as show, patch.object(
+                window_layout._USER32, "SetWindowPos", return_value=True,
+            ):
+                self.assertTrue(window_layout.move_window(
+                    306, (20, 30, 800, 600), monitor, state,
+                    rect_basis="visible",
+                ))
+            self.assertEqual(
+                show.call_args_list,
+                [unittest.mock.call(306, window_layout.SW_RESTORE),
+                 unittest.mock.call(306, command)],
+            )
 
 
 if __name__ == "__main__":

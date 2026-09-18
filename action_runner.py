@@ -212,7 +212,9 @@ class ActionRunner:
                     raise RuntimeError(f"모니터 조회 실패: {monitor_error}")
                 monitor = _saved_monitor(entry, monitors)
                 if monitor is None:
-                    raise RuntimeError("저장된 모니터를 찾지 못함")
+                    monitor = _primary_monitor(monitors)
+                if monitor is None:
+                    raise RuntimeError("사용 가능한 모니터 없음")
 
                 hwnd = 0
                 if not bool(entry.get("always_new", False)):
@@ -477,6 +479,8 @@ class ActionRunner:
         move_options = {
             "source_dpi": int(entry.get("dpi", 96) or 96),
         }
+        if "work_area" in entry:
+            move_options["source_work_area"] = entry.get("work_area")
         if "rect_basis" in entry:
             move_options["rect_basis"] = entry.get("rect_basis")
         moved = self._window_mover(
@@ -494,6 +498,8 @@ class ActionRunner:
     ) -> None:
         discovered = set(known_handles)
         provisional_hwnds: set[int] = set()
+        tab_check_ready = False
+        tab_checked = False
         deadline = self._clock() + self._layout_timeout
         while True:
             try:
@@ -511,11 +517,17 @@ class ActionRunner:
                     claimed_hwnds.add(hwnd)
                     provisional_hwnds.add(hwnd)
                     self._move_new_layout_window(item)
+            elif tab_check_ready and not tab_checked:
+                self._match_tabbed_explorer_windows(
+                    pending, known_handles, claimed_hwnds,
+                )
+                tab_checked = True
             if all(item["hwnd"] for item in pending):
                 break
             now = self._clock()
             if now >= deadline:
                 break
+            tab_check_ready = True
             self._sleeper(min(self._layout_poll_interval, deadline - now))
 
         if not provisional_hwnds:
@@ -564,6 +576,29 @@ class ActionRunner:
         claimed_hwnds.update(
             int(item["hwnd"] or 0) for item in pending if int(item["hwnd"] or 0)
         )
+
+    def _match_tabbed_explorer_windows(
+        self, pending: list[dict], known_handles: set[int], claimed_hwnds: set[int],
+    ) -> None:
+        """Reuse an existing Explorer top-level window when opening created a tab."""
+        available_handles = set(known_handles) - set(claimed_hwnds)
+        if not available_handles:
+            return
+        try:
+            windows = _windows_for_handles(
+                self._explorer_path_provider(available_handles), available_handles,
+            )
+        except Exception:
+            return
+        for item in pending:
+            if item["hwnd"]:
+                continue
+            hwnd = _matching_explorer_hwnd(windows, item["path"], claimed_hwnds)
+            if not hwnd:
+                continue
+            item["hwnd"] = hwnd
+            claimed_hwnds.add(hwnd)
+            self._move_new_layout_window(item)
 
     def _move_new_layout_window(self, item: dict) -> None:
         try:
@@ -765,6 +800,13 @@ def _saved_monitor(entry: dict, monitors) -> dict | None:
         if int(monitor.get("number", 0) or 0) == number:
             return monitor
     return None
+
+
+def _primary_monitor(monitors) -> dict | None:
+    for monitor in monitors:
+        if bool(monitor.get("primary", False)):
+            return monitor
+    return monitors[0] if monitors else None
 
 
 def _layout_entry_label(entry, index: int) -> str:

@@ -894,7 +894,8 @@ class FeatureUpdateTest(unittest.TestCase):
         self.assertEqual(values["data_dir"], data_dir)
         self.assertNotIn("backup_dir", values)
         self.assertNotIn("backup_dir", dialog.path_labels)
-        self.assertEqual(len(dialog.hotkey_builders), 10)
+        self.assertEqual(len(dialog.hotkey_builders), 11)
+        self.assertIn(main_window.WINDOW_PIN_HOTKEY_SETTING, dialog.hotkey_builders)
         self.assertIn(main_window.EXIT_HOTKEY_SETTING, dialog.hotkey_builders)
         self.assertIn(main_window.QUICK_SCHEDULE_HOTKEY_SETTING, dialog.hotkey_builders)
         self.assertIn(main_window.QUICK_MEMO_HOTKEY_SETTING, dialog.hotkey_builders)
@@ -913,8 +914,8 @@ class FeatureUpdateTest(unittest.TestCase):
             for field in dialog.hotkey_field_widgets
         ]
         self.assertEqual(dialog._hotkey_columns, 2)
-        self.assertEqual([(row, column) for row, column, _, _ in positions[:5]], [(0, 0), (1, 0), (2, 0), (3, 0), (4, 0)])
-        self.assertEqual([(row, column) for row, column, _, _ in positions[5:]], [(0, 1), (1, 1), (2, 1), (3, 1), (4, 1)])
+        self.assertEqual([(row, column) for row, column, _, _ in positions[:6]], [(0, 0), (1, 0), (2, 0), (3, 0), (4, 0), (5, 0)])
+        self.assertEqual([(row, column) for row, column, _, _ in positions[6:]], [(0, 1), (1, 1), (2, 1), (3, 1), (4, 1)])
         self.assertEqual(dialog.findChildren(QScrollArea), [])
         self.assertGreaterEqual(dialog.minimumWidth(), 980)
         self.assertGreaterEqual(dialog.minimumHeight(), 660)

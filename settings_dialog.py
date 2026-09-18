@@ -46,6 +46,7 @@ HOTKEY_FIELDS = (
     ("today_view_hotkey", "오늘 일정 열기"),
     ("memo_search_hotkey", "메모·일정 검색"),
     ("quick_schedule_hotkey", "빠른 일정"),
+    ("window_pin_hotkey", "창 고정/해제"),
 )
 # key, label, help text, default.  Kept here so the dialog and the window agree.
 DEADLINE_OPTIONS = (
@@ -86,6 +87,7 @@ HOTKEY_DEFAULTS = {
     "new_memo_hotkey": "Ctrl+Alt+Shift+N",
     "today_view_hotkey": "Ctrl+Alt+C", "memo_search_hotkey": "Ctrl+Alt+M",
     "quick_schedule_hotkey": "Ctrl+Alt+A",
+    "window_pin_hotkey": "Ctrl+Alt+T",
 }
 
 
@@ -103,6 +105,8 @@ class SettingsDialog(QDialog):
         pet_persistent_enabled: bool = False,
         memo_auto_save_enabled: bool = True,
         show_start_guide_on_launch: bool = True,
+        explorer_double_click_enabled: bool = True,
+        explorer_middle_click_enabled: bool = True,
         deadline_options: dict | None = None,
         schedule_postit_options: dict | None = None,
         parent=None,
@@ -243,6 +247,16 @@ class SettingsDialog(QDialog):
         self.show_start_guide_check = QCheckBox("프로그램 시작 시 빠른 시작 표시")
         self.show_start_guide_check.setChecked(bool(show_start_guide_on_launch))
         startup_layout.addWidget(self.show_start_guide_check)
+        self.explorer_double_click_check = QCheckBox(
+            "탐색기 빈 공간 더블클릭 상위 폴더 이동"
+        )
+        self.explorer_double_click_check.setChecked(bool(explorer_double_click_enabled))
+        startup_layout.addWidget(self.explorer_double_click_check)
+        self.explorer_middle_click_check = QCheckBox(
+            "탐색기 파일 목록 가운데 클릭 상위 폴더 이동"
+        )
+        self.explorer_middle_click_check.setChecked(bool(explorer_middle_click_enabled))
+        startup_layout.addWidget(self.explorer_middle_click_check)
         self.memo_auto_save_check = QCheckBox("메모 자동 저장")
         self.memo_auto_save_check.setChecked(bool(memo_auto_save_enabled))
         startup_layout.addWidget(self.memo_auto_save_check)
@@ -463,6 +477,12 @@ class SettingsDialog(QDialog):
         values["toma_pet_alert_enabled"] = self.pet_alert_check.isChecked()
         values["toma_pet_persistent_enabled"] = self.pet_persistent_check.isChecked()
         values["memo_auto_save_enabled"] = self.memo_auto_save_check.isChecked()
+        values["explorer_double_click_enabled"] = (
+            self.explorer_double_click_check.isChecked()
+        )
+        values["explorer_middle_click_enabled"] = (
+            self.explorer_middle_click_check.isChecked()
+        )
         for key, check in self.deadline_checks.items():
             values[key] = check.isChecked()
         values["schedule_postit_preferences"] = SchedulePostitPreferences(

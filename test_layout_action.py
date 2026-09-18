@@ -74,7 +74,8 @@ class LayoutActionUiTest(unittest.TestCase):
             {
                 "hwnd": 101, "explorer_path": r"D:\제출", "monitor": 2,
                 "rect": [100, 80, 900, 700], "rect_basis": "visible",
-                "state": "normal",
+                "state": "normal", "monitor_device": r"\\.\DISPLAY2",
+                "work_area": [1920, 1032], "dpi": 96,
             },
             {
                 "hwnd": 102, "explorer_path": r"C:\자료", "monitor": 1,
@@ -115,6 +116,8 @@ class LayoutActionUiTest(unittest.TestCase):
             "kind": "explorer", "path": r"D:\제출", "monitor": 2,
             "rect": [100, 80, 900, 700], "rect_basis": "visible",
             "state": "normal", "always_new": True,
+            "monitor_device": r"\\.\DISPLAY2", "work_area": [1920, 1032],
+            "dpi": 96,
         }]})
 
         actions = self.window.layout_table.cellWidget(0, 5).findChildren(QPushButton)
@@ -188,6 +191,8 @@ class LayoutExcelRoundTripTest(unittest.TestCase):
                 "kind": "explorer", "path": r"D:\제출", "monitor": 2,
                 "rect": [100, 80, 900, 700], "rect_basis": "visible",
                 "state": "normal", "always_new": False,
+                "monitor_device": r"\\.\DISPLAY2", "work_area": [1920, 1032],
+                "dpi": 96,
             },
             {
                 "kind": "explorer", "path": r"C:\자료", "monitor": 1,

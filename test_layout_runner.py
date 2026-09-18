@@ -5,12 +5,14 @@ import unittest
 from unittest.mock import Mock
 
 from action_runner import ActionRunner
+from window_layout import target_window_rect
 
 
 MONITOR = {
     "number": 1,
     "device": r"\\.\DISPLAY1",
-    "work_rect": (0, 0, 1920, 1040),
+    "work_rect": (0, 0, 1920, 1032),
+    "primary": True,
     "dpi": 96,
 }
 
@@ -80,6 +82,53 @@ class LayoutRunnerTest(unittest.TestCase):
         mover.assert_called_once_with(
             102, [20, 30, 800, 600], MONITOR, "normal",
             source_dpi=96, rect_basis="visible",
+        )
+
+    def test_missing_saved_monitor_falls_back_inside_primary_work_area(self):
+        restored_rects = []
+
+        def move(_hwnd, rect, monitor, _state, **options):
+            restored_rects.append(target_window_rect(
+                rect,
+                monitor["work_rect"],
+                source_dpi=options.get("source_dpi", 96),
+                source_work_area=options.get("source_work_area"),
+            ))
+            return True
+
+        saved = layout_entry(r"D:\사라진보조", monitor=2)
+        saved.update({
+            "monitor_device": r"\\.\DISPLAY2",
+            "work_area": [1920, 1032],
+            "rect": [1800, 900, 500, 400],
+        })
+        runner = self.runner(
+            explorer_window_provider=lambda: [
+                {"hwnd": 103, "path": r"D:\사라진보조"},
+            ],
+            window_mover=move,
+        )
+
+        self.assertEqual(runner._run_layout({"windows": [saved]}), "1개 창 복원")
+        self.assertEqual(restored_rects, [[1420, 632, 500, 400]])
+
+    def test_forwards_saved_dpi_work_area_and_window_state(self):
+        mover = Mock(return_value=True)
+        saved = layout_entry(r"D:\배율")
+        saved.update({
+            "dpi": 144,
+            "work_area": [1920, 1032],
+            "state": "minimized",
+        })
+        runner = self.runner(
+            explorer_window_provider=lambda: [{"hwnd": 104, "path": r"D:\배율"}],
+            window_mover=mover,
+        )
+
+        self.assertEqual(runner._run_layout({"windows": [saved]}), "1개 창 복원")
+        mover.assert_called_once_with(
+            104, [20, 30, 800, 600], MONITOR, "minimized",
+            source_dpi=144, source_work_area=[1920, 1032],
         )
 
     def test_opens_and_polls_until_a_new_matching_window_appears(self):
@@ -306,6 +355,37 @@ class LayoutRunnerTest(unittest.TestCase):
             ("move", 703),
             ("path", {703}),
         ])
+
+    def test_reuses_existing_window_when_explorer_opens_a_tab(self):
+        clock = FakeClock()
+        tab_opened = False
+        mover = Mock(return_value=True)
+
+        def open_explorer(_path):
+            nonlocal tab_opened
+            tab_opened = True
+
+        def paths(requested):
+            path = r"C:\탭대상" if tab_opened else r"C:\기존"
+            return [{"hwnd": 704, "path": path}] if 704 in set(requested) else []
+
+        runner = self.runner(
+            explorer_window_provider=None,
+            explorer_handle_provider=lambda: {704},
+            explorer_path_provider=paths,
+            explorer_opener=open_explorer,
+            window_mover=mover,
+            clock=clock.now,
+            sleeper=clock.sleep,
+        )
+
+        result = runner._run_layout({
+            "windows": [layout_entry(r"C:\탭대상", always_new=True)],
+        })
+
+        self.assertEqual(result, "1개 창 복원")
+        self.assertEqual(mover.call_args.args[0], 704)
+        self.assertAlmostEqual(clock.value, 0.1)
 
     def test_reassigns_moved_windows_when_verified_paths_are_swapped(self):
         events = []

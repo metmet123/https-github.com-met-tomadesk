@@ -104,6 +104,26 @@ def enumerate_explorer_windows() -> list[dict]:
     return windows
 
 
+def explorer_window_from_hwnd(hwnd: int, shell=None):
+    """Return the Shell.Application window matching hwnd in the calling COM thread."""
+    wanted = int(hwnd or 0)
+    if not wanted:
+        return None
+    if shell is None:
+        try:
+            from win32com.client import Dispatch
+        except ImportError:
+            return None
+        shell = Dispatch("Shell.Application")
+    for window in shell.Windows():
+        try:
+            if int(window.HWND) == wanted:
+                return window
+        except Exception:
+            continue
+    return None
+
+
 def _restore_window(hwnd: int) -> bool:
     if not hwnd:
         return False

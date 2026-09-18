@@ -50,6 +50,7 @@ from hotkey_defs import HOTKEY_ID_START, HOTKEY_ID_STOP, HotkeyError
 from hotkey_manager import HotkeyManager
 from hotkey_parser import parse_hotkey
 from macro_recorder import WindowsHookRecorder
+from explorer_dblclick import ExplorerDoubleClickNavigator
 from macro_playback_config import (
     MAX_REPEAT_COUNT,
     MIN_REPEAT_COUNT,
@@ -61,7 +62,13 @@ from macro_playback_config import (
 from macro_timing_editor import TimingEditorDialog
 from select_all_header import SelectAllHeader
 from settings_dialog import DEADLINE_OPTIONS, SettingsDialog
-from store import COLUMNS as HOTKEY_COLUMNS, TABLES as HOTKEY_TABLES, Store
+from store import (
+    COLUMNS as HOTKEY_COLUMNS,
+    EXPLORER_DBLCLICK_SETTING,
+    EXPLORER_MIDDLE_CLICK_SETTING,
+    TABLES as HOTKEY_TABLES,
+    Store,
+)
 from storage_config import (
     copy_databases_preserving_existing,
     merge_storage_files,
@@ -82,6 +89,7 @@ from ui_polish import (
 from ui_theme import scaled_stylesheet as theme_scaled_stylesheet
 from window_title_bar import WindowTitleBar
 from window_layout import collect_open_windows
+from window_pin import WindowPinController
 
 
 ACTION_LABELS = {
@@ -105,6 +113,7 @@ MEMO_SEARCH_HOTKEY_ID = 994
 NEW_MEMO_HOTKEY_ID = 991
 QUICK_SCHEDULE_HOTKEY_ID = 990
 SCHEDULE_POSTIT_HOTKEY_ID = 989
+WINDOW_PIN_HOTKEY_ID = 988
 MAIN_OPEN_HOTKEY = "Ctrl+Alt+F10"
 TRAY_HIDE_HOTKEY = "Ctrl+Alt+F11"
 EXIT_HOTKEY = "Ctrl+Alt+F9"
@@ -113,6 +122,7 @@ NEW_MEMO_HOTKEY = "Ctrl+Alt+Shift+N"
 TODAY_VIEW_HOTKEY = "Ctrl+Alt+C"
 MEMO_SEARCH_HOTKEY = "Ctrl+Alt+M"
 QUICK_SCHEDULE_HOTKEY = "Ctrl+Alt+A"
+WINDOW_PIN_HOTKEY = "Ctrl+Alt+T"
 MAIN_OPEN_HOTKEY_SETTING = "main_open_hotkey"
 TRAY_HIDE_HOTKEY_SETTING = "tray_hide_hotkey"
 EXIT_HOTKEY_SETTING = "exit_hotkey"
@@ -121,6 +131,7 @@ NEW_MEMO_HOTKEY_SETTING = "new_memo_hotkey"
 TODAY_VIEW_HOTKEY_SETTING = "today_view_hotkey"
 MEMO_SEARCH_HOTKEY_SETTING = "memo_search_hotkey"
 QUICK_SCHEDULE_HOTKEY_SETTING = "quick_schedule_hotkey"
+WINDOW_PIN_HOTKEY_SETTING = "window_pin_hotkey"
 STARTUP_MODE_SETTING = "startup_mode"
 SHOW_START_GUIDE_SETTING = "show_start_guide_on_launch"
 MEMO_AUTO_SAVE_SETTING = "memo_auto_save_enabled"
@@ -384,6 +395,9 @@ class MainWindow(QMainWindow):
         self.quick_schedule_hotkey = self._hotkey_from_store(
             QUICK_SCHEDULE_HOTKEY_SETTING, QUICK_SCHEDULE_HOTKEY
         )
+        self.window_pin_hotkey = self._hotkey_from_store(
+            WINDOW_PIN_HOTKEY_SETTING, WINDOW_PIN_HOTKEY
+        )
         self.schedule_postit_hotkey = SchedulePostitPreferences.load(self.note_store).hotkey
         self.startup_mode = self.store.setting(STARTUP_MODE_SETTING, "window")
         self.runner = ActionRunner(self.playback_stop_hotkey, settings_store=self.store)
@@ -394,6 +408,10 @@ class MainWindow(QMainWindow):
         self.recorder = WindowsHookRecorder()
         self.recorder.ignore_click = self._is_own_window_click
         self._recording = False
+        self._explorer_double_click_navigator = None
+        self._explorer_double_click_enabled = False
+        self._explorer_middle_click_enabled = False
+        self._configure_explorer_double_click_from_store()
         self._updating_macro_document = False
         self._original_macro_state: dict | None = None
         self._macro_undo_stack: list[dict] = []
@@ -429,6 +447,11 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(820, 560)
         self.resize(1420, 720)
         self._build_ui()
+        self.window_pin = WindowPinController(
+            is_own_postit=self._is_own_postit_window,
+            count_changed=lambda _count: self._refresh_tray_tooltip(),
+        )
+        QApplication.instance().aboutToQuit.connect(self.window_pin.shutdown)
         self.pet_controller = TomaPetController(
             self.note_store, self.open_today_schedule, self.show_quick_memo,
         )
@@ -709,10 +732,42 @@ class MainWindow(QMainWindow):
         return True
 
     def _set_tray_tooltip(self, text: str) -> None:
+        self._tray_detail_text = text
+        self._refresh_tray_tooltip()
+
+    def _refresh_tray_tooltip(self) -> None:
         tray_icon = getattr(self, "tray_icon", None)
         if tray_icon is None:
             return
-        tray_icon.setToolTip(APP_NAME + "\n" + text if text else APP_NAME)
+        details = []
+        text = str(getattr(self, "_tray_detail_text", "") or "")
+        if text:
+            details.append(text)
+        window_pin = getattr(self, "window_pin", None)
+        if window_pin is not None:
+            details.append(f"고정된 창 {window_pin.pinned_count}개")
+        tray_icon.setToolTip(APP_NAME + ("\n" + "\n".join(details) if details else ""))
+
+    def _is_own_postit_window(self, hwnd: int) -> bool:
+        panel = getattr(self, "alert_panel", None)
+        if panel is None:
+            return False
+        windows = list(getattr(panel, "postits", {}).values())
+        schedule_postit = getattr(panel, "schedule_postit", None)
+        if schedule_postit is not None:
+            windows.append(schedule_postit)
+        return any(
+            window.isVisible() and int(window.winId()) == int(hwnd)
+            for window in windows
+        )
+
+    def toggle_foreground_window_pin(self) -> None:
+        result = self.window_pin.toggle_foreground()
+        level = "success" if result.changed else "warning"
+        self._set_status(result.message, level)
+        tray_icon = getattr(self, "tray_icon", None)
+        if tray_icon is not None:
+            tray_icon.showMessage("창 고정/해제", result.message, application_icon(), 3500)
 
     def _cycle_alert_tab(self) -> None:
         """Move to the next 메모·일정 tab; the shortcut workspace has none."""
@@ -797,7 +852,7 @@ class MainWindow(QMainWindow):
 
     def _build_tray(self) -> None:
         self.tray_icon = QSystemTrayIcon(self.windowIcon(), self)
-        self.tray_icon.setToolTip(APP_NAME)
+        self._refresh_tray_tooltip()
         tray_menu = QMenu(self)
         open_action = tray_menu.addAction("메인 창 열기")
         open_action.triggered.connect(self.restore_from_tray)
@@ -1497,6 +1552,12 @@ class MainWindow(QMainWindow):
         }
         if "rect_basis" in window:
             payload["rect_basis"] = str(window.get("rect_basis", "window") or "window")
+        if window.get("monitor_device"):
+            payload["monitor_device"] = str(window["monitor_device"])
+        if "work_area" in window:
+            payload["work_area"] = list(window.get("work_area") or [])
+        if "dpi" in window:
+            payload["dpi"] = int(window.get("dpi", 96) or 96)
         return payload
 
     def _set_layout_rows(self, windows) -> None:
@@ -1673,6 +1734,7 @@ class MainWindow(QMainWindow):
                 TODAY_VIEW_HOTKEY_SETTING: self.today_view_hotkey,
                 MEMO_SEARCH_HOTKEY_SETTING: self.memo_search_hotkey,
                 QUICK_SCHEDULE_HOTKEY_SETTING: self.quick_schedule_hotkey,
+                WINDOW_PIN_HOTKEY_SETTING: self.window_pin_hotkey,
             },
             startup_mode=self.startup_mode,
             data_dir=self.store.data_dir,
@@ -1687,6 +1749,13 @@ class MainWindow(QMainWindow):
             ),
             show_start_guide_on_launch=(
                 self.store.setting(SHOW_START_GUIDE_SETTING, "true").lower() == "true"
+            ),
+            explorer_double_click_enabled=(
+                self.store.setting(EXPLORER_DBLCLICK_SETTING, "true").lower() == "true"
+            ),
+            explorer_middle_click_enabled=(
+                self.store.setting(EXPLORER_MIDDLE_CLICK_SETTING, "true").lower()
+                == "true"
             ),
             deadline_options=self.deadline_options(),
             schedule_postit_options=schedule_postit_preferences.__dict__,
@@ -1732,11 +1801,15 @@ class MainWindow(QMainWindow):
         self.quick_schedule_hotkey = values.get(
             QUICK_SCHEDULE_HOTKEY_SETTING, self.quick_schedule_hotkey
         )
+        self.window_pin_hotkey = values.get(
+            WINDOW_PIN_HOTKEY_SETTING, self.window_pin_hotkey
+        )
         values[QUICK_MEMO_HOTKEY_SETTING] = self.quick_memo_hotkey
         values[NEW_MEMO_HOTKEY_SETTING] = self.new_memo_hotkey
         values[TODAY_VIEW_HOTKEY_SETTING] = self.today_view_hotkey
         values[MEMO_SEARCH_HOTKEY_SETTING] = self.memo_search_hotkey
         values[QUICK_SCHEDULE_HOTKEY_SETTING] = self.quick_schedule_hotkey
+        values[WINDOW_PIN_HOTKEY_SETTING] = self.window_pin_hotkey
         self.startup_mode = values["startup_mode"]
         for key in (
             EXIT_HOTKEY_SETTING,
@@ -1749,12 +1822,19 @@ class MainWindow(QMainWindow):
             TODAY_VIEW_HOTKEY_SETTING,
             MEMO_SEARCH_HOTKEY_SETTING,
             QUICK_SCHEDULE_HOTKEY_SETTING,
+            WINDOW_PIN_HOTKEY_SETTING,
         ):
             self.store.set_setting(key, values[key])
         self.store.set_setting(STARTUP_MODE_SETTING, self.startup_mode)
         self.store.set_setting(
             SHOW_START_GUIDE_SETTING,
             "true" if values.get("show_start_guide_on_launch", True) else "false",
+        )
+        self._set_explorer_double_click_enabled(
+            bool(values.get("explorer_double_click_enabled", True))
+        )
+        self._set_explorer_middle_click_enabled(
+            bool(values.get("explorer_middle_click_enabled", True))
         )
         for key, default in DEADLINE_SETTING_DEFAULTS.items():
             self.note_store.set_setting(
@@ -1813,6 +1893,58 @@ class MainWindow(QMainWindow):
             return
         if self.register_hotkeys(show_message=True, success_message="설정이 저장되었습니다."):
             self._set_status("설정을 저장하고 전역 단축키를 갱신했습니다.", "success")
+
+    def _configure_explorer_double_click_from_store(self) -> None:
+        self._explorer_double_click_enabled = (
+            self.store.setting(EXPLORER_DBLCLICK_SETTING, "true").strip().casefold()
+            == "true"
+        )
+        self._explorer_middle_click_enabled = (
+            self.store.setting(EXPLORER_MIDDLE_CLICK_SETTING, "true").strip().casefold()
+            == "true"
+        )
+        self._sync_explorer_mouse_hook()
+
+    def _set_explorer_double_click_enabled(
+        self, enabled: bool, *, persist: bool = True
+    ) -> None:
+        self._explorer_double_click_enabled = bool(enabled)
+        self._sync_explorer_mouse_hook()
+        if persist:
+            self.store.set_setting(
+                EXPLORER_DBLCLICK_SETTING, "true" if enabled else "false"
+            )
+
+    def _set_explorer_middle_click_enabled(
+        self, enabled: bool, *, persist: bool = True
+    ) -> None:
+        self._explorer_middle_click_enabled = bool(enabled)
+        self._sync_explorer_mouse_hook()
+        if persist:
+            self.store.set_setting(
+                EXPLORER_MIDDLE_CLICK_SETTING, "true" if enabled else "false"
+            )
+
+    def _sync_explorer_mouse_hook(self) -> None:
+        navigator = getattr(self, "_explorer_double_click_navigator", None)
+        double_enabled = bool(getattr(self, "_explorer_double_click_enabled", False))
+        middle_enabled = bool(getattr(self, "_explorer_middle_click_enabled", False))
+        if (double_enabled or middle_enabled) and navigator is None:
+            navigator = ExplorerDoubleClickNavigator(
+                recording_provider=lambda: self._recording,
+                double_click_enabled=double_enabled,
+                middle_click_enabled=middle_enabled,
+            )
+            navigator.start()
+            self._explorer_double_click_navigator = navigator
+        elif not (double_enabled or middle_enabled) and navigator is not None:
+            navigator.stop()
+            self._explorer_double_click_navigator = None
+        elif navigator is not None:
+            navigator.configure_features(
+                double_click_enabled=double_enabled,
+                middle_click_enabled=middle_enabled,
+            )
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -2578,6 +2710,7 @@ class MainWindow(QMainWindow):
             self.today_view_hotkey: "오늘 일정 열기",
             self.memo_search_hotkey: "메모·일정 검색",
             self.quick_schedule_hotkey: "빠른 일정",
+            self.window_pin_hotkey: "창 고정/해제",
             self.schedule_postit_hotkey: "일정 포스트잇",
         }
         reserved.pop("", None)
@@ -3161,6 +3294,7 @@ class MainWindow(QMainWindow):
             self.today_view_hotkey,
             self.memo_search_hotkey,
             self.quick_schedule_hotkey,
+            self.window_pin_hotkey,
             self.schedule_postit_hotkey,
         }
         reserved.discard("")
@@ -3200,6 +3334,7 @@ class MainWindow(QMainWindow):
             self.new_memo_hotkey,
             self.today_view_hotkey, self.memo_search_hotkey,
             self.quick_schedule_hotkey,
+            self.window_pin_hotkey,
             self.schedule_postit_hotkey,
         }
         controls.discard("")
@@ -3350,6 +3485,7 @@ class MainWindow(QMainWindow):
             (TODAY_VIEW_HOTKEY_ID, self.today_view_hotkey, self.open_today_schedule, "오늘 일정"),
             (MEMO_SEARCH_HOTKEY_ID, self.memo_search_hotkey, self.show_memo_search, "메모·일정 검색"),
             (QUICK_SCHEDULE_HOTKEY_ID, self.quick_schedule_hotkey, self.show_quick_schedule, "빠른 일정"),
+            (WINDOW_PIN_HOTKEY_ID, self.window_pin_hotkey, self.toggle_foreground_window_pin, "창 고정/해제"),
             (SCHEDULE_POSTIT_HOTKEY_ID, self.schedule_postit_hotkey, self.toggle_schedule_postit, "일정 포스트잇"),
         )
         control_registered = 0
@@ -3373,6 +3509,7 @@ class MainWindow(QMainWindow):
                 self.today_view_hotkey,
                 self.memo_search_hotkey,
                 self.quick_schedule_hotkey,
+                self.window_pin_hotkey,
                 self.schedule_postit_hotkey,
             }:
                 failed.append(f"{row['name']} (프로그램 제어 단축키와 충돌)")
@@ -3690,6 +3827,9 @@ class MainWindow(QMainWindow):
         self._save_splitter_sizes()
         if self._recording:
             self.recorder.stop()
+        self._set_explorer_double_click_enabled(False, persist=False)
+        self._set_explorer_middle_click_enabled(False, persist=False)
+        self.window_pin.shutdown()
         QApplication.instance().removeEventFilter(self)
         self.hotkeys.unregister_all()
         # 갈고리를 건 채로 나가면 다음에 켤 때까지 키가 새어 나간다.

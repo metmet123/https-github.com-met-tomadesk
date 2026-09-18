@@ -124,6 +124,22 @@ class BorderAwareRestoreTest(unittest.TestCase):
         self.assertEqual(api.window_rect_calls, 1)
         self.assertEqual(api.frame_rect_calls, 1)
 
+    def test_work_area_scaling_clamps_visible_bounds_before_readding_borders(self):
+        monitor = dict(MONITOR, work_rect=(0, 0, 1600, 900))
+        with patch.object(window_layout._USER32, "ShowWindow", return_value=True), patch.object(
+            window_layout._USER32, "SetWindowPos", return_value=True,
+        ) as set_position:
+            self.assertTrue(window_layout.move_window(
+                301,
+                [960, 516, 960, 516],
+                monitor,
+                rect_basis=window_layout.RECT_BASIS_VISIBLE,
+                source_work_area=[1920, 1032],
+                api_provider=FakeWindowsApi(),
+            ))
+
+        self.assertEqual(set_position.call_args.args[2:6], (793, 450, 814, 457))
+
 
 if __name__ == "__main__":
     unittest.main()

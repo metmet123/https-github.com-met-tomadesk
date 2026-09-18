@@ -22,6 +22,7 @@ SWP_NOZORDER = 0x0004
 SWP_NOACTIVATE = 0x0010
 SWP_ASYNCWINDOWPOS = 0x4000
 DWMWA_EXTENDED_FRAME_BOUNDS = 9
+MDT_EFFECTIVE_DPI = 0
 RECT_BASIS_VISIBLE = "visible"
 RECT_BASIS_WINDOW_RECT_FALLBACK = "window"
 
@@ -73,6 +74,15 @@ _DWMAPI.DwmGetWindowAttribute.argtypes = [
     wintypes.HWND, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD,
 ]
 _DWMAPI.DwmGetWindowAttribute.restype = ctypes.c_long
+try:
+    _SHCORE = ctypes.WinDLL("shcore", use_last_error=True)
+    _SHCORE.GetDpiForMonitor.argtypes = [
+        wintypes.HANDLE, ctypes.c_int,
+        ctypes.POINTER(wintypes.UINT), ctypes.POINTER(wintypes.UINT),
+    ]
+    _SHCORE.GetDpiForMonitor.restype = ctypes.c_long
+except (AttributeError, OSError):
+    _SHCORE = None
 
 
 class _NativeWindowBoundsProvider:
@@ -110,6 +120,24 @@ def scale_size_for_dpi(rect, source_dpi: int, target_dpi: int) -> list[int]:
     target = max(1, int(target_dpi or 96))
     ratio = target / source
     return [x, y, max(1, round(width * ratio)), max(1, round(height * ratio))]
+
+
+def scale_rect_for_work_area(rect, source_work_area, target_work_rect) -> list[int]:
+    """Scale a relative rectangle when the monitor work-area size changes."""
+    x, y, width, height = (int(round(value)) for value in rect)
+    try:
+        source_width, source_height = (max(1, int(value)) for value in source_work_area)
+    except (TypeError, ValueError):
+        return [x, y, max(1, width), max(1, height)]
+    left, top, right, bottom = (int(value) for value in target_work_rect)
+    target_width = max(1, right - left)
+    target_height = max(1, bottom - top)
+    return [
+        round(x * target_width / source_width),
+        round(y * target_height / source_height),
+        max(1, round(width * target_width / source_width)),
+        max(1, round(height * target_height / source_height)),
+    ]
 
 
 def clamp_rect_to_work_area(rect, work_rect) -> list[int]:
@@ -173,9 +201,11 @@ def target_window_rect(
     rect_basis: str | None = None,
     source_dpi: int = 96,
     target_dpi: int = 96,
+    source_work_area=None,
 ) -> list[int]:
     """Convert saved coordinates to the raw rectangle required by SetWindowPos."""
-    scaled = scale_size_for_dpi(rect, source_dpi, target_dpi)
+    work_scaled = scale_rect_for_work_area(rect, source_work_area, work_rect)
+    scaled = scale_size_for_dpi(work_scaled, source_dpi, target_dpi)
     border_left, border_top, border_right, border_bottom = (
         max(0, int(value)) for value in borders
     )
@@ -194,6 +224,18 @@ def target_window_rect(
         width + border_left + border_right,
         height + border_top + border_bottom,
     ]
+
+
+def _monitor_dpi(handle) -> int:
+    """Return a monitor's effective DPI, falling back to 100% scaling."""
+    if _SHCORE is None:
+        return 96
+    dpi_x = wintypes.UINT()
+    dpi_y = wintypes.UINT()
+    result = _SHCORE.GetDpiForMonitor(
+        handle, MDT_EFFECTIVE_DPI, ctypes.byref(dpi_x), ctypes.byref(dpi_y),
+    )
+    return int(dpi_x.value or 96) if result == 0 else 96
 
 
 def enumerate_monitors() -> list[dict]:
@@ -218,7 +260,7 @@ def enumerate_monitors() -> list[dict]:
                 "monitor_rect": _rect_tuple(info.rcMonitor),
                 "work_rect": _rect_tuple(info.rcWork),
                 "primary": bool(info.dwFlags & MONITORINFOF_PRIMARY),
-                "dpi": 96,
+                "dpi": _monitor_dpi(handle),
             })
         return True
 
@@ -375,6 +417,9 @@ def describe_windows(windows, monitors, explorer_windows=()) -> list[dict]:
         state = "minimized" if window.get("minimized") else (
             "maximized" if window.get("maximized") else "normal"
         )
+        work_left, work_top, work_right, work_bottom = (
+            int(value) for value in monitor["work_rect"]
+        )
         result.append({
             "hwnd": hwnd,
             "program_path": str(window.get("program_path", "") or ""),
@@ -382,6 +427,9 @@ def describe_windows(windows, monitors, explorer_windows=()) -> list[dict]:
             "explorer_path": str(explorer.get("path", "") or ""),
             "monitor": int(monitor.get("number", 0) or 0),
             "monitor_device": str(monitor.get("device", "") or ""),
+            "work_area": [
+                max(1, work_right - work_left), max(1, work_bottom - work_top),
+            ],
             "rect": relative_rect(window["rect"], monitor["work_rect"]),
             "rect_basis": str(
                 window.get("rect_basis", RECT_BASIS_WINDOW_RECT_FALLBACK)
@@ -400,6 +448,7 @@ def move_window(
     state: str = "normal",
     source_dpi: int = 96,
     rect_basis: str | None = None,
+    source_work_area=None,
     api_provider=None,
 ) -> bool:
     """Move a window to a monitor-relative rectangle and apply its window state."""
@@ -413,6 +462,7 @@ def move_window(
         rect_basis=rect_basis,
         source_dpi=source_dpi,
         target_dpi=int(monitor.get("dpi", 96) or 96),
+        source_work_area=source_work_area,
     )
     _USER32.ShowWindow(hwnd, SW_RESTORE)
     accepted = bool(_USER32.SetWindowPos(
