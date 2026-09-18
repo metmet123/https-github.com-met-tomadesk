@@ -27,6 +27,7 @@ from PyQt6.QtWidgets import (
 from hotkey_builder import HotkeyBuilder
 from hotkey_parser import parse_hotkey
 from ui_polish import polish_button
+from storage_config import is_system_temporary_path
 from alert_notes.value_input_guard import install_value_input_guard
 from alert_notes.schedule_postit_settings import (
     COMPLETE_STRIKE, COMPLETE_TRASH, SchedulePostitPreferences,
@@ -530,6 +531,19 @@ class SettingsDialog(QDialog):
         if not selected:
             return
         path = Path(selected)
+        if (
+            key == "data_dir"
+            and is_system_temporary_path(path)
+            and not is_system_temporary_path(self.data_dir)
+        ):
+            QMessageBox.warning(
+                self,
+                "저장 위치 선택 불가",
+                "Windows 임시 폴더는 시스템이나 정리 도구가 삭제할 수 있어 "
+                "데이터 저장 위치로 사용할 수 없습니다.\n\n"
+                f"선택한 경로: {path}",
+            )
+            return
         setattr(self, key, path)
         self.path_labels[key].setText(str(path))
         self.path_labels[key].setToolTip(str(path))

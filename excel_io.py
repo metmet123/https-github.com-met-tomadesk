@@ -7,10 +7,11 @@ from hotkey_parser import parse_hotkey
 
 SHEET_NAME = "단축키목록"
 BASE_HEADERS = ["ID", "활성", "이름", "단축키", "작업유형", "문구", "입력후Enter", "URL", "경로", "매크로JSON"]
+LAYOUT_HEADER = "창배치JSON"
 EXCLUDED_APPS_HEADER = "제외프로그램"
 RESTORE_MINIMIZED_HEADER = "최소화창복원"
-HEADERS = [*BASE_HEADERS, RESTORE_MINIMIZED_HEADER, EXCLUDED_APPS_HEADER]
-ACTION_TYPES = {"text", "url", "path", "macro"}
+HEADERS = [*BASE_HEADERS, LAYOUT_HEADER, RESTORE_MINIMIZED_HEADER, EXCLUDED_APPS_HEADER]
+ACTION_TYPES = {"text", "url", "path", "macro", "layout"}
 
 
 class ExcelImportError(ValueError):
@@ -80,8 +81,10 @@ def action_to_excel_row(action) -> list:
         payload.get("url", "") if action_type == "url" else "",
         payload.get("path", "") if action_type == "path" else "",
         json.dumps(payload, ensure_ascii=False, indent=2) if action_type == "macro" else "",
+        json.dumps(payload, ensure_ascii=False, indent=2) if action_type == "layout" else "",
         _bool_label(payload.get("restore_if_minimized", False)) if action_type == "path" else "",
-        json.dumps(persisted_app_list(payload.get("excluded_apps", [])), ensure_ascii=False),
+        json.dumps(persisted_app_list(payload.get("excluded_apps", [])), ensure_ascii=False)
+        if action_type != "layout" else "",
     ]
 
 
@@ -92,13 +95,16 @@ def excel_row_to_action(values, index: dict[str, int]) -> dict:
     hotkey = parse_hotkey(str(_cell(values, index, "단축키") or "").strip()).text
     action_type = str(_cell(values, index, "작업유형") or "").strip().lower()
     if action_type not in ACTION_TYPES:
-        raise ExcelImportError("작업유형은 text/url/path/macro 중 하나여야 합니다.")
+        raise ExcelImportError("작업유형은 text/url/path/macro/layout 중 하나여야 합니다.")
     payload = _payload_from_excel(action_type, values, index)
     if action_type == "path":
         payload["restore_if_minimized"] = parse_bool(
             _cell_optional(values, index, RESTORE_MINIMIZED_HEADER),
             default=False,
         )
+    if action_type == "layout":
+        return {"id": action_id, "name": name, "hotkey": hotkey, "action_type": action_type,
+                "payload": payload, "active": active}
     excluded_text = str(_cell_optional(values, index, EXCLUDED_APPS_HEADER) or "").strip()
     if excluded_text:
         try:
@@ -141,6 +147,19 @@ def _payload_from_excel(action_type: str, values, index: dict[str, int]) -> dict
         if not target:
             raise ExcelImportError("path 작업은 경로가 필요합니다.")
         return {"path": target}
+    if action_type == "layout":
+        layout_text = str(_cell_optional(values, index, LAYOUT_HEADER) or "").strip()
+        if not layout_text:
+            raise ExcelImportError("layout 작업은 창배치JSON이 필요합니다.")
+        try:
+            payload = json.loads(layout_text)
+        except json.JSONDecodeError as exc:
+            raise ExcelImportError(f"창배치JSON 형식이 올바르지 않습니다: {exc}") from exc
+        if not isinstance(payload, dict) or not isinstance(payload.get("windows"), list):
+            raise ExcelImportError("layout 작업은 windows 배열이 있는 JSON 객체가 필요합니다.")
+        if not payload["windows"]:
+            raise ExcelImportError("layout 작업은 하나 이상의 창이 필요합니다.")
+        return payload
     macro_text = str(_cell(values, index, "매크로JSON") or "").strip()
     try:
         payload = json.loads(macro_text)

@@ -11,7 +11,11 @@ from app_icon import application_icon
 from app_config import APP_NAME
 from main_window import MainWindow
 from single_instance import SingleInstanceGuard
-from storage_config import fallback_storage_dir, save_storage_paths
+from storage_config import (
+    consume_ignored_temporary_storage_path,
+    fallback_storage_dir,
+    save_storage_paths,
+)
 from store import Store
 
 
@@ -25,6 +29,7 @@ def main() -> int:
         QMessageBox.information(None, APP_NAME, "TomaDesk가 이미 실행 중입니다.")
         return 0
     try:
+        _show_ignored_storage_path_warning()
         store = _open_store_with_recovery()
         if store is None:
             return 1
@@ -35,6 +40,20 @@ def main() -> int:
         return app.exec()
     finally:
         guard.release()
+
+
+def _show_ignored_storage_path_warning() -> None:
+    ignored_path = consume_ignored_temporary_storage_path()
+    if ignored_path is None:
+        return
+    QMessageBox.warning(
+        None,
+        "데이터 저장 위치 보호",
+        "설정된 데이터 저장 위치가 Windows 임시 폴더 안에 있어 사용하지 않았습니다.\n"
+        "이번 실행에는 프로그램의 기본 데이터 폴더를 사용합니다.\n\n"
+        "이전 위치에 데이터가 남아 있을 수 있으므로 아래 경로를 확인해 주세요.\n"
+        f"{ignored_path}",
+    )
 
 
 def _install_exception_hook(log_path: Path) -> None:

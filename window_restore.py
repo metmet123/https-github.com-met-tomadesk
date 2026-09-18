@@ -60,13 +60,28 @@ def _find_minimized_program_window(target: Path) -> int:
 
 def _find_minimized_explorer_window(target: Path) -> int:
     """Find an Explorer window whose current folder exactly matches target."""
+    wanted = _normalized_path(target)
+    for window in enumerate_explorer_windows():
+        hwnd = int(window.get("hwnd", 0) or 0)
+        if (
+            hwnd
+            and _USER32.IsWindowVisible(hwnd)
+            and _USER32.IsIconic(hwnd)
+            and _normalized_path(window.get("path", "")) == wanted
+        ):
+            return hwnd
+    return 0
+
+
+def enumerate_explorer_windows() -> list[dict]:
+    """Return open Explorer windows without visibility or minimized filters."""
     try:
         import pythoncom
         from win32com.client import Dispatch
     except ImportError:
-        return 0
+        return []
 
-    wanted = _normalized_path(target)
+    windows: list[dict] = []
     initialized = False
     try:
         pythoncom.CoInitialize()
@@ -76,21 +91,17 @@ def _find_minimized_explorer_window(target: Path) -> int:
             try:
                 hwnd = int(window.HWND)
                 folder_path = str(window.Document.Folder.Self.Path or "")
+                title = str(getattr(window, "LocationName", "") or "")
             except Exception:
                 continue
-            if (
-                hwnd
-                and _USER32.IsWindowVisible(hwnd)
-                and _USER32.IsIconic(hwnd)
-                and _normalized_path(folder_path) == wanted
-            ):
-                return hwnd
+            if hwnd and folder_path:
+                windows.append({"hwnd": hwnd, "path": folder_path, "title": title})
     except Exception:
-        return 0
+        return []
     finally:
         if initialized:
             pythoncom.CoUninitialize()
-    return 0
+    return windows
 
 
 def _restore_window(hwnd: int) -> bool:

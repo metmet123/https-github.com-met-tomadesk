@@ -9,9 +9,9 @@ from urllib.parse import urlparse
 from PyQt6.QtCore import QByteArray, QEvent, QPointF, QRect, QRectF, Qt, QTimer
 from PyQt6.QtGui import QColor, QGuiApplication, QKeySequence, QPainter, QShortcut
 from PyQt6.QtWidgets import (
-    QFileDialog, QAbstractSpinBox, QBoxLayout, QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QGridLayout,
+    QFileDialog, QAbstractItemView, QAbstractSpinBox, QBoxLayout, QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QGridLayout,
     QFrame, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton,
-    QApplication, QMenu, QScrollArea, QSlider, QSpinBox, QSplitter, QStackedWidget, QSystemTrayIcon,
+    QApplication, QHeaderView, QMenu, QScrollArea, QSlider, QSpinBox, QSplitter, QStackedWidget, QSystemTrayIcon,
     QSizePolicy, QTableWidget, QTableWidgetItem, QTextEdit, QVBoxLayout, QWidget,
 )
 
@@ -81,9 +81,16 @@ from ui_polish import (
 )
 from ui_theme import scaled_stylesheet as theme_scaled_stylesheet
 from window_title_bar import WindowTitleBar
+from window_layout import collect_open_windows
 
 
-ACTION_LABELS = {"text": "문구 입력", "url": "사이트 열기", "path": "프로그램/폴더 열기", "macro": "반복작업"}
+ACTION_LABELS = {
+    "text": "문구 입력",
+    "url": "사이트 열기",
+    "path": "프로그램/폴더 열기",
+    "macro": "반복작업",
+    "layout": "창 배치",
+}
 RECORD_STOP_HOTKEY_ID = 998
 RECORD_STOP_HOTKEY = "Ctrl+Alt+F12"
 RECORD_STOP_HOTKEY_SETTING = "record_stop_hotkey"
@@ -379,7 +386,10 @@ class MainWindow(QMainWindow):
         )
         self.schedule_postit_hotkey = SchedulePostitPreferences.load(self.note_store).hotkey
         self.startup_mode = self.store.setting(STARTUP_MODE_SETTING, "window")
-        self.runner = ActionRunner(self.playback_stop_hotkey)
+        self.runner = ActionRunner(self.playback_stop_hotkey, settings_store=self.store)
+        self._hidden_windows_exit_restored = False
+        self._hidden_windows_startup_checked = False
+        QApplication.instance().aboutToQuit.connect(self._restore_hidden_windows_on_exit)
         self.hotkeys = HotkeyManager(int(self.winId()))
         self.recorder = WindowsHookRecorder()
         self.recorder.ignore_click = self._is_own_window_click
@@ -795,6 +805,8 @@ class MainWindow(QMainWindow):
         schedule_postit_action.triggered.connect(self.toggle_schedule_postit)
         settings_action = tray_menu.addAction("설정")
         settings_action.triggered.connect(self.show_settings)
+        restore_hidden_action = tray_menu.addAction("숨긴 창 모두 복원")
+        restore_hidden_action.triggered.connect(self.restore_all_hidden_windows)
         tray_menu.addSeparator()
         exit_action = tray_menu.addAction("종료")
         exit_action.triggered.connect(self.exit_application)
@@ -831,6 +843,7 @@ class MainWindow(QMainWindow):
 
     def show_initial_state(self) -> None:
         show_guide = self.store.setting(SHOW_START_GUIDE_SETTING, "true").lower() == "true"
+        QTimer.singleShot(200, self._offer_restore_hidden_windows)
         if self.startup_mode == "tray" and QSystemTrayIcon.isSystemTrayAvailable():
             self.tray_icon.show()
             self.hide()
@@ -840,6 +853,34 @@ class MainWindow(QMainWindow):
         self.show()
         if show_guide:
             QTimer.singleShot(0, self.show_start_guide)
+
+    def restore_all_hidden_windows(self) -> None:
+        restored, failed = self.runner.restore_all_hidden_windows()
+        if failed:
+            self._set_status(
+                f"숨긴 창 {restored}개 복원, {failed}개는 창 종류·폴더 경로 확인에 실패했습니다.",
+                "warning",
+            )
+        else:
+            self._set_status(f"숨긴 창 {restored}개를 복원했습니다.", "success")
+
+    def _offer_restore_hidden_windows(self) -> None:
+        if self._hidden_windows_startup_checked:
+            return
+        self._hidden_windows_startup_checked = True
+        count = self.runner.alive_hidden_window_count()
+        if count and QMessageBox.question(
+            self,
+            "숨긴 창 복원",
+            f"이전 실행에서 숨긴 탐색기 창 {count}개가 남아 있습니다. 지금 복원할까요?",
+        ) == QMessageBox.StandardButton.Yes:
+            self.restore_all_hidden_windows()
+
+    def _restore_hidden_windows_on_exit(self) -> tuple[int, int]:
+        if self._hidden_windows_exit_restored:
+            return (0, 0)
+        self._hidden_windows_exit_restored = True
+        return self.runner.restore_all_hidden_windows()
 
     def show_start_guide(self) -> None:
         memo_auto_save = self.note_store.setting(MEMO_AUTO_SAVE_SETTING, "true").lower() == "true"
@@ -912,8 +953,8 @@ class MainWindow(QMainWindow):
         self.register_hotkeys(False)
 
     def exit_application(self) -> None:
-        self.close()
-        QApplication.instance().quit()
+        if self.close():
+            QApplication.instance().quit()
 
     def _build_table_panel(self) -> QWidget:
         panel = QWidget()
@@ -1376,6 +1417,7 @@ class MainWindow(QMainWindow):
         macro_layout.addWidget(settings_panel, 2)
         macro_root.addLayout(macro_layout)
         self.stack.addWidget(macro_page)
+        self.stack.addWidget(self._layout_page())
         self._sync_stack()
         self._sync_excluded_apps_buttons()
 
@@ -1394,6 +1436,165 @@ class MainWindow(QMainWindow):
         layout.addStretch()
         return page
 
+    def _layout_page(self) -> QWidget:
+        page = QWidget()
+        root = QVBoxLayout(page)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(8)
+
+        capture_row = QHBoxLayout()
+        self.layout_capture_button = self._button(
+            capture_row, "＋ 지금 열린 창 불러오기", self.capture_layout_windows
+        )
+        self.layout_capture_button.setAccessibleDescription(
+            "현재 열린 파일 탐색기 창의 폴더와 화면 위치를 목록으로 불러옵니다"
+        )
+        self.layout_status_label = QLabel("탐색기 창을 불러온 뒤 저장할 창을 선택하세요.")
+        self.layout_status_label.setObjectName("secondaryText")
+        capture_row.addWidget(self.layout_status_label, 1)
+        root.addLayout(capture_row)
+
+        self.layout_table = QTableWidget(0, 6)
+        self.layout_table.setObjectName("layoutWindowTable")
+        self.layout_table.setHorizontalHeaderLabels(
+            ["사용", "폴더", "모니터", "위치·크기", "열기 방식", "순서·삭제"]
+        )
+        self.layout_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.layout_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.layout_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.layout_table.verticalHeader().setVisible(False)
+        self.layout_table.setMinimumHeight(180)
+        header = self.layout_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        for column in (2, 3, 4, 5):
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        root.addWidget(self.layout_table, 1)
+        return page
+
+    def capture_layout_windows(self) -> None:
+        try:
+            windows = [item for item in collect_open_windows() if item.get("explorer_path")]
+        except Exception as exc:
+            self.layout_status_label.setText(f"창을 불러오지 못했습니다: {exc}")
+            return
+        rows = [self._layout_payload_from_window(item) for item in windows]
+        self._set_layout_rows(rows)
+        if rows:
+            self.layout_status_label.setText(f"탐색기 창 {len(rows)}개를 불러왔습니다.")
+        else:
+            self.layout_status_label.setText("현재 열린 파일 탐색기 창이 없습니다.")
+
+    @staticmethod
+    def _layout_payload_from_window(window: dict) -> dict:
+        payload = {
+            "kind": "explorer",
+            "path": str(window.get("explorer_path", "") or ""),
+            "monitor": int(window.get("monitor", 0) or 0),
+            "rect": list(window.get("rect", [0, 0, 1, 1])),
+            "state": str(window.get("state", "normal") or "normal"),
+            "always_new": False,
+        }
+        if "rect_basis" in window:
+            payload["rect_basis"] = str(window.get("rect_basis", "window") or "window")
+        return payload
+
+    def _set_layout_rows(self, windows) -> None:
+        self.layout_table.setRowCount(0)
+        for value in windows if isinstance(windows, list) else []:
+            if not isinstance(value, dict):
+                continue
+            row_value = dict(value)
+            selected = bool(row_value.pop("_selected", True))
+            row = self.layout_table.rowCount()
+            self.layout_table.insertRow(row)
+
+            use_item = QTableWidgetItem()
+            use_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsUserCheckable)
+            use_item.setCheckState(Qt.CheckState.Checked if selected else Qt.CheckState.Unchecked)
+            use_item.setData(Qt.ItemDataRole.UserRole, row_value)
+            self.layout_table.setItem(row, 0, use_item)
+
+            path = str(row_value.get("path", "") or "")
+            folder_name = Path(path).name or path
+            folder_item = QTableWidgetItem(folder_name)
+            folder_item.setToolTip(path)
+            self.layout_table.setItem(row, 1, folder_item)
+            self.layout_table.setItem(
+                row, 2, QTableWidgetItem(f"모니터 {int(row_value.get('monitor', 0) or 0)}")
+            )
+            rect = list(row_value.get("rect", [0, 0, 1, 1]))
+            while len(rect) < 4:
+                rect.append(0)
+            self.layout_table.setItem(
+                row, 3, QTableWidgetItem(f"{rect[0]}, {rect[1]} · {rect[2]}×{rect[3]}")
+            )
+
+            always_new = QCheckBox("항상 새 창으로 열기")
+            always_new.setChecked(bool(row_value.get("always_new", False)))
+            always_new.setAccessibleName(f"{folder_name} 항상 새 창으로 열기")
+            self.layout_table.setCellWidget(row, 4, always_new)
+
+            actions = QWidget()
+            actions_layout = QHBoxLayout(actions)
+            actions_layout.setContentsMargins(0, 0, 0, 0)
+            actions_layout.setSpacing(2)
+            up = QPushButton("↑")
+            down = QPushButton("↓")
+            remove = QPushButton("삭제")
+            for button in (up, down, remove):
+                polish_button(button)
+                actions_layout.addWidget(button)
+            up.setAccessibleName(f"{folder_name} 위로 이동")
+            down.setAccessibleName(f"{folder_name} 아래로 이동")
+            remove.setAccessibleName(f"{folder_name} 행 삭제")
+            up.clicked.connect(lambda _checked=False, button=up: self._move_layout_row(button, -1))
+            down.clicked.connect(lambda _checked=False, button=down: self._move_layout_row(button, 1))
+            remove.clicked.connect(lambda _checked=False, button=remove: self._delete_layout_row(button))
+            self.layout_table.setCellWidget(row, 5, actions)
+            self.layout_table.setRowHeight(row, 32)
+
+    def _layout_row_states(self) -> list[dict]:
+        result = []
+        for row in range(self.layout_table.rowCount()):
+            use_item = self.layout_table.item(row, 0)
+            value = dict(use_item.data(Qt.ItemDataRole.UserRole) or {})
+            always_new = self.layout_table.cellWidget(row, 4)
+            value["always_new"] = bool(always_new and always_new.isChecked())
+            value["_selected"] = use_item.checkState() == Qt.CheckState.Checked
+            result.append(value)
+        return result
+
+    def _layout_windows(self, selected_only: bool = True) -> list[dict]:
+        result = []
+        for value in self._layout_row_states():
+            selected = bool(value.pop("_selected", False))
+            if selected or not selected_only:
+                result.append(value)
+        return result
+
+    def _layout_row_for_button(self, button: QPushButton) -> int:
+        for row in range(self.layout_table.rowCount()):
+            host = self.layout_table.cellWidget(row, 5)
+            if host is not None and button in host.findChildren(QPushButton):
+                return row
+        return -1
+
+    def _move_layout_row(self, button: QPushButton, offset: int) -> None:
+        row = self._layout_row_for_button(button)
+        target = row + offset
+        if row < 0 or target < 0 or target >= self.layout_table.rowCount():
+            return
+        rows = self._layout_row_states()
+        rows[row], rows[target] = rows[target], rows[row]
+        self._set_layout_rows(rows)
+        self.layout_table.selectRow(target)
+
+    def _delete_layout_row(self, button: QPushButton) -> None:
+        row = self._layout_row_for_button(button)
+        if row >= 0:
+            self.layout_table.removeRow(row)
+
     def _button(self, layout, text: str, callback, *position) -> QPushButton:
         button = QPushButton(text)
         button.clicked.connect(callback)
@@ -1403,13 +1604,14 @@ class MainWindow(QMainWindow):
 
     def _sync_stack(self) -> None:
         self.stack.setCurrentIndex(self.type_combo.currentIndex())
-        is_macro = self.type_combo.currentData() == "macro"
+        action_type = self.type_combo.currentData()
+        is_macro = action_type == "macro"
         if hasattr(self, "macro_save_button"):
             self.macro_save_button.setVisible(is_macro)
         if hasattr(self, "form_save_button"):
             self.form_save_button.setVisible(not is_macro)
         if hasattr(self, "form_excluded_apps_button"):
-            self.form_excluded_apps_button.setVisible(not is_macro)
+            self.form_excluded_apps_button.setVisible(action_type in {"text", "url", "path"})
 
     def toggle_recording_help(self, expanded: bool) -> None:
         self.recording_help_panel.setVisible(expanded)
@@ -2640,6 +2842,7 @@ class MainWindow(QMainWindow):
         self.url_edit.setText("")
         self.path_edit.setText("")
         self.path_restore_check.setChecked(False)
+        self._set_layout_rows([])
         self._updating_macro_document = True
         try:
             self.macro_edit.setPlainText(_default_macro_json())
@@ -2721,6 +2924,11 @@ class MainWindow(QMainWindow):
             finally:
                 self._updating_macro_document = False
             self._sync_timing_controls()
+        elif action_type == "layout":
+            self._set_layout_rows(payload.get("windows", []))
+            self.layout_status_label.setText(
+                f"저장된 탐색기 창 {self.layout_table.rowCount()}개를 불러왔습니다."
+            )
 
     def save_action(self) -> bool:
         self._commit_macro_history_state()
@@ -2790,6 +2998,9 @@ class MainWindow(QMainWindow):
         if action_type == "macro" and not payload.get("steps"):
             self.macro_edit.setFocus()
             raise ValueError("반복작업에 하나 이상의 단계를 추가해 주세요.")
+        if action_type == "layout" and not payload.get("windows"):
+            self.layout_capture_button.setFocus()
+            raise ValueError("저장할 탐색기 창을 하나 이상 선택해 주세요.")
 
     def _action_form_state(self) -> dict:
         """Return a lossless editor snapshot without validating unfinished input."""
@@ -2807,6 +3018,7 @@ class MainWindow(QMainWindow):
             "macro": self.macro_edit.toPlainText(),
             "speed": self.speed_slider.value(),
             "repeat": self.repeat_count_spin.value(),
+            "layout_windows": self._layout_row_states(),
             "excluded_apps": persisted_app_list(self.excluded_apps),
         }
 
@@ -2869,6 +3081,8 @@ class MainWindow(QMainWindow):
         elif action_type == "macro":
             payload = self._macro_document()
             payload.update(self._timing_options())
+        elif action_type == "layout":
+            return {"windows": self._layout_windows(selected_only=True)}
         else:
             payload = {}
         payload["excluded_apps"] = persisted_app_list(self.excluded_apps)
@@ -3463,6 +3677,7 @@ class MainWindow(QMainWindow):
         if not self._confirm_action_form_transition():
             event.ignore()
             return
+        self._restore_hidden_windows_on_exit()
         self._cancel_resize_drag()
         self._foreground_hotkey_timer.stop()
         if hasattr(self, "alert_service"):

@@ -5,12 +5,14 @@ import json
 import os
 import shutil
 import sys
+import tempfile
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
 
 CONFIG_NAME = "storage_paths.json"
 APP_STORAGE_NAME = "CodexShortcutLauncher"
+_ignored_temporary_storage_path: Path | None = None
 
 
 def application_dir() -> Path:
@@ -49,7 +51,9 @@ def load_storage_paths(
     app_directory: Path | None = None,
     config_file: Path | None = None,
 ) -> tuple[Path, Path]:
+    global _ignored_temporary_storage_path
     defaults = default_storage_paths(app_directory)
+    uses_bootstrap_config = config_file is None
     path = Path(config_file) if config_file is not None else bootstrap_config_file()
     if not path.is_file():
         return defaults
@@ -59,6 +63,9 @@ def load_storage_paths(
     except (OSError, TypeError, ValueError, json.JSONDecodeError):
         return defaults
     data_dir = data_dir or defaults[0]
+    if uses_bootstrap_config and is_system_temporary_path(data_dir):
+        _ignored_temporary_storage_path = data_dir
+        return defaults
     return data_dir, data_dir
 
 
@@ -67,6 +74,11 @@ def save_storage_paths(
     backup_dir: Path | None = None,
     config_file: Path | None = None,
 ) -> Path:
+    if config_file is None and is_system_temporary_path(data_dir):
+        raise OSError(
+            "Windows 임시 폴더 안에는 데이터 저장 위치를 설정할 수 없습니다.\n"
+            f"선택한 경로: {Path(data_dir)}"
+        )
     path = Path(config_file) if config_file is not None else bootstrap_config_file()
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
@@ -78,6 +90,24 @@ def save_storage_paths(
     return path
 
 
+def is_system_temporary_path(path: Path) -> bool:
+    """Return whether *path* is the active system temporary folder or below it."""
+    candidate = os.path.normcase(str(Path(path).expanduser().resolve()))
+    temporary_root = os.path.normcase(str(Path(tempfile.gettempdir()).resolve()))
+    try:
+        return os.path.commonpath((candidate, temporary_root)) == temporary_root
+    except ValueError:
+        return False
+
+
+def consume_ignored_temporary_storage_path() -> Path | None:
+    """Return the unsafe bootstrap value once so startup can explain the fallback."""
+    global _ignored_temporary_storage_path
+    ignored = _ignored_temporary_storage_path
+    _ignored_temporary_storage_path = None
+    return ignored
+
+
 def migrate_legacy_storage(
     data_dir: Path,
     backup_dir: Path | None = None,
@@ -85,6 +115,7 @@ def migrate_legacy_storage(
     legacy_root: Path | None = None,
 ) -> bool:
     """Merge the former data/backup layout into one data directory."""
+    uses_bootstrap_config = config_file is None
     config = Path(config_file) if config_file is not None else bootstrap_config_file()
     legacy = Path(legacy_root) if legacy_root is not None else config.parent
     legacy_data = legacy / "data"
@@ -121,7 +152,10 @@ def migrate_legacy_storage(
                 changed = True
 
     if previous_backup is not None:
-        save_storage_paths(destination_data, config_file=config)
+        if uses_bootstrap_config:
+            save_storage_paths(destination_data)
+        else:
+            save_storage_paths(destination_data, config_file=config)
         changed = True
     return changed
 
