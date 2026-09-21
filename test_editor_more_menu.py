@@ -143,3 +143,23 @@ def test_unknown_search_keeps_no_false_action(ui):
     assert editor.more_menu.empty.isVisible()
     QTest.keyClick(editor.more_menu.search, Qt.Key.Key_Return)
     assert editor.more_menu.isVisible()
+
+
+def test_more_group_headers_stand_apart_without_changing_search_actions(ui):
+    app, editor, store = ui
+    editor.property_chips.more_button.click()
+    app.processEvents()
+    menu = editor.more_menu
+    assert len(menu.headers) == 5
+    assert len(menu.group_separators) == 4
+    for group, header in menu.headers.items():
+        assert header.objectName() == "editorMoreGroupHeader"
+        assert header.accessibleName() == f"{group} 그룹"
+        assert "background:#e8eef6" in header.styleSheet()
+    for row in menu.rows.values():
+        assert row.layout().contentsMargins().left() == 10
+    menu.search.setText("백업")
+    app.processEvents()
+    assert [group for group, header in menu.headers.items() if header.isVisible()] == ["보관·복구"]
+    assert not any(separator.isVisible() for separator in menu.group_separators.values())
+    assert [key for key, row in menu.rows.items() if row.isVisible()] == ["backup"]

@@ -77,9 +77,11 @@ class CompactFormatToolbarTest(unittest.TestCase):
         self.assertEqual((toolbar.preset_settings_button.width(), toolbar.preset_settings_button.height()), (28, 28))
         for button in (
             *toolbar.style_buttons.values(), toolbar.bullet_button, toolbar.checklist_button,
-            toolbar.insert_button, toolbar.image_button,
+            toolbar.image_button,
         ):
             self.assertEqual((button.width(), button.height()), (28, 28))
+        self.assertIs(toolbar.insert_button, editor.function_button)
+        self.assertEqual(toolbar.insert_button.size(), editor.fold_current_button.size())
         close_alert_panel(panel, self.app)
 
     def test_two_rows_fit_and_controls_are_not_clipped_at_supported_widths(self):
@@ -99,7 +101,7 @@ class CompactFormatToolbarTest(unittest.TestCase):
                     toolbar.font_box, toolbar.size_box, toolbar.line_spacing_box,
                     toolbar.color_button, *toolbar.color_buttons.values(),
                     *toolbar.style_buttons.values(), toolbar.bullet_button,
-                    toolbar.checklist_button, toolbar.insert_button,
+                    toolbar.checklist_button,
                     toolbar.image_button, toolbar.default_button, toolbar.preset_strip,
                     toolbar.preset_settings_button,
                 ]

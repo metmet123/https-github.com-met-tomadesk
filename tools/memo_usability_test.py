@@ -210,17 +210,16 @@ def s2():
     if actions: actions[0].trigger(); pump()
     record('S2 머리영역', '⚙ › 편집 단축키 설정이 여는 창', '대화상자 열림', DIALOG_LOG or '없음', bool(DIALOG_LOG))
     click(ed.format_expand_button)
-    # ⋯ 칩
+    # 더보기 메뉴
     click(chips.buttons['other'])
     s = shot_widget(win, 'S2_more_chip')
-    texts = [w.text() for w in ed.property_panel.findChildren(type(ed.manual_save_button)) if w.isVisible()]
-    required_controls = (ed.opacity_combo, ed.always_top_check, ed.postit_check,
-                         ed.lock_check, ed.annotation_menu_button,
-                         ed.save_template_button, ed.version_button)
-    record('S2 머리영역', "'⋯' 안의 항목", '색상·투명도·항상 위·포스트잇·잠금·주석·템플릿·버전', texts,
-           all(widget.isVisible() for widget in required_controls)
-           and any(button.isVisible() for button in ed.color_buttons.values()), s)
-    record('S2 머리영역', "'⋯' 열면 본문 높이", '본문이 충분히 남음', f'본문 {ed.content_edit.height()}px', ed.content_edit.height() > 250, s)
+    texts = [button.text() for button in ed.more_menu.action_buttons.values() if button.isVisible()]
+    required = {'전체 메모 백업', '전체 메모 복원', '버전 기록', '템플릿 관리',
+                '선택을 템플릿으로 저장', '백링크', '주석 추가', '주석 보기',
+                '포스트잇·색상·저장 설정', '편집 단축키 설정'}
+    record('S2 머리영역', "'더보기' 안의 항목", '보관·기록·연결·메모 설정 기능', texts,
+           ed.more_menu.isVisible() and required <= set(texts), s)
+    record('S2 머리영역', "'더보기' 열면 본문 높이", '본문이 충분히 남음', f'본문 {ed.content_edit.height()}px', ed.content_edit.height() > 250, s)
     click(chips.buttons['other'])
     # 글자 잘림 검사
     clipped = []
@@ -410,10 +409,11 @@ def s6():
     record('S6 링크', '대상 메모에서 백링크 보기', "'알림/캘린더' 표시", items, any('알림/캘린더' in x for x in items), s)
     click(ed.property_chips.buttons['other'])
     MENU_LOG.clear()
-    click(ed.backlink_button)
+    click(ed.more_menu.action_buttons['backlinks'])
+    pump()
     backlink_actions = MENU_LOG[-1] if MENU_LOG else []
-    record('S6 링크', '제목 줄 백링크 한 번 클릭', '원본 메모 메뉴 표시', backlink_actions,
-           ed.backlink_button.isVisible() and any('알림/캘린더' in x for x in backlink_actions), s)
+    record('S6 링크', '더보기 → 백링크 한 번 클릭', '원본 메모 메뉴 표시', backlink_actions,
+           any('알림/캘린더' in x for x in backlink_actions), s)
     # 복제 시 v2 링크
     lp._item_for(b).setCheckState(0, Qt.CheckState.Checked); pump()
     panel.copy_selected_notes(); panel.paste_copied_notes(); pump()
@@ -510,8 +510,8 @@ def s9():
     ok = body.save_selection_as_template(); pump()
     record('S9 템플릿', '선택 → 템플릿으로 저장', '저장됨', f'결과={ok}, 개수={len(store.memo_data.templates())}', len(store.memo_data.templates()) == 1)
     click(ed.property_chips.buttons['other'])
-    visible_save = ed.save_template_button.isVisible()
-    record('S9 템플릿', "'템플릿으로 저장' 진입 위치", '⋯ 안의 버튼', visible_save, visible_save)
+    visible_save = ed.more_menu.isVisible() and ed.more_menu.action_buttons['save_template'].isVisible()
+    record('S9 템플릿', "'템플릿으로 저장' 진입 위치", '더보기 안의 버튼', visible_save, visible_save)
     click(ed.property_chips.buttons['other'])
     dst = store.create_note("템플릿 사용", "")
     panel.refresh(); panel.select_note(dst); pump()

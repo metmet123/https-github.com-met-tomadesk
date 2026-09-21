@@ -9,12 +9,14 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtCore import QMimeData, QPoint, QPointF, Qt
-from PyQt6.QtGui import QKeyEvent, QMouseEvent, QTextCharFormat, QTextCursor, QWheelEvent
+from PyQt6.QtGui import QKeyEvent, QKeySequence, QMouseEvent, QTextCharFormat, QTextCursor, QWheelEvent
+from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication
 
 from alert_notes.editor import MemoEditor
 from alert_notes.editor_shortcut_settings import EditorShortcutSettingsDialog
 from alert_notes.note_shortcuts import STRUCTURE_SHORTCUTS
+from alert_notes.block_identity import is_section_break
 from alert_notes.rich_memo_edit import HEADING_FOLDED_PREFIX, RichMemoTextEdit
 from alert_notes.sqlite_store import NoteReminderStore
 from qt_test_support import destroy_widget
@@ -254,6 +256,81 @@ class MemoPhaseThreeTest(unittest.TestCase):
         dialog = EditorShortcutSettingsDialog(self.store)
         self.widgets.append(dialog)
         self.assertEqual(dialog.structure_builders["open_link"].text(), "Ctrl+Alt+Enter")
+
+    def test_ctrl_enter_folds_heading_and_toggle_without_editing_plain_text(self):
+        editor = self.editor("제목\n본문")
+        self.heading(editor, 0, 1)
+        editor.keyPressEvent(QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Return,
+                                       Qt.KeyboardModifier.ControlModifier))
+        self.assertFalse(self.block(editor, 1).isVisible())
+        editor.keyPressEvent(QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Return,
+                                       Qt.KeyboardModifier.ControlModifier, "", True))
+        self.assertFalse(self.block(editor, 1).isVisible())
+        editor.keyPressEvent(QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Return,
+                                       Qt.KeyboardModifier.ControlModifier))
+        self.assertTrue(self.block(editor, 1).isVisible())
+        editor.setTextCursor(QTextCursor(self.block(editor, 1)))
+        before = editor.toPlainText()
+        editor.keyPressEvent(QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Return,
+                                       Qt.KeyboardModifier.ControlModifier))
+        self.assertEqual(editor.toPlainText(), before)
+        toggle = self.editor("할 일")
+        toggle.make_toggle()
+        toggle.keyPressEvent(QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Return,
+                                       Qt.KeyboardModifier.ControlModifier))
+        self.assertFalse(toggle._toggle_is_open(toggle.document().begin()))
+
+    def test_legacy_fold_default_resolves_to_ctrl_enter_without_rewriting_setting(self):
+        setting = STRUCTURE_SHORTCUTS["toggle_fold"][1]
+        self.store.set_setting(setting, "Ctrl+Alt+Space")
+        wrapper = MemoEditor(self.store)
+        self.widgets.append(wrapper)
+        self.assertEqual(wrapper.structure_shortcuts[1].key(), QKeySequence("Ctrl+Enter"))
+        dialog = EditorShortcutSettingsDialog(self.store)
+        self.widgets.append(dialog)
+        self.assertEqual(dialog.structure_builders["toggle_fold"].text(), "Ctrl+Enter")
+        self.assertEqual(self.store.setting(setting, ""), "Ctrl+Alt+Space")
+        with patch("alert_notes.editor_shortcut_settings.QMessageBox.information"):
+            dialog._save()
+        self.assertEqual(self.store.setting(setting, ""), "Ctrl+Enter")
+
+    def test_ctrl_enter_qt_shortcut_folds_once_in_memo_editor(self):
+        wrapper = MemoEditor(self.store)
+        self.widgets.append(wrapper)
+        wrapper.show()
+        body = wrapper.content_edit
+        body.setPlainText("제목\n본문")
+        body.setTextCursor(QTextCursor(self.block(body, 0)))
+        body.apply_heading1()
+        body.setFocus()
+        self.app.processEvents()
+        QTest.keyClick(body, Qt.Key.Key_Return, Qt.KeyboardModifier.ControlModifier)
+        self.assertFalse(self.block(body, 1).isVisible())
+        QTest.keyClick(body, Qt.Key.Key_Return, Qt.KeyboardModifier.ControlModifier)
+        self.assertTrue(self.block(body, 1).isVisible())
+
+    def test_section_break_hint_is_transient_but_boundary_is_saved(self):
+        editor = self.editor("제목\n본문")
+        self.heading(editor, 0, 1)
+        body = self.block(editor, 1)
+        editor.setTextCursor(QTextCursor(body))
+        self.assertEqual(editor._section_hint_timer.interval(), 1000)
+        self.assertTrue(editor.mark_section_break(body))
+        self.assertTrue(is_section_break(body))
+        self.assertEqual(editor._section_hint_position, body.position())
+        saved = editor.content()
+        editor.setTextCursor(QTextCursor(self.block(editor, 0)))
+        self.assertIsNone(editor._section_hint_position)
+        editor._show_section_hint(body)
+        editor._section_hint_timer.setInterval(10)
+        editor._section_hint_timer.start()
+        QTest.qWait(30)
+        self.assertIsNone(editor._section_hint_position)
+        self.assertTrue(is_section_break(body))
+        reopened = self.editor()
+        reopened.set_content(saved)
+        self.assertTrue(is_section_break(self.block(reopened, 1)))
+        self.assertIsNone(reopened._section_hint_position)
 
     def test_spacing_wheel_is_ignored_with_and_without_focus(self):
         wrapper = MemoEditor(self.store)

@@ -55,18 +55,31 @@ class EditorMoreMenu(QFrame):
         rows.setContentsMargins(0, 0, 0, 0)
         rows.setSpacing(2)
         self.headers = {}
+        self.group_separators = {}
         self.rows = {}
         self.action_buttons = {}
         self.pin_buttons = {}
         for command in commands:
             if command.group not in self.headers:
+                if self.headers:
+                    separator = QFrame()
+                    separator.setObjectName("editorMoreGroupSeparator")
+                    separator.setFixedHeight(7)
+                    separator.setStyleSheet("border-bottom:1px solid #cbd5e1;")
+                    rows.addWidget(separator)
+                    self.group_separators[command.group] = separator
                 label = QLabel(command.group)
-                label.setStyleSheet("color:#64748b;font-weight:600;padding-top:5px;")
+                label.setObjectName("editorMoreGroupHeader")
+                label.setAccessibleName(f"{command.group} 그룹")
+                label.setStyleSheet(
+                    "color:#243b53;background:#e8eef6;font-weight:700;"
+                    "border-left:3px solid #5b7fa8;padding:5px 8px;"
+                )
                 rows.addWidget(label)
                 self.headers[command.group] = label
             row = QWidget()
             layout = QHBoxLayout(row)
-            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setContentsMargins(10, 0, 0, 0)
             layout.setSpacing(2)
             button = QPushButton(command.label)
             button.setMinimumHeight(28)
@@ -125,8 +138,14 @@ class EditorMoreMenu(QFrame):
             self.action_buttons[command.key].setEnabled(bool(command.enabled()))
             if visible:
                 groups.add(command.group)
+        first_visible = True
         for group, header in self.headers.items():
-            header.setVisible(group in groups)
+            visible = group in groups
+            header.setVisible(visible)
+            if group in self.group_separators:
+                self.group_separators[group].setVisible(visible and not first_visible)
+            if visible:
+                first_visible = False
         self.empty.setVisible(not groups)
 
     def run_first(self):

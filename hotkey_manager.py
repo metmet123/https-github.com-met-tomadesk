@@ -4,7 +4,7 @@ import ctypes
 from ctypes import wintypes
 
 from hotkey_defs import WM_HOTKEY, HotkeyError
-from hotkey_hook import KeyboardHook
+from hotkey_hook import KeyboardHook, foreground_is_this_process
 from hotkey_parser import can_intercept, parse_hotkey
 
 
@@ -15,6 +15,7 @@ class HotkeyManager:
     다른 프로그램이 같은 조합을 쓰고 있어도 우리가 먼저 가져온다.
     가로채면 안 되는 조합(Ctrl+C 등)과 갈고리를 걸지 못한 경우에만 예전처럼
     RegisterHotKey 에 맡긴다.  이때는 먼저 잡은 프로그램이 임자다.
+    Alt+1~5는 전경 확인이 필요해 갈고리 실패 시 대체 등록하지 않는다.
     """
 
     def __init__(self, hwnd: int, hook_factory=KeyboardHook):
@@ -27,6 +28,7 @@ class HotkeyManager:
         self._registered: dict[int, str] = {}
         self._callbacks: dict[int, callable] = {}
         self._priority: set[int] = set()
+        self._focus_only: set[int] = set()
         self._hook_factory = hook_factory
         self._hook = None
         self._hook_failed = False
@@ -61,14 +63,19 @@ class HotkeyManager:
     def register(self, hotkey_id: int, hotkey_text: str, callback) -> str:
         parsed = parse_hotkey(hotkey_text)
         self.unregister(hotkey_id)
+        focus_only = parsed.text in {f"Alt+{number}" for number in range(1, 6)}
         if can_intercept(parsed):
             hook = self._ensure_hook()
             if hook is not None:
-                hook.matcher.claim(hotkey_id, parsed.modifiers, parsed.vk)
+                hook.matcher.claim(hotkey_id, parsed.modifiers, parsed.vk, focus_only=focus_only)
                 self._priority.add(hotkey_id)
+                if focus_only:
+                    self._focus_only.add(hotkey_id)
                 self._registered[hotkey_id] = parsed.text
                 self._callbacks[hotkey_id] = callback
                 return parsed.text
+        if focus_only:
+            raise HotkeyError(f"{hotkey_text}: 포커스 제한 단축키는 키보드 갈고리 없이 전역 등록할 수 없습니다.")
         ctypes.set_last_error(0)
         ok = self._user32.RegisterHotKey(self.hwnd, hotkey_id, parsed.modifiers, parsed.vk)
         if not ok:
@@ -89,6 +96,7 @@ class HotkeyManager:
         else:
             self._user32.UnregisterHotKey(self.hwnd, hotkey_id)
         self._registered.pop(hotkey_id, None)
+        self._focus_only.discard(hotkey_id)
         self._callbacks.pop(hotkey_id, None)
 
     def unregister_all(self) -> None:
@@ -110,5 +118,7 @@ class HotkeyManager:
         callback = self._callbacks.get(int(msg.wParam))
         if callback is None:
             return False
+        if int(msg.wParam) in self._focus_only and not foreground_is_this_process():
+            return True
         callback()
         return True

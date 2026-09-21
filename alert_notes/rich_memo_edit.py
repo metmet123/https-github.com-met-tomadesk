@@ -25,6 +25,8 @@ from .insert_menu import (
     install_insert_shortcuts, item_label, item_tooltip, matching_items,
 )
 from .insert_preferences import get_insert_preferences
+from .image_move import move_image
+from .note_shortcuts import structure_shortcut_value
 from .note_link_dialog import NoteLinkDialog
 from .line_gutter import LineGutter
 from .rich_text import editor_content, load_editor_content, sanitize_rich_html
@@ -141,6 +143,7 @@ class RichMemoTextEdit(QTextEdit):
         self.store = store
         self.insert_preferences = get_insert_preferences(store)
         self.note_id: int | None = None
+        self.template_title_provider = None
         self._refitting_images = False
         # 마우스가 올라와 있는 토글·체크리스트 표시의 위치.  손가락 커서와 옅은
         # 사각형을 어디에 그릴지 이 값 하나로 정한다.
@@ -159,6 +162,13 @@ class RichMemoTextEdit(QTextEdit):
         self._drop_at = None
         # 크기를 끌고 있는 그림.
         self._image_resize = None
+        self._image_move_press = None
+        self._image_drop = None
+        self._selected_image_at: int | None = None
+        self._image_scroll_direction = 0
+        self._image_scroll_timer = QTimer(self)
+        self._image_scroll_timer.setInterval(50)
+        self._image_scroll_timer.timeout.connect(self._auto_scroll_image_drag)
         # 구조(토글·줄 수)가 바뀌었을 때만 문서를 다시 계산한다.
         self._watched_document = None
         self._structure_dirty = True
@@ -176,6 +186,11 @@ class RichMemoTextEdit(QTextEdit):
         # 본문 찾기로 표시해 둔 자리.  칠할 때 체크리스트 표시와 함께 얹는다.
         self._find_ranges: list[tuple[int, int]] = []
         self._find_current = -1
+        self._section_hint_position: int | None = None
+        self._section_hint_timer = QTimer(self)
+        self._section_hint_timer.setSingleShot(True)
+        self._section_hint_timer.setInterval(1000)
+        self._section_hint_timer.timeout.connect(self._hide_section_hint)
         self._annotations: list[dict] = []
         self.external_undo_handler = None
         self.external_redo_handler = None
@@ -192,6 +207,7 @@ class RichMemoTextEdit(QTextEdit):
         self._refit_timer.timeout.connect(self.refit_images)
         self.textChanged.connect(self._refresh_checklist_display)
         self.textChanged.connect(self._refresh_structure)
+        self.textChanged.connect(self._clear_selected_image)
         # 스크롤하면 보이는 줄이 달라진다.  그때 다시 칠한다.
         self.verticalScrollBar().valueChanged.connect(self._refresh_checklist_display)
         self._page_sync_timer = QTimer(self)
@@ -200,6 +216,8 @@ class RichMemoTextEdit(QTextEdit):
         self._page_sync_timer.timeout.connect(self.sync_page_titles)
         self.textChanged.connect(self._queue_page_sync)
         self.cursorPositionChanged.connect(self._refresh_insert_popup)
+        self.cursorPositionChanged.connect(self._hide_section_hint)
+        self.verticalScrollBar().valueChanged.connect(self._hide_section_hint)
         self._caret_guard_timer = QTimer(self)
         self._caret_guard_timer.setSingleShot(True)
         self._caret_guard_timer.setInterval(0)
@@ -229,6 +247,8 @@ class RichMemoTextEdit(QTextEdit):
         self.insert_shortcuts = install_insert_shortcuts(self)
 
     def set_note_context(self, note_id: int | None) -> None:
+        self._hide_section_hint()
+        self._cancel_image_drag(clear_selection=True)
         if hasattr(self, "block_selection"):
             self.block_selection.clear()
             self.character_selection.clear()
@@ -403,6 +423,8 @@ class RichMemoTextEdit(QTextEdit):
         self.note_id = resolved
 
     def set_content(self, content: str) -> None:
+        self._hide_section_hint()
+        self._cancel_image_drag(clear_selection=True)
         source = self.document().property("tomaSourceContent")
         if self.document().isModified():
             return
@@ -1755,6 +1777,7 @@ class RichMemoTextEdit(QTextEdit):
         QTextCursor(block).setBlockFormat(fmt)
         self._refresh_toggle_visibility()
         self.viewport().update()
+        self._show_section_hint(block)
         return True
 
     def clear_section_break(self, block) -> bool:
@@ -1794,6 +1817,8 @@ class RichMemoTextEdit(QTextEdit):
         self.setTextCursor(cursor)
         self.setCurrentCharFormat(QTextCharFormat())
         self._refresh_toggle_visibility()
+        if is_section_break(cursor.block()):
+            self._show_section_hint(cursor.block())
 
     def _keep_caret_on_visible_line(self) -> None:
         """Ctrl+End·↓ 등으로 숨은 줄에 들어간 커서를 보이는 줄로 데려온다."""
@@ -1811,11 +1836,15 @@ class RichMemoTextEdit(QTextEdit):
         self.setTextCursor(moved)
 
     def _paint_section_breaks(self, painter: QPainter, viewport_rect) -> None:
+        position = self._section_hint_position
+        if position is None:
+            return
         painter.save()
         pen = QPen(QColor("#cbd5e1"), 1.0, Qt.PenStyle.DashLine)
         painter.setPen(pen)
         for block in self._visible_blocks():
-            if not block.isVisible() or not is_section_break(block):
+            if (not block.isVisible() or block.position() != position
+                    or not is_section_break(block)):
                 continue
             rect = self.cursorRect(QTextCursor(block))
             y = rect.top() - 1.5
@@ -1823,6 +1852,18 @@ class RichMemoTextEdit(QTextEdit):
                 continue
             painter.drawLine(QLineF(rect.left(), y, viewport_rect.right() - 8, y))
         painter.restore()
+
+    def _show_section_hint(self, block) -> None:
+        self._section_hint_position = block.position()
+        self._section_hint_timer.start()
+        self.viewport().update()
+
+    def _hide_section_hint(self, *_args) -> None:
+        if self._section_hint_position is None:
+            return
+        self._section_hint_timer.stop()
+        self._section_hint_position = None
+        self.viewport().update()
 
     def _nearest_fold_parent(self, block):
         """커서 줄을 품은 가장 가까운 토글이나 제목."""
@@ -2383,7 +2424,7 @@ class RichMemoTextEdit(QTextEdit):
             normalized = query.casefold()
             template_query = "" if normalized in {"template", "템플릿"} else normalized
             template_mode = normalized.startswith("template") or normalized.startswith("템플릿")
-            for row in self.store.memo_data.templates():
+            for row in self.store.memo_data.available_templates():
                 trigger = str(row["trigger"])
                 name = str(row["name"])
                 if template_mode or not normalized or normalized in trigger.casefold() or normalized in name.casefold():
@@ -2403,14 +2444,14 @@ class RichMemoTextEdit(QTextEdit):
             popup.addItem(entry)
         for label, template_id in template_matches:
             entry = QListWidgetItem(label)
-            entry.setToolTip("저장한 블록 템플릿을 새 UUID로 삽입합니다")
+            entry.setToolTip("템플릿을 현재 위치에 삽입합니다")
             entry.setData(Qt.ItemDataRole.UserRole, f"template:{template_id}")
             popup.addItem(entry)
         popup.setCurrentRow(0)
         # 스크롤을 내리지 않아도 다 보이게 항목 수만큼 편다.  줄 높이는 글꼴에
         # 따라 달라지므로 짐작하지 않고 위젯에 물어본다.
         row = max(popup.sizeHintForRow(0), self.INSERT_ROW_HEIGHT)
-        popup.resize(240, row * popup.count() + popup.frameWidth() * 2 + 2)
+        popup.resize(240, row * min(popup.count(), 8) + popup.frameWidth() * 2 + 2)
         corner = self.viewport().mapToGlobal(self.cursorRect().bottomLeft())
         popup.move(corner.x(), corner.y() + 4)
         popup.show()
@@ -2507,15 +2548,30 @@ class RichMemoTextEdit(QTextEdit):
         return True
 
     def _insert_template(self, template_id: int) -> bool:
-        row = self.store.conn.execute("SELECT * FROM memo_templates WHERE id=?", (int(template_id),)).fetchone()
-        if row is None or int(row["payload_version"]) != 1:
-            raise ValueError("지원하지 않는 템플릿 형식입니다.")
-        try:
-            payload = json.loads(str(row["payload_json"]))
-        except json.JSONDecodeError as exc:
-            raise ValueError("템플릿 데이터를 읽을 수 없습니다.") from exc
+        from .builtin_templates import builtin_payload, fill_template_payload, selected_template_formats
+
+        if template_id < 0:
+            payload = builtin_payload(template_id)
+        else:
+            row = self.store.conn.execute("SELECT * FROM memo_templates WHERE id=?", (int(template_id),)).fetchone()
+            if row is None or int(row["payload_version"]) != 1:
+                raise ValueError("지원하지 않는 템플릿 형식입니다.")
+            try:
+                payload = json.loads(str(row["payload_json"]))
+            except json.JSONDecodeError as exc:
+                raise ValueError("템플릿 데이터를 읽을 수 없습니다.") from exc
         if not isinstance(payload, dict) or int(payload.get("version", 0)) != 1:
             raise ValueError("지원하지 않는 템플릿 형식입니다.")
+        title = ""
+        if callable(self.template_title_provider):
+            title = str(self.template_title_provider() or "")
+        elif self.store is not None and self.note_id is not None:
+            note = self.store.note(self.note_id)
+            title = str(note["title"] or "") if note is not None else ""
+        date_format, time_format = selected_template_formats(self.store)
+        payload = fill_template_payload(
+            payload, title=title, date_format=date_format, time_format=time_format,
+        )
         return self._paste_internal_blocks(payload)
 
     def save_selection_as_template(self) -> bool:
@@ -3189,6 +3245,89 @@ class RichMemoTextEdit(QTextEdit):
                 return int(note_id)
         return None
 
+    def image_at(self, point):
+        if self.image_grip_at(point) is not None:
+            return None
+        return next((fragment for fragment in self._image_fragments()
+                     if self.image_rect(fragment).contains(QPointF(point))), None)
+
+    def _cancel_image_drag(self, *, clear_selection: bool = False) -> None:
+        self._image_move_press = None
+        self._image_drop = None
+        self._image_scroll_direction = 0
+        self._image_scroll_timer.stop()
+        if clear_selection:
+            self._selected_image_at = None
+        self.viewport().update()
+
+    def _clear_selected_image(self) -> None:
+        if self._image_move_press is None and self._selected_image_at is not None:
+            self._selected_image_at = None
+            self.viewport().update()
+
+    def _image_drop_at(self, point):
+        if not self.viewport().rect().contains(point):
+            return None
+        cursor = self.cursorForPosition(point)
+        block = cursor.block()
+        if not block.isValid() or not block.isVisible():
+            return None
+        state = self._image_move_press
+        if state is None or block.position() == self.document().findBlock(state["at"]).position():
+            return None
+        if cursor.currentTable() is not None:
+            return (cursor.position(), False, False)
+        line = self.cursorRect(QTextCursor(block))
+        if self._is_toggle_block(block) and self._toggle_is_open(block):
+            upper = line.top() + line.height() / 3
+            lower = line.bottom() - line.height() / 3
+            if upper <= point.y() <= lower:
+                child = block.next()
+                if (child.isValid() and child.isVisible()
+                        and self._block_indent(child) > self._block_indent(block)):
+                    return (child.position(), bool(child.text()), False)
+        after = point.y() >= line.center().y()
+        position = block.position() + block.length() - 1 if after else block.position()
+        return (position, bool(block.text()), after)
+
+    def _update_image_drag(self, point) -> None:
+        self._image_drop = self._image_drop_at(point)
+        margin = 24
+        self._image_scroll_direction = (
+            -1 if point.y() < margin else 1 if point.y() > self.viewport().height() - margin else 0
+        )
+        if self._image_scroll_direction:
+            self._image_scroll_timer.start()
+        else:
+            self._image_scroll_timer.stop()
+        self.viewport().update()
+
+    def _auto_scroll_image_drag(self) -> None:
+        state = self._image_move_press
+        if state is None or not state["active"] or not self._image_scroll_direction:
+            self._image_scroll_timer.stop()
+            return
+        bar = self.verticalScrollBar()
+        bar.setValue(bar.value() + self._image_scroll_direction * 18)
+        self._image_drop = self._image_drop_at(state["point"])
+        self.viewport().update()
+
+    def _finish_image_drag(self, point) -> bool:
+        state = self._image_move_press
+        drop = self._image_drop_at(point) if state is not None and state["active"] else None
+        self._cancel_image_drag()
+        if state is None or drop is None:
+            return False
+        position, separate, after = drop
+        moved = move_image(self.document(), state["at"], position,
+                           separate=separate, after=after)
+        if moved is None:
+            return False
+        self._selected_image_at = moved
+        self._refresh_toggle_visibility()
+        self.viewport().update()
+        return True
+
     def _block_link_at_position(self, position: int) -> tuple[int, str] | None:
         block = self.document().findBlock(max(0, int(position)))
         if not block.isValid():
@@ -3307,6 +3446,16 @@ class RichMemoTextEdit(QTextEdit):
             self.viewport().update()
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if self._image_move_press is not None and event.buttons() & Qt.MouseButton.LeftButton:
+            state = self._image_move_press
+            state["point"] = event.position().toPoint()
+            if ((state["point"] - state["start"]).manhattanLength()
+                    > QApplication.startDragDistance()):
+                state["active"] = True
+            if state["active"]:
+                self._update_image_drag(state["point"])
+            event.accept()
+            return
         if (self._character_press_point is not None
                 and event.buttons() & Qt.MouseButton.LeftButton):
             if ((event.position().toPoint() - self._character_press_point).manhattanLength()
@@ -3338,6 +3487,9 @@ class RichMemoTextEdit(QTextEdit):
         if self.image_grip_at(event.position()) is not None:
             if self.viewport().cursor().shape() != Qt.CursorShape.SizeFDiagCursor:
                 self.viewport().setCursor(Qt.CursorShape.SizeFDiagCursor)
+            return
+        if self.image_at(event.position()) is not None:
+            self.viewport().setCursor(Qt.CursorShape.OpenHandCursor)
             return
         block = self._marker_block_at(event.position())
         self._set_hover_marker(block)
@@ -3403,6 +3555,20 @@ class RichMemoTextEdit(QTextEdit):
         self._paint_quote_bars(painter, viewport_rect)
         self._paint_heading_markers(painter, viewport_rect)
         self._paint_drop_marker(painter)
+        if self._selected_image_at is not None:
+            for fragment in self._image_fragments():
+                if fragment.position() == self._selected_image_at:
+                    painter.setPen(QPen(QColor("#3b54e8"), 2.0))
+                    painter.setBrush(Qt.BrushStyle.NoBrush)
+                    painter.drawRect(self.image_rect(fragment).adjusted(-2, -2, 2, 2))
+                    break
+        if self._image_drop is not None:
+            position, _separate, _after = self._image_drop
+            marker_cursor = QTextCursor(self.document())
+            marker_cursor.setPosition(position)
+            rect = self.cursorRect(marker_cursor)
+            painter.setPen(QPen(QColor("#3b54e8"), 2.0))
+            painter.drawLine(QLineF(4.0, rect.top(), self.viewport().width() - 8.0, rect.top()))
         for block in self._visible_blocks():
             text = block.text()
             if text.startswith((UNCHECKED_PREFIX, CHECKED_PREFIX)):
@@ -3885,6 +4051,10 @@ class RichMemoTextEdit(QTextEdit):
         )
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
+        if event.key() == Qt.Key.Key_Escape and self._image_move_press is not None:
+            self._cancel_image_drag()
+            event.accept()
+            return
         key = QKeySequence(event.keyCombination()).toString()
         format_handler = getattr(self, "format_shortcut_handlers", {}).get(key)
         if format_handler is not None:
@@ -3892,9 +4062,10 @@ class RichMemoTextEdit(QTextEdit):
             event.accept()
             return
         if (event.key() in {Qt.Key.Key_Return, Qt.Key.Key_Enter}
-                and event.modifiers() == Qt.KeyboardModifier.ControlModifier
-                and getattr(self, "reminder_save_handler", None) is not None):
-            self.reminder_save_handler()
+                and event.modifiers() == Qt.KeyboardModifier.ControlModifier):
+            fold_key = structure_shortcut_value(self.store, "toggle_fold") if self.store else "Ctrl+Enter"
+            if fold_key == "Ctrl+Enter" and not event.isAutoRepeat():
+                self.toggle_current_fold()
             event.accept()
             return
         if event.key() == Qt.Key.Key_M and event.modifiers() == (
@@ -4239,7 +4410,8 @@ class RichMemoTextEdit(QTextEdit):
         pin.setCheckable(True)
         pin.setChecked(all(is_pinned(block) for block in self.block_commands.blocks()))
         pin.triggered.connect(self.toggle_selected_block_pins)
-        fold = block_menu.addAction("현재 제목·토글 접기/펴기\tCtrl+Alt+Space")
+        fold_key = structure_shortcut_value(self.store, "toggle_fold") if self.store else "Ctrl+Enter"
+        fold = block_menu.addAction(f"현재 제목·토글 접기/펴기\t{fold_key}")
         fold.setEnabled(bool(self.heading_level(self.textCursor().block()) or self.current_block_is_toggle()))
         fold.triggered.connect(self.toggle_current_fold)
         block_menu.addAction("모두 접기/펴기\tCtrl+Shift+E", self.toggle_all_folds)
@@ -4365,6 +4537,7 @@ class RichMemoTextEdit(QTextEdit):
         self.setTextCursor(cursor)
         if hidden_heading_tail:
             self._refresh_toggle_visibility()
+            self._show_section_hint(cursor.block())
         self.setFocus()
         return True
 
@@ -4430,6 +4603,22 @@ class RichMemoTextEdit(QTextEdit):
                 self._left_press_target = None
                 event.accept()
                 return
+            image = self.image_at(event.position()) if not event.modifiers() else None
+            if image is not None:
+                self._selected_image_at = image.position()
+                self._image_move_press = {
+                    "at": image.position(), "start": event.position().toPoint(),
+                    "point": event.position().toPoint(), "active": False,
+                }
+                self._left_press_target = None
+                self._claimed_press = True
+                self.setFocus()
+                self.viewport().update()
+                event.accept()
+                return
+            if self._selected_image_at is not None:
+                self._selected_image_at = None
+                self.viewport().update()
             if self._character_press_point is not None:
                 # Ctrl+drag is wholly ours: QTextEdit must not receive a press
                 # whose matching move/release is consumed by range selection.
@@ -4454,6 +4643,14 @@ class RichMemoTextEdit(QTextEdit):
         return float(self.cursorRect(spot).left())
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton and self._image_move_press is not None:
+            self._finish_image_drag(event.position().toPoint())
+            self._left_press_point = None
+            self._left_press_target = None
+            self._left_press_dragged = False
+            self._claimed_press = False
+            event.accept()
+            return
         character_press = (
             event.button() == Qt.MouseButton.LeftButton
             and self._character_press_point is not None
@@ -4591,9 +4788,11 @@ class RichMemoTextEdit(QTextEdit):
                     # 직접 끌어 정한 폭이 있으면 그 값을 지킨다.
                     wanted = float(chosen) if chosen else original_width
                     width = min(wanted, self._available_image_width())
-                    image_fmt.setWidth(width)
-                    image_fmt.setHeight(width * original_height / max(1.0, original_width))
-                    cursor.setCharFormat(image_fmt)
+                    height = width * original_height / max(1.0, original_width)
+                    if abs(image_fmt.width() - width) > 0.1 or abs(image_fmt.height() - height) > 0.1:
+                        image_fmt.setWidth(width)
+                        image_fmt.setHeight(height)
+                        cursor.setCharFormat(image_fmt)
                 cursor.clearSelection()
         finally:
             self.blockSignals(blocked)

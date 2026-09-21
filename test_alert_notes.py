@@ -410,15 +410,15 @@ class AlertNoteQtTest(unittest.TestCase):
         reset_gap = (editor.datetime_input.datetime() - datetime.now()).total_seconds()
         self.assertGreaterEqual(reset_gap, 8 * 60)
         self.assertLessEqual(reset_gap, 10 * 60)
-        self.assertEqual(editor.reminder_save_hint.text(), "Ctrl+Enter로 알림 저장")
+        self.assertEqual(editor.reminder_save_hint.text(), "알림 저장 버튼으로 저장")
         editor.time_shortcuts[0].activated.emit()
         self.assertEqual(len(saved), 1)
         editor.content_edit.setFocus()
         QTest.keyClick(
             editor.content_edit, Qt.Key.Key_Return, Qt.KeyboardModifier.ControlModifier,
         )
-        # Ctrl+Enter also works while the property panel is closed.
-        self.assertEqual(len(saved), 2)
+        # Ctrl+Enter no longer saves an alert, including while the panel is closed.
+        self.assertEqual(len(saved), 1)
         close_alert_panel(panel, self.app)
 
     def test_reminder_details_state_persists_and_manual_time_resets_quick_accumulation(self):

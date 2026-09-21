@@ -229,14 +229,14 @@ class CompactMemoUiTest(unittest.TestCase):
         self.assertEqual(len(self.store.pending_reminders_for_note(note_id)), 1)
         close_alert_panel(panel, self.app)
 
-    def test_ctrl_enter_saves_when_property_panel_is_closed(self):
+    def test_ctrl_enter_does_not_save_reminder_when_property_panel_is_closed(self):
         panel, note_id = self._panel()
         body = panel.editor.content_edit
         self.assertFalse(panel.editor.property_panel.isVisible())
         body.setFocus()
         QTest.keyClick(body, Qt.Key.Key_Return, Qt.KeyboardModifier.ControlModifier)
         self.app.processEvents()
-        self.assertEqual(len(self.store.pending_reminders_for_note(note_id)), 1)
+        self.assertEqual(len(self.store.pending_reminders_for_note(note_id)), 0)
         close_alert_panel(panel, self.app)
 
     def test_heading_and_checklist_shortcuts_do_not_collide(self):

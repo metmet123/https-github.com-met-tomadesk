@@ -16,6 +16,7 @@ UNSAFE_TO_INTERCEPT 가 막는다.
 """
 
 import ctypes
+import os
 import threading
 from ctypes import wintypes
 
@@ -37,18 +38,34 @@ MODIFIER_PROBES = (
 )
 MODIFIER_KEYS = frozenset({0x10, 0x11, 0x12, 0x5B, 0x5C,
                            0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5})
+_USER32 = ctypes.WinDLL("user32", use_last_error=True)
+_USER32.GetForegroundWindow.restype = wintypes.HWND
+_USER32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+
+
+def foreground_is_this_process() -> bool:
+    """Check the actual foreground owner at key-down, not a polling snapshot."""
+    try:
+        hwnd = _USER32.GetForegroundWindow()
+        if not hwnd:
+            return False
+        pid = wintypes.DWORD()
+        _USER32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        return pid.value == os.getpid()
+    except OSError:
+        return False
 
 
 class HotkeyMatcher:
     """어떤 키를 우리가 가져갈지 정하는 표.  창(Windows)과 상관없는 부분."""
 
     def __init__(self):
-        self._claims: dict[int, tuple[int, int]] = {}
+        self._claims: dict[int, tuple[int, int, bool]] = {}
         self._lock = threading.Lock()
 
-    def claim(self, hotkey_id: int, modifiers: int, vk: int) -> None:
+    def claim(self, hotkey_id: int, modifiers: int, vk: int, *, focus_only: bool = False) -> None:
         with self._lock:
-            self._claims[int(hotkey_id)] = (int(modifiers) & ~MOD_NOREPEAT, int(vk))
+            self._claims[int(hotkey_id)] = (int(modifiers) & ~MOD_NOREPEAT, int(vk), bool(focus_only))
 
     def release(self, hotkey_id: int) -> None:
         with self._lock:
@@ -71,9 +88,14 @@ class HotkeyMatcher:
         wanted = (int(modifiers) & ~MOD_NOREPEAT, int(vk))
         with self._lock:
             for hotkey_id, claim in self._claims.items():
-                if claim == wanted:
+                if claim[:2] == wanted:
                     return hotkey_id
         return None
+
+    def focus_only(self, hotkey_id: int) -> bool:
+        with self._lock:
+            claim = self._claims.get(int(hotkey_id))
+            return bool(claim and claim[2])
 
 
 class _KeyboardHookData(ctypes.Structure):
@@ -85,9 +107,11 @@ class _KeyboardHookData(ctypes.Structure):
 class KeyboardHook:
     """맡아 둔 조합을 가로채 창에 WM_HOTKEY 로 알려 주는 갈고리."""
 
-    def __init__(self, hwnd: int, matcher: HotkeyMatcher | None = None):
+    def __init__(self, hwnd: int, matcher: HotkeyMatcher | None = None,
+                 foreground_checker=None):
         self.hwnd = int(hwnd)
         self.matcher = matcher or HotkeyMatcher()
+        self.foreground_checker = foreground_checker or foreground_is_this_process
         self._thread: threading.Thread | None = None
         self._thread_id = 0
         self._ready = threading.Event()
@@ -202,6 +226,8 @@ class KeyboardHook:
             return None
         hotkey_id = self.matcher.match(vk, modifiers_now())
         if hotkey_id is None:
+            return None
+        if self.matcher.focus_only(hotkey_id) and not self.foreground_checker():
             return None
         self._swallowed.add(vk)
         return hotkey_id

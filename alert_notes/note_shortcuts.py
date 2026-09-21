@@ -23,8 +23,17 @@ FORMAT_SHORTCUTS = {
 
 STRUCTURE_SHORTCUTS = {
     "open_link": ("현재 페이지·메모 링크 열기", "hotkey_editor_open_link", "Ctrl+Alt+Enter"),
-    "toggle_fold": ("현재 제목·토글 접기/펴기", "hotkey_editor_toggle_fold", "Ctrl+Alt+Space"),
+    "toggle_fold": ("현재 제목·토글 접기/펴기", "hotkey_editor_toggle_fold", "Ctrl+Enter"),
 }
+
+
+def structure_shortcut_value(store, action: str) -> str:
+    """Treat the former fold default as the new default without rewriting settings."""
+    _label, setting, default = STRUCTURE_SHORTCUTS[action]
+    value = store.setting(setting, default)
+    if action == "toggle_fold" and value == "Ctrl+Alt+Space":
+        return default
+    return value
 
 
 def modifier_setting(store) -> str:

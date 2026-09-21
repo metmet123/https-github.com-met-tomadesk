@@ -201,6 +201,12 @@ class MemoDataService:
     def templates(self):
         return list(self.conn.execute("SELECT * FROM memo_templates ORDER BY sort_order,name,id"))
 
+    def available_templates(self):
+        """Show shipped examples without inserting rows into a user's database."""
+        from .builtin_templates import builtin_rows
+
+        return [*builtin_rows(), *self.templates()]
+
     def save_template(self, name: str, trigger: str, payload: dict, payload_version: int = 1) -> int:
         clean_name = str(name or "").strip()
         clean_trigger = str(trigger or "").strip().lstrip("/")

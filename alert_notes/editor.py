@@ -1,16 +1,17 @@
 from datetime import datetime, timedelta
 import json
+import weakref
 
 from html import escape
 
 from PyQt6.QtCore import QEvent, QSize, QTimer, Qt, pyqtSignal
 from PyQt6 import sip
-from PyQt6.QtGui import QCursor, QKeySequence, QShortcut
+from PyQt6.QtGui import QCursor, QKeySequence, QShortcut, QTextLength, QTextTable
 from PyQt6.QtWidgets import (
     QAbstractButton, QAbstractSpinBox, QButtonGroup, QCheckBox, QComboBox, QFrame, QGridLayout,
     QHBoxLayout, QLabel, QLayout, QLineEdit, QListWidget, QMenu, QMessageBox, QPushButton, QSizePolicy, QSpinBox,
     QInputDialog,
-    QRadioButton, QStyle, QStyleOptionSpinBox, QToolButton, QVBoxLayout, QWidget,
+    QRadioButton, QSpacerItem, QStyle, QStyleOptionSpinBox, QToolButton, QVBoxLayout, QWidget,
 )
 
 from hotkey_builder import HotkeyBuilder
@@ -24,10 +25,10 @@ from .editor_shortcut_settings import (
     DEFAULT_ALWAYS_TOP, DEFAULT_POSTIT, SETTING_ALWAYS_TOP, SETTING_POSTIT,
     EditorShortcutSettingsDialog,
 )
-from .note_shortcuts import STRUCTURE_SHORTCUTS, TIME_SHORTCUTS, bind_time_shortcuts, modifier_setting, shortcut_text
+from .note_shortcuts import STRUCTURE_SHORTCUTS, TIME_SHORTCUTS, bind_time_shortcuts, modifier_setting, shortcut_text, structure_shortcut_value
 from .recurrence import RecurrenceRule
 from .recurrence_controls import RecurrenceControls
-from .rich_memo_edit import RichMemoTextEdit
+from .rich_memo_edit import IMAGE_ORIGINAL_WIDTH, IMAGE_USER_WIDTH, RichMemoTextEdit
 from .rich_text import plain_text_from_content
 from .sqlite_store import DATETIME_FMT
 from .find_bar import MemoFindBar
@@ -58,6 +59,8 @@ class MemoEditor(QWidget):
     AUTO_SAVE_SETTING = "memo_auto_save_enabled"
     TITLE_FIELD_WIDTH = 104
     CATEGORY_CHIP_MAX_WIDTH = 90
+    READING_WIDTH_SETTING = "memo_body_reading_width"
+    READING_BODY_WIDTH = 720
     TITLE_FOLD_BUTTON_SIZE = 26
     save_requested = pyqtSignal(dict)
     delete_requested = pyqtSignal()
@@ -100,6 +103,8 @@ class MemoEditor(QWidget):
             "classic" if self.store.setting("memo_editor_layout", "compact") == "classic"
             else "compact"
         )
+        self.reading_width_mode = self.store.setting(self.READING_WIDTH_SETTING, "window") == "reading"
+        self._wide_media = False
         self._forced_narrow = False
         self._fullscreen_on = False
         self._shutdown = False
@@ -116,6 +121,11 @@ class MemoEditor(QWidget):
         self._annotation_undo: list[tuple[str, dict]] = []
         self._annotation_redo: list[tuple[str, dict]] = []
         self._build_ui()
+        views = getattr(self.store, "_memo_editor_views", None)
+        if views is None:
+            views = weakref.WeakSet()
+            setattr(self.store, "_memo_editor_views", views)
+        views.add(self)
         self.manual_save_shortcut = QShortcut(QKeySequence("Ctrl+S"), self)
         self.manual_save_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self.manual_save_shortcut.activated.connect(self._manual_save)
@@ -134,6 +144,7 @@ class MemoEditor(QWidget):
         self.content_edit.textChanged.connect(self._queue_fold_button_sync)
         self.title_edit.textChanged.connect(self._queue_save)
         self.content_edit.textChanged.connect(self._queue_save)
+        self.content_edit.textChanged.connect(self._queue_reading_width_sync)
         self.content_edit.page_created.connect(self.page_created)
         self.content_edit.page_open_requested.connect(self.note_open_requested)
         self.content_edit.block_link_open_requested.connect(self.block_link_open_requested)
@@ -302,6 +313,7 @@ class MemoEditor(QWidget):
         self.summary_button.installEventFilter(self)
         root.addLayout(title_row)
         self.content_edit = RichMemoTextEdit(self.store)
+        self.content_edit.template_title_provider = self.title_edit.text
         self.content_edit.setObjectName("memoBodyEditor")
         self.content_edit.setPlaceholderText("메모 내용을 입력하세요")
         self.content_edit.setMinimumHeight(320)
@@ -313,16 +325,25 @@ class MemoEditor(QWidget):
         body_layout = QHBoxLayout(self.body_host)
         body_layout.setContentsMargins(0, 0, 0, 0)
         body_layout.setSpacing(6)
+        self.body_left_spacer = QSpacerItem(0, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)
+        self.body_right_spacer = QSpacerItem(0, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)
+        body_layout.addItem(self.body_left_spacer)
         body_layout.addWidget(self.content_edit, 1)
+        body_layout.addItem(self.body_right_spacer)
         self.outline_panel = OutlinePanel(self.content_edit, self.body_host)
         self.outline_panel.ensure_link_target = self._ensure_block_link_target
         body_layout.addWidget(self.outline_panel)
+        self.body_layout = body_layout
         self.outline_panel.hide()
         self.outline_button.toggled.connect(self._set_outline_visible)
         self.outline_panel.close_requested.connect(lambda: self.outline_button.setChecked(False))
         self.content_edit.textChanged.connect(self.outline_panel.queue_refresh)
         self.content_edit.cursorPositionChanged.connect(self.outline_panel.sync_current)
         root.addWidget(self.body_host, 1)
+        self.reading_width_timer = QTimer(self)
+        self.reading_width_timer.setSingleShot(True)
+        self.reading_width_timer.setInterval(120)
+        self.reading_width_timer.timeout.connect(self._refresh_reading_media)
         # 본문 찾기 줄.  Ctrl+F 로 열리고 평소에는 자리도 차지하지 않는다.
         self.find_bar = MemoFindBar(self.content_edit, self)
         root.addWidget(self.find_bar)
@@ -423,7 +444,7 @@ class MemoEditor(QWidget):
         reminder_actions.addWidget(self.reminder_clear_button, 1)
         reminder_actions.addWidget(self.clear_input_button, 1)
         reminder_details_layout.addLayout(reminder_actions)
-        self.reminder_save_hint = QLabel("Ctrl+Enter로 알림 저장")
+        self.reminder_save_hint = QLabel("알림 저장 버튼으로 저장")
         self.reminder_save_hint.setObjectName("secondaryText")
         self.reminder_save_hint.setAlignment(Qt.AlignmentFlag.AlignRight)
         reminder_details_layout.addWidget(self.reminder_save_hint)
@@ -431,10 +452,6 @@ class MemoEditor(QWidget):
         self.reminder_clear_button.clicked.connect(lambda: self.reminder_clear_requested.emit(self.editing_reminder_id))
         self.clear_input_button.clicked.connect(self._reset_reminder_input)
         self.datetime_input.changed.connect(self._on_datetime_changed)
-        self.reminder_save_shortcut = QShortcut(QKeySequence("Ctrl+Enter"), self)
-        self.reminder_save_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
-        self.reminder_save_shortcut.activated.connect(self._save_reminder)
-        self.content_edit.reminder_save_handler = self._save_reminder
         reminder_layout.addWidget(self.reminder_details)
         self.reminder_toggle.toggled.connect(self._set_reminder_expanded)
         expanded = self.store.setting(self.REMINDER_COLLAPSED_SETTING, "true").lower() != "true"
@@ -623,6 +640,8 @@ class MemoEditor(QWidget):
         self._fit_category_chip()
         if hasattr(self, "outline_panel"):
             self._set_outline_visible()
+        if hasattr(self, "reading_width_timer"):
+            self._update_reading_width()
 
     def _set_outline_visible(self, _checked: bool = False) -> None:
         # Use the host width, not the already shrunken text editor width.
@@ -641,6 +660,79 @@ class MemoEditor(QWidget):
         )
         if show:
             self.outline_panel.refresh()
+        if hasattr(self, "reading_width_timer"):
+            self._update_reading_width()
+
+    def _queue_reading_width_sync(self) -> None:
+        if self.reading_width_mode and hasattr(self, "reading_width_timer"):
+            self.reading_width_timer.start()
+
+    def _refresh_reading_media(self) -> None:
+        if self.reading_width_mode:
+            self._wide_media = self._has_wide_media()
+        self._update_reading_width()
+
+    def _has_wide_media(self) -> bool:
+        document = self.content_edit.document()
+        block = document.begin()
+        while block.isValid():
+            iterator = block.begin()
+            while not iterator.atEnd():
+                fragment = iterator.fragment()
+                if fragment.isValid() and fragment.charFormat().isImageFormat():
+                    image = fragment.charFormat().toImageFormat()
+                    chosen = image.property(IMAGE_USER_WIDTH)
+                    width = chosen if chosen else image.property(IMAGE_ORIGINAL_WIDTH) or image.width()
+                    try:
+                        if float(width) > self.READING_BODY_WIDTH - 28:
+                            return True
+                    except (TypeError, ValueError):
+                        pass
+                iterator += 1
+            block = block.next()
+        frames = list(document.rootFrame().childFrames())
+        while frames:
+            frame = frames.pop()
+            if isinstance(frame, QTextTable):
+                table_format = frame.format()
+                width = table_format.width()
+                if width.type() == QTextLength.Type.FixedLength and width.rawValue() > self.READING_BODY_WIDTH:
+                    return True
+                columns = table_format.columnWidthConstraints()
+                fixed_width = sum(
+                    column.rawValue() for column in columns
+                    if column.type() == QTextLength.Type.FixedLength
+                )
+                if fixed_width > self.READING_BODY_WIDTH or frame.columns() >= 5:
+                    return True
+            frames.extend(frame.childFrames())
+        return False
+
+    def _update_reading_width(self) -> None:
+        if not hasattr(self, "body_layout"):
+            return
+        reading = self.reading_width_mode and not self._wide_media
+        policy = QSizePolicy.Policy.Expanding if reading else QSizePolicy.Policy.Fixed
+        for spacer in (self.body_left_spacer, self.body_right_spacer):
+            spacer.changeSize(0, 0, policy, QSizePolicy.Policy.Minimum)
+        self.content_edit.setMaximumWidth(self.READING_BODY_WIDTH if reading else 16777215)
+        self.body_layout.invalidate()
+
+    def _choose_reading_width(self) -> None:
+        options = ("창 너비에 맞춤", "읽기 좋은 폭")
+        choice, accepted = QInputDialog.getItem(
+            self, "본문 읽기 폭", "본문 표시 방식", options,
+            1 if self.reading_width_mode else 0, False,
+        )
+        if not accepted:
+            return
+        self.reading_width_mode = choice == options[1]
+        self.store.set_setting(
+            self.READING_WIDTH_SETTING, "reading" if self.reading_width_mode else "window",
+        )
+        for view in tuple(getattr(self.store, "_memo_editor_views", ())):
+            view.reading_width_mode = self.reading_width_mode
+            view._refresh_reading_media()
 
     @staticmethod
     def _drain(layout) -> None:
@@ -889,9 +981,7 @@ class MemoEditor(QWidget):
         for button in (self.fold_current_button, self.fold_all_button):
             button.setEnabled(has_any)
         self.fold_all_button.setChecked(has_any and all_folded)
-        fold_key = self.store.setting(
-            STRUCTURE_SHORTCUTS["toggle_fold"][1], STRUCTURE_SHORTCUTS["toggle_fold"][2],
-        )
+        fold_key = structure_shortcut_value(self.store, "toggle_fold")
         self.fold_current_button.setToolTip(f"현재 제목·토글 접기/펴기 ({fold_key})")
         self.fold_all_button.setToolTip(
             "모두 펼치기 (Ctrl+Shift+E)" if has_any and all_folded else "모두 접기/펼치기 (Ctrl+Shift+E)"
@@ -1063,6 +1153,7 @@ class MemoEditor(QWidget):
         self._refresh_property_chips()
         self._refresh_relations()
         self._resolve_annotation_locations()
+        self._refresh_reading_media()
 
     def _toggle_relations(self, checked: bool) -> None:
         self.backlink_list.setVisible(bool(checked))
@@ -1683,6 +1774,7 @@ class MemoEditor(QWidget):
             EditorCommand("add_annotation", "연결·주석", "주석 추가", self._add_annotation, has_note),
             EditorCommand("annotations", "연결·주석", "주석 보기", self._show_annotations, has_note),
             EditorCommand("options", "메모 설정", "포스트잇·색상·저장 설정", lambda: self._toggle_property_page("other")),
+            EditorCommand("reading_width", "메모 설정", "본문 읽기 폭", self._choose_reading_width),
             EditorCommand("shortcuts", "메모 설정", "편집 단축키 설정", self._open_shortcut_settings),
         ]
         try:
@@ -1842,8 +1934,10 @@ class MemoEditor(QWidget):
             shortcut.deleteLater()
         self.structure_shortcuts = []
         for action, (_label, setting, default) in STRUCTURE_SHORTCUTS.items():
-            shortcut = QShortcut(QKeySequence(self.store.setting(setting, default)), self.content_edit)
+            shortcut = QShortcut(QKeySequence(structure_shortcut_value(self.store, action)), self.content_edit)
             shortcut.setContext(Qt.ShortcutContext.WidgetShortcut)
+            if action == "toggle_fold":
+                shortcut.setAutoRepeat(False)
             callback = (
                 self.content_edit.open_current_link if action == "open_link"
                 else self.content_edit.toggle_current_fold

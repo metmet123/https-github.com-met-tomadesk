@@ -79,6 +79,35 @@ class PropertyChipBar(QWidget):
         # QToolButton's native sizeHint reserves substantially more horizontal
         # space than this text-only chip paints.  Keep the narrow row within its
         # width budget while allowing the label, 6px padding and border to fit.
+        if self._narrow:
+            for key, button in self.buttons.items():
+                summary = self._summaries.get(key, (self.LABELS[key], False))[0]
+                button.setText(summary if key in self.ALWAYS_SUMMARY else self.LABELS[key])
+
+            widths = {
+                key: button.fontMetrics().horizontalAdvance(button.text()) + 14
+                for key, button in self.buttons.items()
+            }
+            visible_items = sum(
+                1 for index in range(self.layout().count())
+                if (item := self.layout().itemAt(index)).widget() is not None
+                and item.widget().isVisible()
+            )
+            fixed_siblings = sum(
+                item.widget().width()
+                for index in range(self.layout().count())
+                if (item := self.layout().itemAt(index)).widget() is not None
+                and item.widget().isVisible()
+                and item.widget() not in self.buttons.values()
+            )
+            needed = sum(widths.values()) + fixed_siblings
+            needed += max(0, visible_items - 1) * self.layout().spacing()
+            if needed > self.contentsRect().width():
+                for key in ("format", "other"):
+                    button = self.buttons[key]
+                    if button.text().endswith(" ▾"):
+                        button.setText(button.text()[:-2])
+
         for key, button in self.buttons.items():
             if key == "other":
                 button.setFixedWidth(max(26, button.fontMetrics().horizontalAdvance(button.text()) + 14))
@@ -88,6 +117,10 @@ class PropertyChipBar(QWidget):
             else:
                 button.setMinimumWidth(0)
                 button.setMaximumWidth(16777215)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._fit_button_widths()
 
     def set_deadline_state(self, state: str, tooltip: str = "") -> None:
         """past/today/soon 이면 칩 색으로 급한 정도를 보여 준다."""

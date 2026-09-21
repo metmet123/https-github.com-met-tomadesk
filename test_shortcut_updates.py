@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from ctypes import wintypes
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -138,6 +138,14 @@ class MatcherTest(unittest.TestCase):
         self.assertIsNone(self.matcher.match(ord("N"), MOD_CONTROL | MOD_ALT))
         self.assertEqual(len(self.matcher), 0)
 
+    def test_focus_rule_belongs_to_the_claim(self):
+        self.matcher.claim(8, MOD_ALT, ord("1"), focus_only=True)
+        self.assertTrue(self.matcher.focus_only(8))
+        self.assertFalse(self.matcher.focus_only(7))
+        self.assertIsNone(self.matcher.match(0x61, MOD_ALT), "숫자패드를 숫자 윗줄로 취급했습니다")
+        self.matcher.release(8)
+        self.assertFalse(self.matcher.focus_only(8))
+
 
 class HookDecisionTest(unittest.TestCase):
     """갈고리 안에서 내리는 판단.  실제로 걸지는 않는다."""
@@ -178,6 +186,18 @@ class HookDecisionTest(unittest.TestCase):
         self.hook._decide(WM_KEYDOWN, self._event(ord("N")), lambda: self.pressed)
         self.assertTrue(self.hook._swallow_release(WM_KEYUP, self._event(ord("N"))))
         self.assertFalse(self.hook._swallow_release(WM_KEYUP, self._event(ord("N"))))
+
+    def test_focus_only_key_passes_down_and_up_to_another_app(self):
+        self.hook.matcher.claim(12, MOD_ALT, ord("1"), focus_only=True)
+        self.hook.foreground_checker = lambda: False
+        self.assertIsNone(self.hook._decide(WM_KEYDOWN, self._event(ord("1")), lambda: MOD_ALT))
+        self.assertFalse(self.hook._swallow_release(WM_KEYUP, self._event(ord("1"))))
+
+    def test_focus_only_key_is_taken_while_tomadesk_is_foreground(self):
+        self.hook.matcher.claim(12, MOD_ALT, ord("1"), focus_only=True)
+        self.hook.foreground_checker = lambda: True
+        self.assertEqual(self.hook._decide(WM_KEYDOWN, self._event(ord("1")), lambda: MOD_ALT), 12)
+        self.assertTrue(self.hook._swallow_release(WM_KEYUP, self._event(ord("1"))))
 
 
 class _FakeHook:
@@ -255,6 +275,25 @@ class ManagerTest(unittest.TestCase):
         self.assertEqual(self.manager.priority_ids(), set())
         self.manager._user32.RegisterHotKey.assert_called_once()
 
+    def test_top_row_alt_digits_are_focus_only(self):
+        for number in range(1, 6):
+            hotkey_id = 100 + number
+            self.manager.register(hotkey_id, f"Alt+{number}", lambda: None)
+            self.assertTrue(self.hooks[0].matcher.focus_only(hotkey_id))
+        self.assertEqual(self.manager.priority_ids(), set(range(101, 106)))
+        self.manager._user32.RegisterHotKey.assert_not_called()
+
+    def test_focus_only_key_does_not_fall_back_to_windows_registration(self):
+        _FakeHook.started = False
+        with self.assertRaises(HotkeyError):
+            self.manager.register(1, "Alt+1", lambda: None)
+        self.manager._user32.RegisterHotKey.assert_not_called()
+        self.assertEqual(self.manager.priority_ids(), set())
+
+    def test_numpad_alt_digit_keeps_the_existing_global_rule(self):
+        self.manager.register(1, "Alt+Numpad1", lambda: None)
+        self.assertFalse(self.hooks[0].matcher.focus_only(1))
+
     def test_a_failed_hook_is_not_retried_for_every_key(self):
         _FakeHook.started = False
         self.manager.register(1, "Ctrl+Alt+N", lambda: None)
@@ -279,6 +318,19 @@ class ManagerTest(unittest.TestCase):
         message.message = WM_HOTKEY
         message.wParam = 1
         self.assertTrue(self.manager.handle_native_event(ctypes.addressof(message)))
+        self.assertEqual(fired, [True])
+
+    def test_queued_focus_only_message_is_dropped_after_focus_switch(self):
+        fired = []
+        self.manager.register(1, "Alt+1", lambda: fired.append(True))
+        message = wintypes.MSG()
+        message.message = WM_HOTKEY
+        message.wParam = 1
+        with patch("hotkey_manager.foreground_is_this_process", return_value=False):
+            self.assertTrue(self.manager.handle_native_event(ctypes.addressof(message)))
+        self.assertEqual(fired, [])
+        with patch("hotkey_manager.foreground_is_this_process", return_value=True):
+            self.assertTrue(self.manager.handle_native_event(ctypes.addressof(message)))
         self.assertEqual(fired, [True])
 
     def test_another_message_is_left_alone(self):

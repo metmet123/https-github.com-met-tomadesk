@@ -5,7 +5,7 @@ from hotkey_parser import parse_hotkey
 
 from .note_shortcuts import (
     DEFAULT_MODIFIER, FORMAT_SHORTCUTS, STRUCTURE_SHORTCUTS, SETTING_MODIFIER, TIME_SHORTCUTS, VALID_MODIFIERS,
-    shortcut_text,
+    shortcut_text, structure_shortcut_value,
 )
 from .value_input_guard import install_value_input_guard
 from .insert_menu import HEADING_ITEMS
@@ -53,7 +53,7 @@ class EditorShortcutSettingsDialog(QDialog):
             layout.addRow(label, builder)
         self.structure_builders = {}
         for action, (label, setting, default) in STRUCTURE_SHORTCUTS.items():
-            builder = self._builder(store.setting(setting, default))
+            builder = self._builder(structure_shortcut_value(store, action))
             self.structure_builders[action] = builder
             layout.addRow(label, builder)
         for item in HEADING_ITEMS:
@@ -94,8 +94,10 @@ class EditorShortcutSettingsDialog(QDialog):
                 *(item[5] for item in HEADING_ITEMS if item[5]),
             )
         }
-        if any(value in reserved for value in normalized):
-            QMessageBox.warning(self, "단축키 설정", "편집·알림 기본 단축키와 겹칩니다.")
+        fold_index = 2 + len(self.format_builders) + list(self.structure_builders).index("toggle_fold")
+        if any(value in reserved and not (index == fold_index and value == "Ctrl+Enter")
+               for index, value in enumerate(normalized)):
+            QMessageBox.warning(self, "단축키 설정", "편집 기본 단축키와 겹칩니다.")
             return
         self.store.set_setting(SETTING_MODIFIER, self.modifier.currentText())
         self.store.set_setting(LAYOUT_SETTING, str(self.layout_mode.currentData()))
