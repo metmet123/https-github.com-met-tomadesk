@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 import json
 import sqlite3
+from contextlib import nullcontext
 
 from .schedule_recurrence import DATETIME_FMT, expand_occurrences, normalize_rule
 
@@ -140,7 +141,7 @@ class ScheduleStore:
         with self.conn:
             self.conn.execute("DELETE FROM schedule_items WHERE source_reminder_id=?", (reminder_id,))
 
-    def save_item(self, values: dict) -> int:
+    def save_item(self, values: dict, *, manage_transaction: bool = True) -> int:
         item_id = values.get("id")
         if item_id:
             source = self.conn.execute(
@@ -160,7 +161,7 @@ class ScheduleStore:
         payload[6] = int(bool(payload[6]))
         payload[10] = rule
         payload[13] = int(bool(payload[13]))
-        with self.conn:
+        with self.conn if manage_transaction else nullcontext():
             if item_id:
                 assignments = ",".join(f"{key}=?" for key in columns)
                 self.conn.execute(f"UPDATE schedule_items SET {assignments},updated_at=? WHERE id=?", (*payload, stamp, item_id))

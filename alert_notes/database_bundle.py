@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
+import sqlite3
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -12,41 +15,120 @@ def export_database_bundle(sources: dict, path: Path) -> Path:
         payload["databases"][name] = {table: _table_rows(conn, table) for table in tables}
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    # A failed write must not truncate an existing safety backup.
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=output.parent,
+                                         prefix='.bundle-', suffix='.tmp', delete=False) as handle:
+            temporary = Path(handle.name)
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, output)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
     return output
 
 
 def import_database_bundle(targets: dict, path: Path, legacy_name: str | None = None) -> set[str]:
-    """Restore present databases; omitted databases are intentionally preserved."""
+    """Validate first, then restore all file databases in one SQLite transaction.
+
+    Attached rollback-journal databases participate in SQLite's super-journal.
+    WAL, in-memory databases and pending caller transactions are rejected rather
+    than silently weakening the all-database commit guarantee.
+    """
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError('백업 최상위 형식이 올바르지 않습니다.')
     databases = payload.get("databases")
-    if databases is None:
-        databases = {legacy_name: payload.get("tables", payload)} if legacy_name else {}
-    restored: set[str] = set()
+    if 'databases' in payload:
+        if payload.get('format') != 'sqlite-database-bundle' or type(payload.get('version')) is not int or payload['version'] != 1:
+            raise ValueError('지원하지 않는 백업 형식 또는 버전입니다.')
+    elif legacy_name:
+        databases = {legacy_name: payload.get('tables', payload)}
+    if not isinstance(databases, dict) or not databases:
+        raise ValueError('복원할 데이터베이스가 없습니다.')
+    plans = []
+    seen_paths = set()
     for name, (conn, table_columns) in targets.items():
-        tables = databases.get(name)
-        if tables is None:
+        if name not in databases:
             continue
-        entries = list(table_columns.items())
-        conn.commit()
-        conn.execute("PRAGMA foreign_keys = OFF")
-        try:
-            conn.execute("BEGIN IMMEDIATE")
-            for table, _columns in reversed(entries):
-                _validate_identifier(table)
-                conn.execute(f"DELETE FROM {table}")
-            for table, columns in entries:
-                for column in columns:
-                    _validate_identifier(column)
-                _insert_rows(conn, table, columns, tables.get(table, []))
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            conn.execute("PRAGMA foreign_keys = ON")
-        restored.add(name)
-    return restored
+        tables = databases[name]
+        if not isinstance(tables, dict) or not table_columns or not set(table_columns).issubset(tables):
+            raise ValueError(f'{name}: 필수 테이블이 빠진 백업입니다. 기존 데이터는 변경하지 않습니다.')
+        if conn.in_transaction:
+            raise ValueError('저장 중인 변경이 있습니다. 저장을 마친 뒤 복원해 주세요.')
+        if conn.execute('PRAGMA query_only').fetchone()[0]:
+            raise ValueError('읽기 전용 데이터베이스에는 복원할 수 없습니다.')
+        dbpath = next((row[2] for row in conn.execute('PRAGMA database_list') if row[1] == 'main'), '')
+        if not dbpath:
+            raise ValueError('파일 데이터베이스만 전체 복원할 수 있습니다.')
+        dbpath = Path(dbpath).resolve()
+        identity = os.path.normcase(str(dbpath))
+        if identity in seen_paths:
+            raise ValueError('동일한 데이터베이스가 복원 대상으로 중복 지정됐습니다.')
+        seen_paths.add(identity)
+        cleaned = {}
+        for table, columns in table_columns.items():
+            _validate_identifier(table)
+            for column in columns:
+                _validate_identifier(column)
+            rows = tables[table]
+            if not isinstance(rows, list):
+                raise ValueError(f'{table}: 행 목록이 올바르지 않습니다.')
+            primary = [r[1] for r in conn.execute(f'PRAGMA table_info({table})') if r[5]]
+            for row in rows:
+                if not isinstance(row, dict) or any(not isinstance(k, str) for k in row):
+                    raise ValueError(f'{table}: 행 형식이 올바르지 않습니다.')
+                if any(k not in row or row[k] is None for k in primary):
+                    raise ValueError(f'{table}: 행 식별자가 빠졌습니다.')
+                if any(isinstance(v, (list, dict)) for v in row.values()):
+                    raise ValueError(f'{table}: 지원하지 않는 값 형식입니다.')
+                if table == 'settings' and 'value' not in row:
+                    raise ValueError('설정 값이 빠졌습니다.')
+            cleaned[table] = [dict(row) for row in rows]
+            # Permission is a current user decision, never a capability granted
+            # by an imported file. Reset it only when this setting exists locally
+            # or in the backup; generic settings tables remain untouched.
+            if table == 'settings' and {'key', 'value'}.issubset(columns):
+                had_permission = conn.execute("SELECT 1 FROM settings WHERE key='external_ai_allowed'").fetchone()
+                has_permission = any(r.get('key') == 'external_ai_allowed' for r in rows)
+                if had_permission or has_permission:
+                    cleaned[table] = [r for r in cleaned[table] if r.get('key') != 'external_ai_allowed']
+                    cleaned[table].append({'key': 'external_ai_allowed', 'value': 'false'})
+        plans.append((name, dbpath, table_columns, cleaned))
+    if not plans:
+        raise ValueError('이 프로그램에서 복원할 수 있는 데이터베이스가 없습니다.')
+    coordinator = sqlite3.connect(plans[0][1].as_uri() + '?mode=rw', uri=True, isolation_level=None)
+    try:
+        aliases = ['main']
+        for index, (_, dbpath, _, _) in enumerate(plans[1:], 1):
+            alias = f'restore_{index}'
+            coordinator.execute(f'ATTACH DATABASE ? AS {alias}', (dbpath.as_uri() + '?mode=rw',))
+            aliases.append(alias)
+        coordinator.execute('PRAGMA foreign_keys=OFF')
+        for alias in aliases:
+            mode = coordinator.execute(f'PRAGMA {alias}.journal_mode').fetchone()[0].lower()
+            if mode not in ('delete', 'truncate', 'persist'):
+                raise ValueError('전체 복원에는 롤백 저널 모드가 필요합니다. 현재 저장 모드에서는 복원을 진행하지 않습니다.')
+            coordinator.execute(f'PRAGMA {alias}.synchronous=FULL')
+        coordinator.execute('BEGIN IMMEDIATE')
+        for alias, (_, _, columns_by_table, tables) in zip(aliases, plans):
+            for table in reversed(list(columns_by_table)):
+                coordinator.execute(f'DELETE FROM {alias}.{table}')
+            for table, columns in columns_by_table.items():
+                _insert_rows(coordinator, table, columns, tables[table], database=alias)
+        for alias in aliases:
+            if coordinator.execute(f'PRAGMA {alias}.foreign_key_check').fetchone():
+                raise ValueError('백업의 데이터 참조 관계가 올바르지 않습니다. 복원을 취소했습니다.')
+        coordinator.commit()
+    except Exception:
+        coordinator.rollback()
+        raise
+    finally:
+        coordinator.close()
+    return {p[0] for p in plans}
 
 
 def _table_rows(conn, table: str) -> list[dict]:
@@ -56,11 +138,11 @@ def _table_rows(conn, table: str) -> list[dict]:
     return [dict(row) if hasattr(row, "keys") else dict(zip(columns, row)) for row in cursor]
 
 
-def _insert_rows(conn, table: str, columns, rows) -> None:
-    schema = _schema_defaults(conn, table)
+def _insert_rows(conn, table: str, columns, rows, database='main') -> None:
+    schema = _schema_defaults(conn, table, database)
     column_sql = ", ".join(columns)
     placeholders = ", ".join(f":{column}" for column in columns)
-    sql = f"INSERT INTO {table}({column_sql}) VALUES({placeholders})"
+    sql = f"INSERT INTO {database}.{table}({column_sql}) VALUES({placeholders})"
     for row in rows:
         values = {
             column: row.get(column, _column_default(table, column, schema))
@@ -78,11 +160,11 @@ def _insert_rows(conn, table: str, columns, rows) -> None:
         conn.execute(sql, values)
 
 
-def _schema_defaults(conn, table: str) -> dict:
+def _schema_defaults(conn, table: str, database='main') -> dict:
     """Defaults straight from the table, so a new column never breaks restore."""
     defaults: dict = {}
     try:
-        rows = list(conn.execute(f"PRAGMA table_info({table})"))
+        rows = list(conn.execute(f"PRAGMA {database}.table_info({table})"))
     except Exception:
         return defaults
     for row in rows:

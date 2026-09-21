@@ -1,0 +1,2861 @@
+[
+  {
+    "index": 1,
+    "group": "날짜 표현",
+    "raw": "오늘 회신",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "task"
+      ],
+      "day": "2026-09-19",
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "오늘 회신",
+      "title": "오늘 회신",
+      "kind": "task",
+      "day": "2026-09-19",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 2,
+    "group": "날짜 표현",
+    "raw": "내일 회신",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "task"
+      ],
+      "day": "2026-09-20",
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "내일 회신",
+      "title": "내일 회신",
+      "kind": "task",
+      "day": "2026-09-20",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 3,
+    "group": "날짜 표현",
+    "raw": "모레 회신",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "task"
+      ],
+      "day": "2026-09-21",
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "모레 회신",
+      "title": "모레 회신",
+      "kind": "task",
+      "day": "2026-09-21",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 4,
+    "group": "날짜 표현",
+    "raw": "글피 회신",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "task"
+      ],
+      "day": "2026-09-22",
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "글피 회신",
+      "title": "글피 회신",
+      "kind": "task",
+      "day": "",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [
+      "day"
+    ],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 5,
+    "group": "날짜 표현",
+    "raw": "다다음주 화 회신",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "task"
+      ],
+      "day": "2026-09-29",
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "다다음주 화 회신",
+      "title": "다다음주 화 회신",
+      "kind": "task",
+      "day": "2026-09-22",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [
+      "day"
+    ],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 6,
+    "group": "날짜 표현",
+    "raw": "다음달 2일 갱신",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "task"
+      ],
+      "day": "2026-10-02",
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "다음달 2일 갱신",
+      "title": "다음달 2일 갱신",
+      "kind": "task",
+      "day": "",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [
+      "day"
+    ],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 7,
+    "group": "날짜 표현",
+    "raw": "이번달 25일 제출",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "task"
+      ],
+      "day": "2026-09-25",
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "이번달 25일 제출",
+      "title": "이번달 25일 제출",
+      "kind": "task",
+      "day": "",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [
+      "day"
+    ],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 8,
+    "group": "날짜 표현",
+    "raw": "3일 뒤 제출",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "task"
+      ],
+      "day": "2026-09-22",
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "3일 뒤 제출",
+      "title": "3일 뒤 제출",
+      "kind": "task",
+      "day": "",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [
+      "day"
+    ],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 9,
+    "group": "날짜 표현",
+    "raw": "이틀 후 회신",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "task"
+      ],
+      "day": "2026-09-21",
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "이틀 후 회신",
+      "title": "이틀 후 회신",
+      "kind": "task",
+      "day": "",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [
+      "day"
+    ],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 10,
+    "group": "날짜 표현",
+    "raw": "다음 주 화요일 회신",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "task"
+      ],
+      "day": "2026-09-22",
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "다음 주 화요일 회신",
+      "title": "다음 주 화요일 회신",
+      "kind": "task",
+      "day": "2026-09-22",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 11,
+    "group": "날짜 표현",
+    "raw": "금요일까지 회신",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "task"
+      ],
+      "day": "2026-09-25",
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "금요일까지 회신",
+      "title": "금요일까지 회신",
+      "kind": "task",
+      "day": "2026-09-25",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 12,
+    "group": "날짜 표현",
+    "raw": "2026년 10월 2일 제출",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "task"
+      ],
+      "day": "2026-10-02",
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "2026년 10월 2일 제출",
+      "title": "2026년 10월 2일 제출",
+      "kind": "task",
+      "day": "2026-10-02",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 13,
+    "group": "날짜 표현",
+    "raw": "2027년 1월 2일 제출",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "task"
+      ],
+      "day": "2027-01-02",
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "2027년 1월 2일 제출",
+      "title": "2027년 1월 2일 제출",
+      "kind": "review",
+      "day": "2026-01-02",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": "기준일보다 이전입니다. 연도·날짜를 확인해 주세요."
+    },
+    "mismatches": [
+      "kind",
+      "day"
+    ],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 14,
+    "group": "날짜 표현",
+    "raw": "2026-10-02 제출",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "task"
+      ],
+      "day": "2026-10-02",
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "2026-10-02 제출",
+      "title": "2026-10-02 제출",
+      "kind": "task",
+      "day": "2026-10-02",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 15,
+    "group": "날짜 표현",
+    "raw": "2026.10.02 제출",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "task"
+      ],
+      "day": "2026-10-02",
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "2026.10.02 제출",
+      "title": "2026.10.02 제출",
+      "kind": "task",
+      "day": "2026-10-02",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 16,
+    "group": "날짜 표현",
+    "raw": "10.2 제출",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "task"
+      ],
+      "day": "2026-10-02",
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "10.2 제출",
+      "title": "10.2 제출",
+      "kind": "task",
+      "day": "",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [
+      "day"
+    ],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 17,
+    "group": "날짜 표현",
+    "raw": "10-02 제출",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "task"
+      ],
+      "day": "2026-10-02",
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "10-02 제출",
+      "title": "10-02 제출",
+      "kind": "task",
+      "day": "",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [
+      "day"
+    ],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 18,
+    "group": "날짜 표현",
+    "raw": "10/2(금) 회신",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "task"
+      ],
+      "day": "2026-10-02",
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "10/2(금) 회신",
+      "title": "10/2(금) 회신",
+      "kind": "task",
+      "day": "2026-10-02",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 19,
+    "group": "불확실·잘못된 날짜",
+    "raw": "10/2(월) 제출",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "10/2(월) 제출",
+      "title": "10/2(월) 제출",
+      "kind": "task",
+      "day": "2026-10-02",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [
+      "kind"
+    ],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 20,
+    "group": "불확실·잘못된 날짜",
+    "raw": "9월 25일 금요일 제출",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "task"
+      ],
+      "day": "2026-09-25",
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "9월 25일 금요일 제출",
+      "title": "9월 25일 금요일 제출",
+      "kind": "review",
+      "day": "",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": "여러 날짜·시간이 있습니다. 항목을 나누거나 날짜를 지정해 주세요."
+    },
+    "mismatches": [
+      "kind",
+      "day"
+    ],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 21,
+    "group": "불확실·잘못된 날짜",
+    "raw": "이번주 금요일 제출",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "이번주 금요일 제출",
+      "title": "이번주 금요일 제출",
+      "kind": "review",
+      "day": "2026-09-18",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": "기준일보다 이전입니다. 연도·날짜를 확인해 주세요."
+    },
+    "mismatches": [],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 22,
+    "group": "불확실·잘못된 날짜",
+    "raw": "어제 제출",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "어제 제출",
+      "title": "어제 제출",
+      "kind": "task",
+      "day": "",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [
+      "kind"
+    ],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 23,
+    "group": "불확실·잘못된 날짜",
+    "raw": "지난주 화요일 회신",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "지난주 화요일 회신",
+      "title": "지난주 화요일 회신",
+      "kind": "task",
+      "day": "2026-09-22",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [
+      "kind"
+    ],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 24,
+    "group": "불확실·잘못된 날짜",
+    "raw": "다음주 중 제출",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "다음주 중 제출",
+      "title": "다음주 중 제출",
+      "kind": "review",
+      "day": "",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": "정확한 날짜가 필요합니다."
+    },
+    "mismatches": [],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 25,
+    "group": "불확실·잘못된 날짜",
+    "raw": "이번 주말 회신",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "이번 주말 회신",
+      "title": "이번 주말 회신",
+      "kind": "review",
+      "day": "",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": "정확한 날짜가 필요합니다."
+    },
+    "mismatches": [],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 26,
+    "group": "불확실·잘못된 날짜",
+    "raw": "이달 말 갱신",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "이달 말 갱신",
+      "title": "이달 말 갱신",
+      "kind": "task",
+      "day": "",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [
+      "kind"
+    ],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 27,
+    "group": "불확실·잘못된 날짜",
+    "raw": "월말 정산 제출",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "월말 정산 제출",
+      "title": "월말 정산 제출",
+      "kind": "task",
+      "day": "",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [
+      "kind"
+    ],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 28,
+    "group": "불확실·잘못된 날짜",
+    "raw": "9월 하순 제출",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "9월 하순 제출",
+      "title": "9월 하순 제출",
+      "kind": "review",
+      "day": "",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": "정확한 날짜가 필요합니다."
+    },
+    "mismatches": [],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 29,
+    "group": "불확실·잘못된 날짜",
+    "raw": "2026-13-01 제출",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "2026-13-01 제출",
+      "title": "2026-13-01 제출",
+      "kind": "review",
+      "day": "",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": "유효하지 않은 날짜입니다."
+    },
+    "mismatches": [],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 30,
+    "group": "불확실·잘못된 날짜",
+    "raw": "2026-02-29 제출",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "2026-02-29 제출",
+      "title": "2026-02-29 제출",
+      "kind": "review",
+      "day": "",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": "유효하지 않은 날짜입니다."
+    },
+    "mismatches": [],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 31,
+    "group": "불확실·잘못된 날짜",
+    "raw": "13/1 제출",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "13/1 제출",
+      "title": "13/1 제출",
+      "kind": "review",
+      "day": "",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": "유효하지 않은 날짜입니다."
+    },
+    "mismatches": [],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 32,
+    "group": "불확실·잘못된 날짜",
+    "raw": "9/31 제출",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "9/31 제출",
+      "title": "9/31 제출",
+      "kind": "review",
+      "day": "",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": "유효하지 않은 날짜입니다."
+    },
+    "mismatches": [],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 33,
+    "group": "취소·조건·반복",
+    "raw": "내일 회신 취소",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review",
+        "info"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "내일 회신 취소",
+      "title": "내일 회신 취소",
+      "kind": "task",
+      "day": "2026-09-20",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [
+      "kind"
+    ],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 34,
+    "group": "취소·조건·반복",
+    "raw": "내일 회신 안 해도 됨",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review",
+        "info"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "내일 회신 안 해도 됨",
+      "title": "내일 회신 안 해도 됨",
+      "kind": "task",
+      "day": "2026-09-20",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [
+      "kind"
+    ],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 35,
+    "group": "취소·조건·반복",
+    "raw": "내일 회신하지 않기",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review",
+        "info"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "내일 회신하지 않기",
+      "title": "내일 회신하지 않기",
+      "kind": "task",
+      "day": "2026-09-20",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [
+      "kind"
+    ],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 36,
+    "group": "취소·조건·반복",
+    "raw": "내일 회신 완료",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review",
+        "info"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "내일 회신 완료",
+      "title": "내일 회신 완료",
+      "kind": "task",
+      "day": "2026-09-20",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [
+      "kind"
+    ],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 37,
+    "group": "취소·조건·반복",
+    "raw": "내일 회신 예정이었으나 보류",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review",
+        "info"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "내일 회신 예정이었으나 보류",
+      "title": "내일 회신 예정이었으나 보류",
+      "kind": "task",
+      "day": "2026-09-20",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [
+      "kind"
+    ],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 38,
+    "group": "취소·조건·반복",
+    "raw": "내일 회신 불필요",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review",
+        "info"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "내일 회신 불필요",
+      "title": "내일 회신 불필요",
+      "kind": "task",
+      "day": "2026-09-20",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [
+      "kind"
+    ],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 39,
+    "group": "취소·조건·반복",
+    "raw": "내일 회신할지 고민",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review",
+        "info"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "내일 회신할지 고민",
+      "title": "내일 회신할지 고민",
+      "kind": "task",
+      "day": "2026-09-20",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [
+      "kind"
+    ],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 40,
+    "group": "취소·조건·반복",
+    "raw": "시간 나면 내일 회신",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review",
+        "info"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "시간 나면 내일 회신",
+      "title": "시간 나면 내일 회신",
+      "kind": "task",
+      "day": "2026-09-20",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [
+      "kind"
+    ],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 41,
+    "group": "취소·조건·반복",
+    "raw": "승인 받으면 내일 제출",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review",
+        "info"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "승인 받으면 내일 제출",
+      "title": "승인 받으면 내일 제출",
+      "kind": "task",
+      "day": "2026-09-20",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [
+      "kind"
+    ],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 42,
+    "group": "취소·조건·반복",
+    "raw": "매 주 화요일 제출",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review",
+        "info"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "매 주 화요일 제출",
+      "title": "매 주 화요일 제출",
+      "kind": "task",
+      "day": "2026-09-22",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [
+      "kind"
+    ],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 43,
+    "group": "취소·조건·반복",
+    "raw": "격주 화요일 제출",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review",
+        "info"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "격주 화요일 제출",
+      "title": "격주 화요일 제출",
+      "kind": "task",
+      "day": "2026-09-22",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [
+      "kind"
+    ],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 44,
+    "group": "취소·조건·반복",
+    "raw": "매년 10/2 갱신",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review",
+        "info"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "매년 10/2 갱신",
+      "title": "매년 10/2 갱신",
+      "kind": "task",
+      "day": "2026-10-02",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [
+      "kind"
+    ],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 45,
+    "group": "취소·조건·반복",
+    "raw": "주중 매일 회신",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review",
+        "info"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "주중 매일 회신",
+      "title": "주중 매일 회신",
+      "kind": "review",
+      "day": "",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": "조건·대략적인 날짜·반복 여부를 확인해 주세요."
+    },
+    "mismatches": [],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 46,
+    "group": "의도·표현",
+    "raw": "내일 택배 보내기",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "task"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "내일 택배 보내기",
+      "title": "내일 택배 보내기",
+      "kind": "review",
+      "day": "2026-09-20",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": "일정인지 정보인지 확인해 주세요."
+    },
+    "mismatches": [
+      "kind"
+    ],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 47,
+    "group": "의도·표현",
+    "raw": "내일 담당자에게 전화",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "task"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "내일 담당자에게 전화",
+      "title": "내일 담당자에게 전화",
+      "kind": "review",
+      "day": "2026-09-20",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": "일정인지 정보인지 확인해 주세요."
+    },
+    "mismatches": [
+      "kind"
+    ],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 48,
+    "group": "의도·표현",
+    "raw": "내일 서류 확인",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "task"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "내일 서류 확인",
+      "title": "내일 서류 확인",
+      "kind": "review",
+      "day": "2026-09-20",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": "일정인지 정보인지 확인해 주세요."
+    },
+    "mismatches": [
+      "kind"
+    ],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 49,
+    "group": "의도·표현",
+    "raw": "내일 은행 방문",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "task"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "내일 은행 방문",
+      "title": "내일 은행 방문",
+      "kind": "review",
+      "day": "2026-09-20",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": "일정인지 정보인지 확인해 주세요."
+    },
+    "mismatches": [
+      "kind"
+    ],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 50,
+    "group": "의도·표현",
+    "raw": "토너 주문",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "task"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "토너 주문",
+      "title": "토너 주문",
+      "kind": "task",
+      "day": "",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 51,
+    "group": "의도·표현",
+    "raw": "할 일: 서랍 정리",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "task"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "할 일: 서랍 정리",
+      "title": "할 일: 서랍 정리",
+      "kind": "task",
+      "day": "",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 52,
+    "group": "의도·표현",
+    "raw": "TODO: 서랍 정리",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "task"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "TODO: 서랍 정리",
+      "title": "TODO: 서랍 정리",
+      "kind": "info",
+      "day": "",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [
+      "kind"
+    ],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 53,
+    "group": "의도·표현",
+    "raw": "아이디어: 예약 자동화",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "idea"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "아이디어: 예약 자동화",
+      "title": "아이디어: 예약 자동화",
+      "kind": "idea",
+      "day": "",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 54,
+    "group": "의도·표현",
+    "raw": "아이디어 - 예약 자동화",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "idea"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "아이디어 - 예약 자동화",
+      "title": "아이디어 - 예약 자동화",
+      "kind": "info",
+      "day": "",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [
+      "kind"
+    ],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 55,
+    "group": "의도·표현",
+    "raw": "💡 예약 자동화",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "idea"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "💡 예약 자동화",
+      "title": "💡 예약 자동화",
+      "kind": "info",
+      "day": "",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [
+      "kind"
+    ],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 56,
+    "group": "의도·표현",
+    "raw": "예약 자동화하면 좋을듯",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "idea"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "예약 자동화하면 좋을듯",
+      "title": "예약 자동화하면 좋을듯",
+      "kind": "idea",
+      "day": "",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 57,
+    "group": "의도·표현",
+    "raw": "정보: 주문 번호 20261002",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "info"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "정보: 주문 번호 20261002",
+      "title": "정보: 주문 번호 20261002",
+      "kind": "info",
+      "day": "",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 58,
+    "group": "의도·표현",
+    "raw": "주문 번호 12345",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "info"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "주문 번호 12345",
+      "title": "주문 번호 12345",
+      "kind": "task",
+      "day": "",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [
+      "kind"
+    ],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 59,
+    "group": "의도·표현",
+    "raw": "보고서 제출 완료",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "info",
+        "review"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "보고서 제출 완료",
+      "title": "보고서 제출 완료",
+      "kind": "task",
+      "day": "",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [
+      "kind"
+    ],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 60,
+    "group": "의도·표현",
+    "raw": "견적서 회신 여부 미정",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "견적서 회신 여부 미정",
+      "title": "견적서 회신 여부 미정",
+      "kind": "task",
+      "day": "",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [
+      "kind"
+    ],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 61,
+    "group": "시간",
+    "raw": "내일 오전 12시~오전 1시 회의",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "event"
+      ],
+      "day": null,
+      "clock": "00:00",
+      "end": "01:00"
+    },
+    "actual": {
+      "raw": "내일 오전 12시~오전 1시 회의",
+      "title": "내일 오전 12시~오전 1시 회의",
+      "kind": "event",
+      "day": "2026-09-20",
+      "clock": "00:00",
+      "end_clock": "01:00",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 62,
+    "group": "시간",
+    "raw": "내일 오후 12시~오후 1시 회의",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "event"
+      ],
+      "day": null,
+      "clock": "12:00",
+      "end": "13:00"
+    },
+    "actual": {
+      "raw": "내일 오후 12시~오후 1시 회의",
+      "title": "내일 오후 12시~오후 1시 회의",
+      "kind": "event",
+      "day": "2026-09-20",
+      "clock": "12:00",
+      "end_clock": "13:00",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 63,
+    "group": "시간",
+    "raw": "내일 오후 3시 반~오후 4시 회의",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "event"
+      ],
+      "day": null,
+      "clock": "15:30",
+      "end": "16:00"
+    },
+    "actual": {
+      "raw": "내일 오후 3시 반~오후 4시 회의",
+      "title": "내일 오후 3시 반~오후 4시 회의",
+      "kind": "event",
+      "day": "2026-09-20",
+      "clock": "15:30",
+      "end_clock": "16:00",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 64,
+    "group": "시간",
+    "raw": "내일 15:00~16:00 회의",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "event"
+      ],
+      "day": null,
+      "clock": "15:00",
+      "end": "16:00"
+    },
+    "actual": {
+      "raw": "내일 15:00~16:00 회의",
+      "title": "내일 15:00~16:00 회의",
+      "kind": "event",
+      "day": "2026-09-20",
+      "clock": "15:00",
+      "end_clock": "16:00",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 65,
+    "group": "시간",
+    "raw": "내일 오후 3~4시 회의",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "내일 오후 3~4시 회의",
+      "title": "내일 오후 3~4시 회의",
+      "kind": "review",
+      "day": "2026-09-20",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": "오전·오후를 확인해 주세요. 일정의 시작·종료 시각을 확인해 주세요."
+    },
+    "mismatches": [],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 66,
+    "group": "시간",
+    "raw": "내일 24:00 제출",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "내일 24:00 제출",
+      "title": "내일 24:00 제출",
+      "kind": "review",
+      "day": "2026-09-20",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": "시간 범위를 확인해 주세요."
+    },
+    "mismatches": [],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 67,
+    "group": "시간",
+    "raw": "내일 15:99 제출",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "내일 15:99 제출",
+      "title": "내일 15:99 제출",
+      "kind": "review",
+      "day": "2026-09-20",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": "시간 범위를 확인해 주세요."
+    },
+    "mismatches": [],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 68,
+    "group": "시간",
+    "raw": "내일 밤 11시 제출",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "내일 밤 11시 제출",
+      "title": "내일 밤 11시 제출",
+      "kind": "review",
+      "day": "2026-09-20",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": "오전·오후를 확인해 주세요."
+    },
+    "mismatches": [],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 69,
+    "group": "시간",
+    "raw": "내일 정오 제출",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "내일 정오 제출",
+      "title": "내일 정오 제출",
+      "kind": "task",
+      "day": "2026-09-20",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [
+      "kind"
+    ],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 70,
+    "group": "시간",
+    "raw": "내일 오후 4시~오후 3시 회의",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "내일 오후 4시~오후 3시 회의",
+      "title": "내일 오후 4시~오후 3시 회의",
+      "kind": "event",
+      "day": "2026-09-20",
+      "clock": "16:00",
+      "end_clock": "15:00",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [
+      "kind"
+    ],
+    "registered": false,
+    "storage_error": "종료 시각은 시작 시각보다 늦어야 합니다. 다음 날 일정은 나누어 등록해 주세요.",
+    "raw_preserved": true
+  },
+  {
+    "index": 71,
+    "group": "시간",
+    "raw": "내일 15:00~15:00 회의",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "내일 15:00~15:00 회의",
+      "title": "내일 15:00~15:00 회의",
+      "kind": "event",
+      "day": "2026-09-20",
+      "clock": "15:00",
+      "end_clock": "15:00",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [
+      "kind"
+    ],
+    "registered": false,
+    "storage_error": "종료 시각은 시작 시각보다 늦어야 합니다. 다음 날 일정은 나누어 등록해 주세요.",
+    "raw_preserved": true
+  },
+  {
+    "index": 72,
+    "group": "시간",
+    "raw": "내일 23:59 제출",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "task"
+      ],
+      "day": null,
+      "clock": "23:59",
+      "end": ""
+    },
+    "actual": {
+      "raw": "내일 23:59 제출",
+      "title": "내일 23:59 제출",
+      "kind": "task",
+      "day": "2026-09-20",
+      "clock": "23:59",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 73,
+    "group": "복합 메모",
+    "raw": "내일 회신, 토너 주문",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "내일 회신, 토너 주문",
+      "title": "내일 회신, 토너 주문",
+      "kind": "task",
+      "day": "2026-09-20",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [
+      "kind"
+    ],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 74,
+    "group": "복합 메모",
+    "raw": "내일 회신 / 모레 제출",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "내일 회신 / 모레 제출",
+      "title": "내일 회신 / 모레 제출",
+      "kind": "review",
+      "day": "",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": "여러 날짜·시간이 있습니다. 항목을 나누거나 날짜를 지정해 주세요."
+    },
+    "mismatches": [],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 75,
+    "group": "복합 메모",
+    "raw": "내일 회신 및 토너 주문",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "내일 회신 및 토너 주문",
+      "title": "내일 회신 및 토너 주문",
+      "kind": "task",
+      "day": "2026-09-20",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [
+      "kind"
+    ],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 76,
+    "group": "복합 메모",
+    "raw": "아이디어: 자동 분류; 내일 견적서 회신",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "아이디어: 자동 분류; 내일 견적서 회신",
+      "title": "아이디어: 자동 분류; 내일 견적서 회신",
+      "kind": "idea",
+      "day": "",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [
+      "kind"
+    ],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 77,
+    "group": "복합 메모",
+    "raw": "정보: 회의 취소, 내일 자료 제출",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "정보: 회의 취소, 내일 자료 제출",
+      "title": "정보: 회의 취소, 내일 자료 제출",
+      "kind": "info",
+      "day": "",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [
+      "kind"
+    ],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 78,
+    "group": "복합 메모",
+    "raw": "내일 회의는 취소하고 보고서 제출",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "내일 회의는 취소하고 보고서 제출",
+      "title": "내일 회의는 취소하고 보고서 제출",
+      "kind": "review",
+      "day": "2026-09-20",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": "한 줄에 여러 내용이 있는지 확인해 주세요."
+    },
+    "mismatches": [],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 79,
+    "group": "복합 메모",
+    "raw": "내일 회신\t모레 제출",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "내일 회신\t모레 제출",
+      "title": "내일 회신\t모레 제출",
+      "kind": "review",
+      "day": "",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": "여러 날짜·시간이 있습니다. 항목을 나누거나 날짜를 지정해 주세요."
+    },
+    "mismatches": [],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 80,
+    "group": "입력 형식",
+    "raw": "내일 회신 #업무",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "task"
+      ],
+      "day": "2026-09-20",
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "내일 회신 #업무",
+      "title": "내일 회신 #업무",
+      "kind": "task",
+      "day": "2026-09-20",
+      "clock": "",
+      "end_clock": "",
+      "category": "업무",
+      "reason": ""
+    },
+    "mismatches": [],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 81,
+    "group": "입력 형식",
+    "raw": "- 내일 회신 #업무",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "task"
+      ],
+      "day": "2026-09-20",
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "- 내일 회신 #업무",
+      "title": "내일 회신 #업무",
+      "kind": "task",
+      "day": "2026-09-20",
+      "clock": "",
+      "end_clock": "",
+      "category": "업무",
+      "reason": ""
+    },
+    "mismatches": [],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 82,
+    "group": "입력 형식",
+    "raw": "1. 내일 회신 #업무",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "task"
+      ],
+      "day": "2026-09-20",
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "1. 내일 회신 #업무",
+      "title": "내일 회신 #업무",
+      "kind": "task",
+      "day": "2026-09-20",
+      "clock": "",
+      "end_clock": "",
+      "category": "업무",
+      "reason": ""
+    },
+    "mismatches": [],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 83,
+    "group": "입력 형식",
+    "raw": "  내일 회신 #업무  ",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "task"
+      ],
+      "day": "2026-09-20",
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "  내일 회신 #업무  ",
+      "title": "내일 회신 #업무",
+      "kind": "task",
+      "day": "2026-09-20",
+      "clock": "",
+      "end_clock": "",
+      "category": "업무",
+      "reason": ""
+    },
+    "mismatches": [],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 84,
+    "group": "입력 형식",
+    "raw": "[ ] 내일 회신 #업무",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "task"
+      ],
+      "day": "2026-09-20",
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "[ ] 내일 회신 #업무",
+      "title": "[ ] 내일 회신 #업무",
+      "kind": "task",
+      "day": "2026-09-20",
+      "clock": "",
+      "end_clock": "",
+      "category": "업무",
+      "reason": ""
+    },
+    "mismatches": [],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 85,
+    "group": "연도·윤년 경계",
+    "raw": "내일 회신",
+    "base": "2026-12-31",
+    "expected": {
+      "kind": [
+        "task"
+      ],
+      "day": "2027-01-01",
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "내일 회신",
+      "title": "내일 회신",
+      "kind": "task",
+      "day": "2027-01-01",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 86,
+    "group": "연도·윤년 경계",
+    "raw": "내일 회신",
+    "base": "2027-02-28",
+    "expected": {
+      "kind": [
+        "task"
+      ],
+      "day": "2027-03-01",
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "내일 회신",
+      "title": "내일 회신",
+      "kind": "task",
+      "day": "2027-03-01",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 87,
+    "group": "연도·윤년 경계",
+    "raw": "내일 회신",
+    "base": "2028-02-28",
+    "expected": {
+      "kind": [
+        "task"
+      ],
+      "day": "2028-02-29",
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "내일 회신",
+      "title": "내일 회신",
+      "kind": "task",
+      "day": "2028-02-29",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 88,
+    "group": "연도·윤년 경계",
+    "raw": "내일 회신",
+    "base": "2028-02-29",
+    "expected": {
+      "kind": [
+        "task"
+      ],
+      "day": "2028-03-01",
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "내일 회신",
+      "title": "내일 회신",
+      "kind": "task",
+      "day": "2028-03-01",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 89,
+    "group": "연도·윤년 경계",
+    "raw": "다음주 월요일 회신",
+    "base": "2026-12-27",
+    "expected": {
+      "kind": [
+        "task"
+      ],
+      "day": "2026-12-28",
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "다음주 월요일 회신",
+      "title": "다음주 월요일 회신",
+      "kind": "task",
+      "day": "2026-12-28",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 90,
+    "group": "연도·윤년 경계",
+    "raw": "다음주 월요일 회신",
+    "base": "2026-12-31",
+    "expected": {
+      "kind": [
+        "task"
+      ],
+      "day": "2027-01-04",
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "다음주 월요일 회신",
+      "title": "다음주 월요일 회신",
+      "kind": "task",
+      "day": "2027-01-04",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 91,
+    "group": "연도 보존",
+    "raw": "2027년 10월 2일 제출",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "task"
+      ],
+      "day": "2027-10-02",
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "2027년 10월 2일 제출",
+      "title": "2027년 10월 2일 제출",
+      "kind": "task",
+      "day": "2026-10-02",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [
+      "day"
+    ],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 92,
+    "group": "연도 보존",
+    "raw": "2025년 10월 2일 제출",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review"
+      ],
+      "day": "2025-10-02",
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "2025년 10월 2일 제출",
+      "title": "2025년 10월 2일 제출",
+      "kind": "task",
+      "day": "2026-10-02",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [
+      "kind",
+      "day"
+    ],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 93,
+    "group": "연도 보존",
+    "raw": "2027/10/02 제출",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "task"
+      ],
+      "day": "2027-10-02",
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "2027/10/02 제출",
+      "title": "2027/10/02 제출",
+      "kind": "task",
+      "day": "2027-10-02",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 94,
+    "group": "숫자·태그",
+    "raw": "정보: 회의실 302호, 주문 12345",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "info"
+      ],
+      "day": "",
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "정보: 회의실 302호, 주문 12345",
+      "title": "정보: 회의실 302호, 주문 12345",
+      "kind": "info",
+      "day": "",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [],
+    "registered": false,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 95,
+    "group": "숫자·태그",
+    "raw": "내일 제품 3개 주문 #업무",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "task"
+      ],
+      "day": "2026-09-20",
+      "clock": "",
+      "end": ""
+    },
+    "actual": {
+      "raw": "내일 제품 3개 주문 #업무",
+      "title": "내일 제품 3개 주문 #업무",
+      "kind": "task",
+      "day": "2026-09-20",
+      "clock": "",
+      "end_clock": "",
+      "category": "업무",
+      "reason": ""
+    },
+    "mismatches": [],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 96,
+    "group": "숫자·태그",
+    "raw": "내일 자료 제출 #재무",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "task"
+      ],
+      "day": "2026-09-20",
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "내일 자료 제출 #재무",
+      "title": "내일 자료 제출 #재무",
+      "kind": "task",
+      "day": "2026-09-20",
+      "clock": "",
+      "end_clock": "",
+      "category": "재무",
+      "reason": ""
+    },
+    "mismatches": [],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 97,
+    "group": "이미 완료한 목록",
+    "raw": "[x] 내일 보고서 제출",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review",
+        "info"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "[x] 내일 보고서 제출",
+      "title": "[x] 내일 보고서 제출",
+      "kind": "task",
+      "day": "2026-09-20",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [
+      "kind"
+    ],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  },
+  {
+    "index": 98,
+    "group": "이미 완료한 목록",
+    "raw": "✅ 내일 보고서 제출",
+    "base": "2026-09-19",
+    "expected": {
+      "kind": [
+        "review",
+        "info"
+      ],
+      "day": null,
+      "clock": null,
+      "end": null
+    },
+    "actual": {
+      "raw": "✅ 내일 보고서 제출",
+      "title": "✅ 내일 보고서 제출",
+      "kind": "task",
+      "day": "2026-09-20",
+      "clock": "",
+      "end_clock": "",
+      "category": "미분류",
+      "reason": ""
+    },
+    "mismatches": [
+      "kind"
+    ],
+    "registered": true,
+    "storage_error": "",
+    "raw_preserved": true
+  }
+]

@@ -894,7 +894,9 @@ class FeatureUpdateTest(unittest.TestCase):
         self.assertEqual(values["data_dir"], data_dir)
         self.assertNotIn("backup_dir", values)
         self.assertNotIn("backup_dir", dialog.path_labels)
-        self.assertEqual(len(dialog.hotkey_builders), 12)
+        self.assertEqual(len(dialog.hotkey_builders), 14)
+        self.assertEqual(values["screen_ocr_hotkey"], "Ctrl+Alt+O")
+        self.assertEqual(values["file_rename_hotkey"], "")
         self.assertIn(main_window.WINDOW_PIN_HOTKEY_SETTING, dialog.hotkey_builders)
         self.assertIn(main_window.SHORTCUT_OVERLAY_HOTKEY_SETTING, dialog.hotkey_builders)
         self.assertIn(main_window.EXIT_HOTKEY_SETTING, dialog.hotkey_builders)
@@ -915,8 +917,8 @@ class FeatureUpdateTest(unittest.TestCase):
             for field in dialog.hotkey_field_widgets
         ]
         self.assertEqual(dialog._hotkey_columns, 2)
-        self.assertEqual([(row, column) for row, column, _, _ in positions[:6]], [(0, 0), (1, 0), (2, 0), (3, 0), (4, 0), (5, 0)])
-        self.assertEqual([(row, column) for row, column, _, _ in positions[6:]], [(0, 1), (1, 1), (2, 1), (3, 1), (4, 1), (5, 1)])
+        self.assertEqual([(row, column) for row, column, _, _ in positions[:7]], [(0, 0), (1, 0), (2, 0), (3, 0), (4, 0), (5, 0), (6, 0)])
+        self.assertEqual([(row, column) for row, column, _, _ in positions[7:]], [(0, 1), (1, 1), (2, 1), (3, 1), (4, 1), (5, 1), (6, 1)])
         self.assertEqual(dialog.findChildren(QScrollArea), [])
         self.assertGreaterEqual(dialog.minimumWidth(), 980)
         self.assertGreaterEqual(dialog.minimumHeight(), 660)

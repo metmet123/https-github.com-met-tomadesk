@@ -33,7 +33,12 @@ class StageOneQtTest(unittest.TestCase):
         builder.setText(parsed.text)
         self.assertEqual(builder.text(), parsed.text)
         self.assertEqual(
-            {key: parse_hotkey(value).text for key, value in HOTKEY_DEFAULTS.items()},
+            {key for key, value in HOTKEY_DEFAULTS.items() if not value},
+            {"file_rename_hotkey"},
+        )
+        self.assertEqual(
+            {key: parse_hotkey(value).text if key != "file_rename_hotkey" else ""
+             for key, value in HOTKEY_DEFAULTS.items()},
             HOTKEY_DEFAULTS,
         )
 

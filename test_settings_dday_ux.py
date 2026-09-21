@@ -368,11 +368,11 @@ class SettingsRoomTest(unittest.TestCase):
         self.assertIs(self.dialog.deadline_card.parentWidget(), self.dialog.schedule_page)
         self.assertEqual(self.dialog._deadline_columns, 3)
 
-    def test_the_four_approved_categories_are_tabs(self):
-        self.assertEqual(self.dialog.settings_tabs.count(), 4)
+    def test_the_settings_categories_include_external_ai(self):
+        self.assertEqual(self.dialog.settings_tabs.count(), 5)
         self.assertEqual(
-            [self.dialog.settings_tabs.tabText(index) for index in range(4)],
-            ["단축키", "일정·D-Day", "프로그램", "데이터"],
+            [self.dialog.settings_tabs.tabText(index) for index in range(5)],
+            ["단축키", "일정·D-Day", "프로그램", "데이터", "외부 AI"],
         )
 
     def test_the_schedule_postit_and_deadline_cards_share_one_page(self):

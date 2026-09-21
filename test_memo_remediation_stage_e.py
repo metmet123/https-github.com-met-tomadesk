@@ -85,7 +85,10 @@ class StageERemediationTest(unittest.TestCase):
         editor.set_note(self.store.note(self.note_id))
         self.app.processEvents()
         try:
-            self.assertTrue(editor.backlink_button.isVisible())
+            self.assertFalse(editor.backlink_button.isVisible())
+            editor.more_menu.open_at(editor.property_chips.more_button)
+            self.assertTrue(editor.more_menu.action_buttons["backlinks"].isEnabled())
+            editor.more_menu.close()
             self.assertEqual(editor.backlink_button.text(), "🔗 1")
             self.assertEqual(editor.annotation_menu_button.text(), "주석 1")
             self.assertEqual(len(editor.content_edit._annotation_selections()), 1)

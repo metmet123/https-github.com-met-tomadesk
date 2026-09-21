@@ -11,7 +11,7 @@ class PropertyChipBar(QWidget):
     ORDER = ("format", "reminder", "deadline", "hotkey", "other")
     LABELS = {
         "reminder": "🔔\u2009알림", "deadline": "📌\u2009D-Day", "hotkey": "⌨\u2009단축키",
-        "format": "서식 ▾", "other": "⋯",
+        "format": "서식 ▾", "other": "더보기 ▾",
     }
     # 값이 들어가도 좁은 폭에서 이름으로 돌아가지 않는 칩.
     ALWAYS_SUMMARY = ("format", "deadline")
@@ -57,7 +57,7 @@ class PropertyChipBar(QWidget):
                     "QFrame#memoChipSeparator{border:0;background:#dbe2ea;}"
                 )
                 row.addWidget(self.format_separator)
-        self.buttons["other"].setFixedWidth(26)
+        self.buttons["other"].setFixedWidth(self.buttons["other"].sizeHint().width())
         row.addStretch(1)
         # Compatibility alias for existing callers/tests; the visible ⋯ button
         # is now the real final property entry rather than a narrow-only clone.

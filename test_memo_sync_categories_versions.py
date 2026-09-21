@@ -260,8 +260,13 @@ class MemoCategoryUiTest(unittest.TestCase):
                 self.assertFalse(panel.list_panel.table.dragEnabled())
                 panel.list_panel.resize(430, 600)
                 self.app.processEvents()
-                self.assertTrue(panel.list_panel.view_combo.isVisible())
-                self.assertTrue(panel.list_panel.sort_combo.isVisible())
+                # Both title filters now share this row. Narrow views expose
+                # view/sort through More instead of squeezing the search field.
+                self.assertTrue(panel.list_panel._controls_in_more)
+                self.assertFalse(panel.list_panel.view_combo.isVisible())
+                self.assertFalse(panel.list_panel.sort_combo.isVisible())
+                self.assertTrue(panel.list_panel.more_categories_button.isVisible())
+                self.assertGreaterEqual(panel.list_panel.search.width(), 120)
                 panel.list_panel._set_category_filter(category_id)
                 store.delete_category(category_id)
                 panel.list_panel.refresh_category_filters()

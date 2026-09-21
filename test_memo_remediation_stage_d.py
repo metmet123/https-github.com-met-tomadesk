@@ -94,13 +94,14 @@ class StageDMemoListTest(unittest.TestCase):
         ))
         self.assertTrue(unassigned.isChecked())
 
-    def test_480_width_keeps_four_columns_and_view_controls(self):
+    def test_480_width_keeps_four_columns_and_more_controls(self):
         self.panel.resize(480, 700)
         self.app.processEvents()
         self.panel._resize_table_columns()
         self.app.processEvents()
-        self.assertGreaterEqual(self.panel.view_combo.width(), 90)
-        self.assertGreaterEqual(self.panel.sort_combo.width(), 90)
+        self.assertTrue(self.panel.view_combo.isHidden())
+        self.assertTrue(self.panel.sort_combo.isHidden())
+        self.assertTrue(self.panel.more_categories_button.isVisible())
         self.assertEqual(self.panel.visible_columns(), [0, 1, 2, 3])
         self.assertEqual(self.panel.table.horizontalScrollBar().maximum(), 0)
         first = next(self.panel._note_items())

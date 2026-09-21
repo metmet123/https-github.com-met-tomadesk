@@ -97,6 +97,11 @@ from ui_theme import scaled_stylesheet as theme_scaled_stylesheet
 from window_title_bar import WindowTitleBar
 from window_layout import collect_open_windows
 from window_pin import WindowPinController
+from file_rename import explorer_selection
+from file_rename_table import FileRenameWindow
+from screen_ocr import ScreenOcrController
+from rename_engine import RenameEngine
+from storage_config import user_storage_root
 
 
 ACTION_LABELS = {
@@ -122,6 +127,8 @@ QUICK_SCHEDULE_HOTKEY_ID = 990
 SCHEDULE_POSTIT_HOTKEY_ID = 989
 WINDOW_PIN_HOTKEY_ID = 988
 SHORTCUT_OVERLAY_HOTKEY_ID = 987
+FILE_RENAME_HOTKEY_ID = 986
+SCREEN_OCR_HOTKEY_ID = 985
 MAIN_OPEN_HOTKEY = "Ctrl+Alt+F10"
 TRAY_HIDE_HOTKEY = "Ctrl+Alt+F11"
 EXIT_HOTKEY = "Ctrl+Alt+F9"
@@ -412,6 +419,10 @@ class MainWindow(QMainWindow):
             SHORTCUT_OVERLAY_HOTKEY_SETTING, SHORTCUT_OVERLAY_HOTKEY
         )
         self.schedule_postit_hotkey = SchedulePostitPreferences.load(self.note_store).hotkey
+        self.file_rename_hotkey = self._hotkey_from_store("file_rename_hotkey", "")
+        self.file_rename_window = None
+        self.screen_ocr_hotkey = self._hotkey_from_store("screen_ocr_hotkey", "Ctrl+Alt+O")
+        self.screen_ocr = None
         self.startup_mode = self.store.setting(STARTUP_MODE_SETTING, "window")
         self.runner = ActionRunner(self.playback_stop_hotkey, settings_store=self.store)
         self._hidden_windows_exit_restored = False
@@ -785,6 +796,53 @@ class MainWindow(QMainWindow):
         if tray_icon is not None:
             tray_icon.showMessage("창 고정/해제", result.message, application_icon(), 3500)
 
+    def show_screen_ocr(self) -> None:
+        if self._recording or self._macro_playing or is_app_excluded(foreground_application(), self.excluded_apps):
+            return
+        if self.screen_ocr is None:
+            self.screen_ocr = ScreenOcrController(self, can_start=lambda: not (
+                self._recording or self._macro_playing or
+                is_app_excluded(foreground_application(), self.excluded_apps)
+            ), save_note=self.note_store.create_note, on_saved=self._ocr_note_saved)
+            QApplication.instance().aboutToQuit.connect(self.screen_ocr.shutdown)
+        self.screen_ocr.start()
+
+    def _ocr_note_saved(self, note_id: int) -> None:
+        # Do not call panel.refresh()/show_note(): those replace the active editor.
+        # OCR must not discard or silently save an unrelated manual-save draft.
+        from PyQt6.QtCore import QSignalBlocker
+        panel = self.alert_panel
+        blocker = QSignalBlocker(panel.list_panel)
+        panel.list_panel.set_rows(self.note_store.notes(panel.list_panel.search.text()), panel.current_id)
+        del blocker
+        panel.calendar.refresh()
+        panel.summary.refresh()
+        self.refresh_deadline_indicators()
+
+    def show_file_rename(self, capture_selection=True) -> None:
+        if self._recording or self._macro_playing or is_app_excluded(foreground_application(), self.excluded_apps):
+            return
+        paths, error = [], ""
+        if capture_selection:
+            try:
+                paths = explorer_selection()
+            except Exception:
+                error = "탐색기 선택을 읽지 못했습니다. 파일을 창으로 끌어다 놓으세요."
+        if self.file_rename_window is None:
+            try:
+                engine = RenameEngine(user_storage_root() / "rename_history" / "history.sqlite3")
+                self.file_rename_window = FileRenameWindow(self, engine=engine)
+            except Exception as exc:
+                self.file_rename_window = FileRenameWindow(self)
+                error = "실행 기록을 열지 못해 미리보기만 제공합니다: " + str(exc)
+        if paths:
+            self.file_rename_window.add_paths(paths)
+        if error:
+            self.file_rename_window.status.setText(error)
+        self.file_rename_window.show()
+        self.file_rename_window.raise_()
+        self.file_rename_window.activateWindow()
+
     def show_shortcut_overlay(self) -> bool:
         current_app = foreground_application()
         return self.shortcut_overlay.open_overlay(
@@ -920,6 +978,10 @@ class MainWindow(QMainWindow):
         schedule_postit_action = tray_menu.addAction("일정 포스트잇")
         schedule_postit_action.triggered.connect(self.toggle_schedule_postit)
         settings_action = tray_menu.addAction("설정")
+        rename_action = tray_menu.addAction("파일 이름 일괄 변경")
+        rename_action.triggered.connect(lambda: self.show_file_rename(False))
+        ocr_action = tray_menu.addAction("화면 글자 따기")
+        ocr_action.triggered.connect(self.show_screen_ocr)
         settings_action.triggered.connect(self.show_settings)
         restore_hidden_action = tray_menu.addAction("숨긴 창 모두 복원")
         restore_hidden_action.triggered.connect(self.restore_all_hidden_windows)
@@ -1797,6 +1859,8 @@ class MainWindow(QMainWindow):
                 QUICK_SCHEDULE_HOTKEY_SETTING: self.quick_schedule_hotkey,
                 WINDOW_PIN_HOTKEY_SETTING: self.window_pin_hotkey,
                 SHORTCUT_OVERLAY_HOTKEY_SETTING: self.shortcut_overlay_hotkey,
+                "file_rename_hotkey": self.file_rename_hotkey,
+                "screen_ocr_hotkey": self.screen_ocr_hotkey,
             },
             startup_mode=self.startup_mode,
             data_dir=self.store.data_dir,
@@ -1876,6 +1940,10 @@ class MainWindow(QMainWindow):
         values[QUICK_SCHEDULE_HOTKEY_SETTING] = self.quick_schedule_hotkey
         values[WINDOW_PIN_HOTKEY_SETTING] = self.window_pin_hotkey
         values[SHORTCUT_OVERLAY_HOTKEY_SETTING] = self.shortcut_overlay_hotkey
+        self.file_rename_hotkey = values.get("file_rename_hotkey", self.file_rename_hotkey)
+        values["file_rename_hotkey"] = self.file_rename_hotkey
+        self.screen_ocr_hotkey = values.get("screen_ocr_hotkey", self.screen_ocr_hotkey)
+        values["screen_ocr_hotkey"] = self.screen_ocr_hotkey
         self.startup_mode = values["startup_mode"]
         for key in (
             EXIT_HOTKEY_SETTING,
@@ -1890,6 +1958,8 @@ class MainWindow(QMainWindow):
             QUICK_SCHEDULE_HOTKEY_SETTING,
             WINDOW_PIN_HOTKEY_SETTING,
             SHORTCUT_OVERLAY_HOTKEY_SETTING,
+            "file_rename_hotkey",
+            "screen_ocr_hotkey",
         ):
             self.store.set_setting(key, values[key])
         self.store.set_setting(STARTUP_MODE_SETTING, self.startup_mode)
@@ -2779,6 +2849,8 @@ class MainWindow(QMainWindow):
             self.quick_schedule_hotkey: "빠른 일정",
             self.window_pin_hotkey: "창 고정/해제",
             self.shortcut_overlay_hotkey: "단축키 안내",
+            self.file_rename_hotkey: "파일 이름 일괄 변경",
+            self.screen_ocr_hotkey: "화면 글자 따기",
             self.schedule_postit_hotkey: "일정 포스트잇",
         }
         reserved.pop("", None)
@@ -3364,6 +3436,8 @@ class MainWindow(QMainWindow):
             self.quick_schedule_hotkey,
             self.window_pin_hotkey,
             self.shortcut_overlay_hotkey,
+            self.file_rename_hotkey,
+            self.screen_ocr_hotkey,
             self.schedule_postit_hotkey,
         }
         reserved.discard("")
@@ -3405,6 +3479,8 @@ class MainWindow(QMainWindow):
             self.quick_schedule_hotkey,
             self.window_pin_hotkey,
             self.shortcut_overlay_hotkey,
+            self.file_rename_hotkey,
+            self.screen_ocr_hotkey,
             self.schedule_postit_hotkey,
         }
         controls.discard("")
@@ -3558,6 +3634,8 @@ class MainWindow(QMainWindow):
             (QUICK_SCHEDULE_HOTKEY_ID, self.quick_schedule_hotkey, self.show_quick_schedule, "빠른 일정"),
             (WINDOW_PIN_HOTKEY_ID, self.window_pin_hotkey, self.toggle_foreground_window_pin, "창 고정/해제"),
             (SHORTCUT_OVERLAY_HOTKEY_ID, self.shortcut_overlay_hotkey, self.show_shortcut_overlay, "단축키 안내"),
+            (FILE_RENAME_HOTKEY_ID, self.file_rename_hotkey, self.show_file_rename, "파일 이름 일괄 변경"),
+            (SCREEN_OCR_HOTKEY_ID, self.screen_ocr_hotkey, self.show_screen_ocr, "화면 글자 따기"),
             (SCHEDULE_POSTIT_HOTKEY_ID, self.schedule_postit_hotkey, self.toggle_schedule_postit, "일정 포스트잇"),
         )
         control_registered = 0
@@ -3586,6 +3664,8 @@ class MainWindow(QMainWindow):
                 self.quick_schedule_hotkey,
                 self.window_pin_hotkey,
                 self.shortcut_overlay_hotkey,
+                self.file_rename_hotkey,
+                self.screen_ocr_hotkey,
                 self.schedule_postit_hotkey,
             }:
                 failed.append(f"{row['name']} (프로그램 제어 단축키와 충돌)")
@@ -3813,6 +3893,7 @@ class MainWindow(QMainWindow):
             "전체 복원",
             f"복원 대상: {preview}\n\n"
             "현재 단축키 작업·메모·일정·알림·설정을 교체합니다.\n"
+            "외부 AI 설정이 포함된 복원은 차단 상태로 적용됩니다. 필요하면 설정에서 다시 허용하세요.\n"
             "복원 직전 현재 상태는 안전 백업으로 자동 저장됩니다. 복원할까요?",
         ) != QMessageBox.StandardButton.Yes:
             return
@@ -3914,6 +3995,8 @@ class MainWindow(QMainWindow):
         self._set_explorer_double_click_enabled(False, persist=False)
         self._set_explorer_middle_click_enabled(False, persist=False)
         self.window_pin.shutdown()
+        if self.screen_ocr is not None:
+            self.screen_ocr.shutdown()
         QApplication.instance().removeEventFilter(self)
         self.hotkeys.unregister_all()
         # 갈고리를 건 채로 나가면 다음에 켤 때까지 키가 새어 나간다.

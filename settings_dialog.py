@@ -2,6 +2,7 @@
 
 import tempfile
 from pathlib import Path
+from alert_notes.external_ai_policy import ExternalAIPolicy
 
 from PyQt6.QtCore import QUrl, Qt
 from PyQt6.QtGui import QDesktopServices, QGuiApplication
@@ -26,6 +27,7 @@ from PyQt6.QtWidgets import (
 
 from hotkey_builder import HotkeyBuilder
 from hotkey_parser import parse_hotkey
+from screen_ocr import WindowsOcrBackend
 from ui_polish import polish_button
 from storage_config import is_system_temporary_path
 from alert_notes.value_input_guard import install_value_input_guard
@@ -48,6 +50,8 @@ HOTKEY_FIELDS = (
     ("quick_schedule_hotkey", "빠른 일정"),
     ("window_pin_hotkey", "창 고정/해제"),
     ("shortcut_overlay_hotkey", "단축키 안내"),
+    ("file_rename_hotkey", "파일 이름 일괄 변경"),
+    ("screen_ocr_hotkey", "화면 글자 따기"),
 )
 # key, label, help text, default.  Kept here so the dialog and the window agree.
 DEADLINE_OPTIONS = (
@@ -90,6 +94,8 @@ HOTKEY_DEFAULTS = {
     "quick_schedule_hotkey": "Ctrl+Alt+A",
     "window_pin_hotkey": "Ctrl+Alt+T",
     "shortcut_overlay_hotkey": "Ctrl+Alt+H",
+    "file_rename_hotkey": "",
+    "screen_ocr_hotkey": "Ctrl+Alt+O",
 }
 
 
@@ -112,8 +118,13 @@ class SettingsDialog(QDialog):
         deadline_options: dict | None = None,
         schedule_postit_options: dict | None = None,
         parent=None,
+        external_ai_store=None,
     ):
         super().__init__(parent)
+        self.external_ai_policy = ExternalAIPolicy(
+            external_ai_store if external_ai_store is not None else getattr(parent, "note_store", None)
+        )
+        self.accepted.connect(self._save_external_ai_policy)
         self.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
         self._action_hotkeys = action_hotkeys or set()
         self._original_hotkeys = {
@@ -175,6 +186,8 @@ class SettingsDialog(QDialog):
         self.hotkey_reset_buttons: dict[str, QPushButton] = {}
         for key, label in HOTKEY_FIELDS:
             builder = HotkeyBuilder()
+            if key == "file_rename_hotkey":
+                builder.setAllowEmpty(True)
             builder.setText(hotkeys.get(key, HOTKEY_DEFAULTS[key]))
             builder.setAccessibleName(label)
             # 열 줄이 세로로 늘어선 칸이라 한 줄이 낮아지는 만큼이 그대로
@@ -220,6 +233,11 @@ class SettingsDialog(QDialog):
         self.hotkey_grid.setColumnStretch(0, 1)
         self.hotkey_grid.setColumnStretch(1, 1)
         hotkey_layout.addLayout(self.hotkey_grid)
+        _ocr_ready, ocr_message = WindowsOcrBackend().availability()
+        self.ocr_status = QLabel(ocr_message)
+        self.ocr_status.setWordWrap(True)
+        self.ocr_status.setObjectName("mutedLabel")
+        hotkey_layout.addWidget(self.ocr_status)
         # 칸이 옆 칸 높이에 맞춰 늘어나면 남는 자리를 머리글이 나눠 가져
         # ‘단축키’ 글자 둘레가 통째로 비었다.  남는 자리는 아래로 보낸다.
         hotkey_layout.addStretch()
@@ -443,6 +461,23 @@ class SettingsDialog(QDialog):
         self.settings_tabs.addTab(self.schedule_page, "일정·D-Day")
         self.settings_tabs.addTab(self.program_page, "프로그램")
         self.settings_tabs.addTab(self.data_page, "데이터")
+        ai_card, ai_layout = _card("외부 AI 연결")
+        self.external_ai_combo = QComboBox()
+        self.external_ai_combo.setAccessibleName("외부 AI 연결 허용 여부")
+        self.external_ai_combo.addItem("차단 — 로컬 기능만 사용", False)
+        self.external_ai_combo.addItem("허용 — 연결 기능 추가 후 사용 가능", True)
+        self.external_ai_combo.setCurrentIndex(1 if self.external_ai_policy.allowed else 0)
+        ai_layout.addWidget(self.external_ai_combo)
+        ai_help = QLabel(
+            "기본값은 차단입니다. 메모 정리·날짜 계산·저장·PC 알림은 외부 AI 없이 사용할 수 있습니다.\n\n"
+            "현재 버전은 실제 AI 연결 기능을 제공하지 않습니다. 허용을 선택해도 메모를 전송하지 않습니다.\n\n"
+            "향후 AI 연결을 추가하면 사용자가 AI 정리를 요청한 메모만 전송하도록 적용할 설정입니다. "
+            "캘린더 동기화 등 다른 서비스의 연결 설정과는 별개입니다."
+        )
+        ai_help.setWordWrap(True)
+        ai_layout.addWidget(ai_help)
+        self.external_ai_page = _settings_page(ai_card)
+        self.settings_tabs.addTab(self.external_ai_page, "외부 AI")
         shell.addWidget(self.settings_tabs, 1)
 
         buttons = QDialogButtonBox(
@@ -469,12 +504,16 @@ class SettingsDialog(QDialog):
         self.resize(dialog_width, min(max(dialog_height, self.sizeHint().height()), max(dialog_height, ceiling)))
         self._refresh_hotkey_conflicts()
 
+    def _save_external_ai_policy(self) -> None:
+        self.external_ai_policy.save(bool(self.external_ai_combo.currentData()))
+
     def values(self) -> dict:
         values = dict(self._accepted_hotkey_values or {
-            key: parse_hotkey(builder.text()).text
+            key: (_optional_hotkey_text(builder) if key == "file_rename_hotkey" else parse_hotkey(builder.text()).text)
             for key, builder in self.hotkey_builders.items()
         })
         values["startup_mode"] = str(self.startup_combo.currentData())
+        values["external_ai_allowed"] = bool(self.external_ai_combo.currentData())
         values["data_dir"] = self.data_dir
         values["toma_pet_alert_enabled"] = self.pet_alert_check.isChecked()
         values["toma_pet_persistent_enabled"] = self.pet_persistent_check.isChecked()
@@ -621,17 +660,18 @@ class SettingsDialog(QDialog):
         rejected: list[str] = []
         for key, _label in HOTKEY_FIELDS:
             try:
-                hotkey = parse_hotkey(self.hotkey_builders[key].text()).text
+                hotkey = (_optional_hotkey_text(self.hotkey_builders[key]) if key == "file_rename_hotkey"
+                          else parse_hotkey(self.hotkey_builders[key].text()).text)
             except Exception as exc:
                 rejected.append(f"{labels[key]}: {exc}")
-                hotkey = parse_hotkey(self._original_hotkeys[key]).text
+                hotkey = parse_hotkey(self._original_hotkeys[key]).text if self._original_hotkeys[key] else ""
             if hotkey and (hotkey in seen or hotkey in self._action_hotkeys):
                 reason = (
                     f"{labels[seen[hotkey]]}와 중복"
                     if hotkey in seen else "저장된 작업 단축키와 중복"
                 )
                 rejected.append(f"{labels[key]}: {reason}")
-                hotkey = parse_hotkey(self._original_hotkeys[key]).text
+                hotkey = parse_hotkey(self._original_hotkeys[key]).text if self._original_hotkeys[key] else ""
             if hotkey and (hotkey in seen or hotkey in self._action_hotkeys):
                 QMessageBox.warning(
                     self, "단축키 중복",

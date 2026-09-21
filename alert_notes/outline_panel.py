@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from html import escape
 
-from PyQt6.QtCore import QMimeData, QTimer, Qt
+from PyQt6.QtCore import QMimeData, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QTextCursor
 from PyQt6.QtWidgets import QApplication, QHBoxLayout, QLabel, QPushButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget
 
@@ -13,6 +13,8 @@ from .outline_model import outline_entries, resolve_block
 
 
 class OutlinePanel(QWidget):
+    close_requested = pyqtSignal()
+
     def __init__(self, editor, parent=None):
         super().__init__(parent)
         self.editor = editor
@@ -29,6 +31,12 @@ class OutlinePanel(QWidget):
         self.copy_button.setAccessibleName("선택한 블록 링크 복사")
         self.copy_button.clicked.connect(self.copy_selected_link)
         header.addWidget(self.copy_button)
+        self.close_button = QPushButton("›")
+        self.close_button.setFixedSize(26, 26)
+        self.close_button.setAccessibleName("메모 목차 접기")
+        self.close_button.setToolTip("목차 접기")
+        self.close_button.clicked.connect(self.close_requested)
+        header.addWidget(self.close_button)
         layout.addLayout(header)
         self.tree = QTreeWidget(self)
         self.tree.setObjectName("memoOutlineTree")

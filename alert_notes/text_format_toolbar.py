@@ -279,7 +279,8 @@ class TextFormatToolbar(QWidget):
         for button in (*self.style_buttons.values(), self.bullet_button, self.checklist_button,
                        self.insert_button, self.image_button, self.default_button,
                        self.preset_settings_button):
-            button.setFixedSize(target)
+            if button.objectName() != "titleFoldButton":
+                button.setFixedSize(target)
         self.font_box.setFixedWidth(px(self.COMPACT_FONT_BOX_WIDTH))
         self._base_font_width = px(self.COMPACT_FONT_BOX_WIDTH)
         self.size_box.setFixedWidth(px(self.SIZE_BOX_WIDTH))
@@ -328,7 +329,8 @@ class TextFormatToolbar(QWidget):
         self.image_button.setFixedSize(target)
         for button in (*self.style_buttons.values(), self.bullet_button,
                        self.checklist_button, self.insert_button):
-            button.setFixedSize(target)
+            if button.objectName() != "titleFoldButton":
+                button.setFixedSize(target)
     def move_presets_to(self, target_layout: QHBoxLayout) -> None:
         """Place visible presets below the editor while preserving saved slot data."""
         self.second_layout.removeWidget(self.preset_strip)

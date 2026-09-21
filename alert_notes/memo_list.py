@@ -16,6 +16,7 @@ from .title_symbols import (
     leading_title_symbol, title_prefix_key, title_symbol_key,
 )
 from select_all_header import SelectAllHeader
+from .title_filter_controls import TitleFilterControls
 
 NOTE_ID_ROLE = Qt.ItemDataRole.UserRole
 SORT_KEY_ROLE = Qt.ItemDataRole.UserRole + 1
@@ -407,7 +408,7 @@ class MemoTree(QTreeWidget):
         return parent_id, index + (1 if where == below else 0)
 
 
-class MemoListPanel(QWidget):
+class MemoListPanel(TitleFilterControls, QWidget):
     note_selected = pyqtSignal(int)
     recent_chosen = pyqtSignal(int)
     new_requested = pyqtSignal()
@@ -421,6 +422,7 @@ class MemoListPanel(QWidget):
     clone_undo_requested = pyqtSignal()
     clone_redo_requested = pyqtSignal()
     filters_changed = pyqtSignal()
+    category_settings_requested = pyqtSignal()
     category_assign_requested = pyqtSignal(list, object)
 
     # 번호 carried no information the row order did not already show, and 표시
@@ -456,7 +458,6 @@ class MemoListPanel(QWidget):
     FILTER_SETTING = "memo_category_filter"
     VIEW_SETTING = "memo_category_view"
     SORT_SETTING = "memo_category_sort"
-    FILTER_CONTROLS_INLINE_WIDTH = 480
 
     def __init__(self, store=None, parent=None):
         super().__init__(parent)
@@ -523,6 +524,17 @@ class MemoListPanel(QWidget):
         self.title_symbol_button.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         self.title_symbol_button.clicked.connect(self._show_title_symbol_menu)
         search_row.addWidget(self.title_symbol_button)
+        self.title_prefix_button = QPushButton("머리말")
+        self.title_prefix_button.setObjectName("memoTitlePrefixFilter")
+        self.title_prefix_button.setCheckable(True)
+        self.title_prefix_button.setAccessibleName("제목 머리말 필터")
+        self.title_prefix_button.setFixedHeight(self.BUTTON_HEIGHT)
+        self.title_prefix_button.setMinimumWidth(0)
+        self.title_prefix_button.setMaximumWidth(120)
+        self.title_prefix_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.title_prefix_button.clicked.connect(self._show_title_prefix_menu)
+        search_row.addWidget(self.title_prefix_button)
+        self.search.setMinimumWidth(120)
         layout.addWidget(search_host)
 
         self.filter_host = QWidget()
@@ -537,6 +549,15 @@ class MemoListPanel(QWidget):
         self.category_chip_layout.setContentsMargins(0, 0, 0, 0)
         self.category_chip_layout.setSpacing(4)
         filter_row.addWidget(self.category_chip_host, 1)
+        self.reset_filters_button = QPushButton("↺ 필터 초기화")
+        self.reset_filters_button.setObjectName("memoResetFiltersButton")
+        self.reset_filters_button.setAccessibleName("필터 초기화")
+        self.reset_filters_button.setToolTip("카테고리·검색·기호·머리말 필터를 모두 풉니다")
+        self.reset_filters_button.setFixedHeight(self.BUTTON_HEIGHT)
+        self.reset_filters_button.clicked.connect(self.reset_all_filters)
+        self.reset_filters_button.hide()
+        filter_row.addWidget(self.reset_filters_button)
+        self.search.textChanged.connect(lambda _text: self._layout_category_filters())
         self.more_categories_button = QPushButton("더보기")
         self.more_categories_button.setObjectName("memoMoreCategoriesButton")
         self.more_categories_button.setCheckable(True)
@@ -545,10 +566,10 @@ class MemoListPanel(QWidget):
         self.more_categories_button.clicked.connect(self._show_more_categories)
         filter_row.addWidget(self.more_categories_button)
         layout.addWidget(self.filter_host)
-        self.view_combo = NoWheelComboBox()
+        self.view_combo = NoWheelComboBox(self)
         self.view_combo.addItem("보기: 기본", "default")
         self.view_combo.addItem("보기: 카테고리별", "category")
-        self.sort_combo = NoWheelComboBox()
+        self.sort_combo = NoWheelComboBox(self)
         for label, value in (
             ("정렬: 기본", "default"), ("수정일 최근순", "updated_desc"),
             ("수정일 오래된순", "updated_asc"), ("제목 가나다순", "title_asc"),
@@ -556,13 +577,8 @@ class MemoListPanel(QWidget):
         ):
             self.sort_combo.addItem(label, value)
         for combo in (self.view_combo, self.sort_combo):
-            combo.setFixedHeight(self.BUTTON_HEIGHT)
-            minimum = max(90, combo.sizeHint().width())
-            combo.setProperty("inline_minimum_width", minimum)
-            combo.setMinimumWidth(minimum)
-            combo.setMaximumWidth(max(138, minimum))
-            combo.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-            search_row.addWidget(combo)
+            combo.hide()  # Settings models only; all interaction lives in More.
+        self._controls_in_more = True
         self.recent_toggle = QPushButton("최근 ▸")
         self.recent_toggle.setObjectName("compactUtilityButton")
         self.recent_toggle.setFixedHeight(self.BUTTON_HEIGHT)
@@ -570,7 +586,7 @@ class MemoListPanel(QWidget):
         self.recent_toggle.setAccessibleName("최근 본 메모 펼치기")
         self.recent_toggle.clicked.connect(self._toggle_recent)
         self.recent_toggle.hide()
-        filter_row.insertWidget(filter_row.count() - 1, self.recent_toggle)
+        filter_row.insertWidget(1, self.recent_toggle)
         self._restore_combo(self.view_combo, self.store.setting(self.VIEW_SETTING, "default") if self.store else "default")
         self._restore_combo(self.sort_combo, self.store.setting(self.SORT_SETTING, "default") if self.store else "default")
         self.view_combo.currentIndexChanged.connect(self._filter_controls_changed)
@@ -700,15 +716,10 @@ class MemoListPanel(QWidget):
         layout.addWidget(self.actions_host)
         self.export_button.clicked.connect(self.export_requested.emit)
         self.delete_button.clicked.connect(self.delete_requested.emit)
+        self._update_title_symbol_button()
+        self._update_title_prefix_button()
 
     # ------------------------------------------------------------- 크기 --
-    def resize(self, *args) -> None:
-        """Switch responsive controls before Qt applies the old layout floor."""
-        if hasattr(self, "view_combo") and args:
-            width = args[0].width() if len(args) == 1 else int(args[0])
-            self._sync_responsive_filter_controls(width)
-        super().resize(*args)
-
     def height_for_rows(self, rows: int) -> int:
         """Height this panel needs before the table can show `rows` entries."""
         header = max(22, self.table_header.height())
@@ -752,13 +763,11 @@ class MemoListPanel(QWidget):
         self._resize_table_columns()
 
     def _sync_responsive_filter_controls(self, width: int | None = None) -> None:
-        compact = int(self.width() if width is None else width) < self.FILTER_CONTROLS_INLINE_WIDTH
-        self._controls_in_more = compact
+        # Keep the existing resize hook, but never put these back in the row.
         for combo in (self.view_combo, self.sort_combo):
-            combo.setVisible(not compact)
-            combo.setMinimumWidth(
-                0 if compact else int(combo.property("inline_minimum_width") or 90)
-            )
+            combo.hide()
+        if hasattr(self, "title_prefix_button"):
+            self._update_title_prefix_button()
 
     def _saved_category_filter(self):
         if self.store is None:
@@ -812,7 +821,15 @@ class MemoListPanel(QWidget):
     def _layout_category_filters(self) -> None:
         if not hasattr(self, "category_filter_buttons"):
             return
-        available = max(100, self.category_chip_host.width())
+        filtered = self._has_any_filter()
+        scale = self._filter_scale()
+        compact_reset = self.width() <= round(300 * scale)
+        self.reset_filters_button.setText("↺" if compact_reset else "↺ 필터 초기화")
+        self.reset_filters_button.setFixedWidth(round(28 * scale) if compact_reset else self.reset_filters_button.sizeHint().width())
+        self.reset_filters_button.setVisible(filtered)
+        available = max(0, self.filter_host.width() - self.more_categories_button.sizeHint().width() - 4
+                        - (self.reset_filters_button.width() + 4 if filtered else 0)
+                        - (self.recent_toggle.sizeHint().width() + 4 if not self.recent_toggle.isHidden() else 0))
         used = 0
         hidden_buttons = []
         for button in self.category_filter_buttons:
@@ -833,49 +850,60 @@ class MemoListPanel(QWidget):
             selected_hidden.text() if selected_hidden is not None else "더보기"
         )
         self.more_categories_button.setIcon(
-            selected_hidden.icon() if selected_hidden is not None else QIcon()
+            selected_hidden.icon() if selected_hidden is not None else
+            color_dot_icon("#3b82f6", 8) if self._custom_view_or_sort() else QIcon()
         )
         self.more_categories_button.setChecked(selected_hidden is not None)
-        self.more_categories_button.setVisible(
-            bool(hidden_buttons) or bool(getattr(self, "_controls_in_more", False))
+        self.more_categories_button.setToolTip(
+            selected_hidden.text() if selected_hidden is not None else
+            "보기·정렬이 기본값이 아닙니다" if self._custom_view_or_sort() else
+            "카테고리·보기·정렬 및 카테고리 설정"
         )
+        self.more_categories_button.setVisible(True)
 
-    def _show_more_categories(self) -> None:
+    def _custom_view_or_sort(self) -> bool:
+        return self.view_combo.currentData() != "default" or self.sort_combo.currentData() != "default"
+
+    def _build_more_categories_menu(self) -> QMenu:
+        old = getattr(self, "more_categories_menu", None)
+        if old is not None:
+            old.deleteLater()
         menu = QMenu(self.more_categories_button)
-        category_actions = 0
-        for button in self.category_filter_buttons:
-            if button.isVisible():
-                continue
-            action = menu.addAction(button.text())
+        hidden = [button for button in self.category_filter_buttons if button.isHidden()]
+        if hidden:
+            menu.addAction("카테고리").setEnabled(False)
+        for button in hidden:
+            action = menu.addAction(button.text().replace("&", "&&"))
+            action.setData(button.property("category_id"))
             action.setIcon(button.icon())
             action.setCheckable(True)
             action.setChecked(button.property("category_id") == self.category_filter_id)
             action.triggered.connect(
                 lambda _checked=False, value=button.property("category_id"): self._set_category_filter(value)
             )
-            category_actions += 1
-        if getattr(self, "_controls_in_more", False):
-            if category_actions:
-                menu.addSeparator()
-            view_menu = menu.addMenu("보기")
-            for index in range(self.view_combo.count()):
-                action = view_menu.addAction(self.view_combo.itemText(index).removeprefix("보기: "))
+        if hidden:
+            menu.addSeparator()
+        for label, combo in (("보기", self.view_combo), ("정렬", self.sort_combo)):
+            submenu = menu.addMenu(label)
+            for index in range(combo.count()):
+                action = submenu.addAction(combo.itemText(index).removeprefix(f"{label}: "))
+                action.setData(combo.itemData(index))
                 action.setCheckable(True)
-                action.setChecked(index == self.view_combo.currentIndex())
+                action.setChecked(index == combo.currentIndex())
                 action.triggered.connect(
-                    lambda _checked=False, value=index: self.view_combo.setCurrentIndex(value)
+                    lambda _checked=False, value=index, model=combo: model.setCurrentIndex(value)
                 )
-            sort_menu = menu.addMenu("정렬")
-            for index in range(self.sort_combo.count()):
-                action = sort_menu.addAction(self.sort_combo.itemText(index).removeprefix("정렬: "))
-                action.setCheckable(True)
-                action.setChecked(index == self.sort_combo.currentIndex())
-                action.triggered.connect(
-                    lambda _checked=False, value=index: self.sort_combo.setCurrentIndex(value)
-                )
+        menu.addSeparator()
+        menu.addAction("⚙ 카테고리 설정…").triggered.connect(self.category_settings_requested.emit)
         self.more_categories_menu = menu
-        menu.exec(self.more_categories_button.mapToGlobal(self.more_categories_button.rect().bottomLeft()))
-        self._layout_category_filters()
+        return menu
+
+    def _show_more_categories(self) -> None:
+        try:
+            self._build_more_categories_menu().exec(
+                self.more_categories_button.mapToGlobal(self.more_categories_button.rect().bottomLeft()))
+        finally:
+            self._layout_category_filters()
 
     def _set_category_filter(self, category_id) -> None:
         self.category_filter_id = (
@@ -891,41 +919,18 @@ class MemoListPanel(QWidget):
         self.filters_changed.emit()
 
     def _show_title_symbol_menu(self) -> None:
-        menu = QMenu(self.title_symbol_button)
-        all_action = menu.addAction("전체")
-        all_action.setCheckable(True)
-        all_action.setChecked(self.title_symbol_filter is None)
-        all_action.triggered.connect(lambda: self._set_title_symbol_filter(None))
-        values = sorted(
-            self._title_symbol_counts, key=lambda value: (-value.count, value.key)
-        )
-        if self.title_symbol_filter and all(
-            value.key != self.title_symbol_filter for value in values
-        ):
-            values.insert(0, TitleValueCount(self.title_symbol_filter, self.title_symbol_filter, 0, ""))
-        if values:
-            menu.addSeparator()
-            for value in values:
-                action = menu.addAction(f"{value.display}  {value.count}")
-                action.setCheckable(True)
-                action.setChecked(value.key == self.title_symbol_filter)
-                action.triggered.connect(
-                    lambda _checked=False, key=value.key: self._set_title_symbol_filter(key)
-                )
-        else:
-            empty = menu.addAction("제목 앞에 기호가 없습니다")
-            empty.setEnabled(False)
-        self.title_symbol_menu = menu
-        menu.exec(self.title_symbol_button.mapToGlobal(self.title_symbol_button.rect().bottomLeft()))
-        self._update_title_symbol_button()
+        self._show_title_menu("symbol")
 
     def _set_title_symbol_filter(self, symbol: str | None) -> None:
         self.title_symbol_filter = title_symbol_key(symbol) if symbol else None
         self._update_title_symbol_button()
+        self._layout_category_filters()
         self.filters_changed.emit()
 
     def _set_title_prefix_filter(self, key: str | None) -> None:
         self.title_prefix_filter = title_prefix_key(key) if key else None
+        self._update_title_prefix_button()
+        self._layout_category_filters()
         self.filters_changed.emit()
 
     def clear_title_filters(self) -> None:
@@ -934,38 +939,18 @@ class MemoListPanel(QWidget):
         self.title_symbol_filter = None
         self.title_prefix_filter = None
         self._update_title_symbol_button()
+        self._update_title_prefix_button()
+        self._layout_category_filters()
         self.filters_changed.emit()
 
     def _update_title_symbol_button(self) -> None:
-        if self.title_symbol_filter:
-            value = next(
-                (entry for entry in self._title_symbol_counts if entry.key == self.title_symbol_filter),
-                None,
-            )
-            count = value.count if value is not None else 0
-            display = value.display if value is not None else self.title_symbol_filter
-            self.title_symbol_button.setText(f"{display} {count} ▾")
-            self.title_symbol_button.setChecked(True)
-            self.title_symbol_button.setToolTip(
-                f"제목이 {display}(으)로 시작하는 메모 {count}개를 표시합니다."
-            )
-            return
-        self.title_symbol_button.setChecked(False)
-        if self._title_symbol_counts:
-            representative = min(
-                self._title_symbol_counts, key=lambda value: (-value.count, value.key)
-            )
-            self.title_symbol_button.setText(
-                f"{representative.display} {representative.count} ▾"
-            )
-        else:
-            self.title_symbol_button.setText("기호 ▾")
-        self.title_symbol_button.setToolTip("제목 맨 앞의 이모지·기호로 메모를 모아 봅니다.")
+        self._update_title_button("symbol")
 
     def _filter_controls_changed(self, *_args) -> None:
         if self.store:
             self.store.set_setting(self.VIEW_SETTING, str(self.view_combo.currentData()))
             self.store.set_setting(self.SORT_SETTING, str(self.sort_combo.currentData()))
+        self._layout_category_filters()
         self.filters_changed.emit()
 
     def _show_bulk_category_menu(self) -> None:
@@ -1268,6 +1253,8 @@ class MemoListPanel(QWidget):
             prefix_rows, leading_title_prefix, title_prefix_key
         )
         self._update_title_symbol_button()
+        self._update_title_prefix_button()
+        self._layout_category_filters()
         rows = [
             row for row in rows
             if (self.title_symbol_filter is None

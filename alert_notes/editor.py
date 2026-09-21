@@ -32,6 +32,7 @@ from .rich_text import plain_text_from_content
 from .sqlite_store import DATETIME_FMT
 from .find_bar import MemoFindBar
 from .outline_panel import OutlinePanel
+from .editor_more_menu import EditorCommand, EditorMoreMenu, PinnedCommandBar
 from .note_property_bar import PropertyChipBar, PropertyPanel
 from .text_format_toolbar import TextFormatToolbar
 from .category_dialog import CategoryManagerDialog
@@ -280,10 +281,11 @@ class MemoEditor(QWidget):
         self.fold_all_button.setCheckable(True)
         title_row.addWidget(self.fold_current_button)
         title_row.addWidget(self.fold_all_button)
-        self.outline_button = QPushButton("목차")
+        self.outline_button = QPushButton("목차 ›")
         self.outline_button.setObjectName("compactUtilityButton")
         self.outline_button.setAccessibleName("메모 목차 열기")
         self.outline_button.setCheckable(True)
+        self.outline_button.setChecked(False)
         self.outline_button.setToolTip("제목·페이지·토글 목차를 엽니다")
         title_row.addWidget(self.outline_button)
         self.summary_button = QPushButton("요약 ›")
@@ -317,6 +319,7 @@ class MemoEditor(QWidget):
         body_layout.addWidget(self.outline_panel)
         self.outline_panel.hide()
         self.outline_button.toggled.connect(self._set_outline_visible)
+        self.outline_panel.close_requested.connect(lambda: self.outline_button.setChecked(False))
         self.content_edit.textChanged.connect(self.outline_panel.queue_refresh)
         self.content_edit.cursorPositionChanged.connect(self.outline_panel.sync_current)
         root.addWidget(self.body_host, 1)
@@ -610,6 +613,8 @@ class MemoEditor(QWidget):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
+        if hasattr(self, "more_menu"):
+            self.more_menu.close()
         if hasattr(self, "actions_layout") and self.layout_mode == "classic":
             self._apply_responsive_layout(event.size().width())
             self._apply_bottom_layout(event.size().width())
@@ -620,13 +625,20 @@ class MemoEditor(QWidget):
             self._set_outline_visible()
 
     def _set_outline_visible(self, _checked: bool = False) -> None:
-        roomy = self.width() >= 650 and self.content_edit.width() >= 430
+        # Use the host width, not the already shrunken text editor width.
+        # Otherwise opening the outline makes the next resize close it again.
+        roomy = self.body_host.width() >= 650
         self.outline_button.setEnabled(roomy)
         if not roomy and self.outline_button.isChecked():
             self.outline_button.setChecked(False)
         show = roomy and self.outline_button.isChecked()
         self.outline_panel.setVisible(show)
-        self.outline_button.setAccessibleName("메모 목차 닫기" if show else "메모 목차 열기")
+        self.outline_button.setText("목차 ‹" if show else "목차 ›")
+        self.outline_button.setAccessibleName("메모 목차 접기" if show else "메모 목차 펼치기")
+        self.outline_button.setToolTip(
+            "목차를 접어 편집 공간을 넓힙니다" if show else
+            "목차를 펼칩니다" if roomy else "목차를 펼치려면 메모 목록을 접거나 창을 넓혀 주세요"
+        )
         if show:
             self.outline_panel.refresh()
 
@@ -1072,7 +1084,8 @@ class MemoEditor(QWidget):
                 self.note_open_requested.emit(note_id)
             )
         self.backlink_menu = menu
-        menu.exec(self.backlink_button.mapToGlobal(self.backlink_button.rect().bottomLeft()))
+        anchor = self.property_chips.more_button if hasattr(self, "property_chips") else self.backlink_button
+        menu.exec(anchor.mapToGlobal(anchor.rect().bottomLeft()))
 
     def _refresh_relations(self) -> None:
         self.backlink_list.clear()
@@ -1094,7 +1107,7 @@ class MemoEditor(QWidget):
         self.content_edit.set_annotations(annotations)
         backlinks = self.store.memo_data.backlinks_for(str(note["sync_id"]))
         self.backlink_button.setText(f"🔗 {len(backlinks)}")
-        self.backlink_button.setVisible(bool(backlinks))
+        self.backlink_button.setVisible(self.layout_mode != "compact" and bool(backlinks))
         for link in backlinks:
             suffix = f" · 블록 {str(link['target_block_id'])[:8]}" if link["target_block_id"] else ""
             from PyQt6.QtWidgets import QListWidgetItem
@@ -1184,7 +1197,8 @@ class MemoEditor(QWidget):
         redo.setEnabled(bool(self._annotation_redo))
         redo.triggered.connect(self._redo_annotation)
         self.annotations_menu = menu
-        menu.exec(self.annotation_menu_button.mapToGlobal(self.annotation_menu_button.rect().bottomLeft()))
+        anchor = self.property_chips.more_button if hasattr(self, "property_chips") else self.annotation_menu_button
+        menu.exec(anchor.mapToGlobal(anchor.rect().bottomLeft()))
 
     def _edit_annotation(self, annotation_id: int) -> None:
         row = self.store.memo_data.annotation(annotation_id)
@@ -1474,6 +1488,8 @@ class MemoEditor(QWidget):
             return
         self.flush_pending_save()
         self._shutdown = True
+        if hasattr(self, "more_menu"):
+            self.more_menu.close()
         self.deadline_timer.stop()
         self.save_timer.stop()
         self.format_toolbar.shutdown()
@@ -1566,7 +1582,7 @@ class MemoEditor(QWidget):
         self._root.removeWidget(self.format_toolbar)
 
         self.property_chips = PropertyChipBar(self)
-        self.property_chips.page_changed.connect(self._toggle_property_page)
+        self.property_chips.page_changed.connect(self._handle_property_command)
         self._root.insertWidget(self._root.indexOf(self.body_host), self.property_chips)
         # Compatibility alias used by existing shortcuts and usability checks.
         self.format_expand_button = self.property_chips.buttons["format"]
@@ -1628,6 +1644,68 @@ class MemoEditor(QWidget):
             signal.connect(self._refresh_property_chips)
         self.property_chips.set_narrow(self.width() < 760)
         self._refresh_property_chips()
+        self._install_more_menu()
+        # Move the existing insert button; its menu and shortcut handlers survive.
+        self.function_button = self.format_toolbar.insert_button
+        self.function_button.setParent(self.property_chips)
+        self.function_button.setObjectName("titleFoldButton")
+        size = self.TITLE_FOLD_BUTTON_SIZE
+        self.function_button.setFixedSize(size, size)
+        self.function_button.setStyleSheet(
+            f"QPushButton{{padding:0;min-width:{size}px;max-width:{size}px;"
+            f"min-height:{size}px;max-height:{size}px;border:0;border-radius:6px;}}"
+            "QPushButton:hover{background:#e7efff;}"
+            "QPushButton::menu-indicator{image:none;width:0px;}"
+        )
+        self.function_button.setAccessibleName("기능 선택")
+        self.function_button.setToolTip("기능 선택 · 토글, 체크리스트, 표, 페이지 등")
+        self.property_chips.layout().insertWidget(1, self.function_button)
+        self.function_button.show()
+
+    def _handle_property_command(self, name):
+        if name == "other":
+            self.property_chips.buttons["other"].setChecked(False)
+            self.more_menu.open_at(self.property_chips.buttons["other"])
+        else:
+            self._toggle_property_page(name)
+
+    def _install_more_menu(self):
+        has_note = lambda: self.note_id is not None
+        commands = [
+            EditorCommand("clipboard", "가져오기", "클립보드 구조 가져오기", lambda: self.structured_clipboard_requested.emit(self)),
+            EditorCommand("file", "가져오기", "파일 가져오기", lambda: self.structured_files_requested.emit((self, None))),
+            EditorCommand("backup", "보관·복구", "전체 메모 백업", lambda: self.memo_backup_requested.emit(self)),
+            EditorCommand("restore", "보관·복구", "전체 메모 복원", lambda: self.memo_restore_requested.emit(self)),
+            EditorCommand("versions", "기록·재사용", "버전 기록", self._show_versions, has_note),
+            EditorCommand("templates", "기록·재사용", "템플릿 관리", self._manage_templates),
+            EditorCommand("save_template", "기록·재사용", "선택을 템플릿으로 저장", self.content_edit.save_selection_as_template),
+            EditorCommand("backlinks", "연결·주석", "백링크", self._open_backlinks, has_note),
+            EditorCommand("add_annotation", "연결·주석", "주석 추가", self._add_annotation, has_note),
+            EditorCommand("annotations", "연결·주석", "주석 보기", self._show_annotations, has_note),
+            EditorCommand("options", "메모 설정", "포스트잇·색상·저장 설정", lambda: self._toggle_property_page("other")),
+            EditorCommand("shortcuts", "메모 설정", "편집 단축키 설정", self._open_shortcut_settings),
+        ]
+        try:
+            pins = json.loads(self.store.setting("memo_toolbar_pins", "[]"))
+        except (ValueError, TypeError):
+            pins = []
+        if not isinstance(pins, list):
+            pins = []
+        self.more_menu = EditorMoreMenu(self, commands, pins)
+        self.pinned_commands = PinnedCommandBar(commands, self.more_menu.run, self)
+        self._root.insertWidget(self._root.indexOf(self.property_chips) + 1, self.pinned_commands)
+        self.pinned_commands.set_pins(self.more_menu.pins)
+        self.more_menu.pins_changed.connect(self._save_toolbar_pins)
+        self.import_backup_button.hide()
+        self.title_row.removeWidget(self.import_backup_button)
+        # These actions now have named entries in More. Keep widgets/signals for
+        # existing callers, but don't leave a second, duplicate button bank.
+        self.relations_card.hide()
+        self.backlink_button.hide()
+
+    def _save_toolbar_pins(self, pins):
+        self.store.set_setting("memo_toolbar_pins", json.dumps(pins))
+        self.pinned_commands.set_pins(pins)
 
     def _toggle_property_page(self, name: str) -> None:
         if name == "format":
@@ -1665,6 +1743,9 @@ class MemoEditor(QWidget):
     def close_compact_panel(self) -> bool:
         if self.layout_mode != "compact":
             return False
+        if hasattr(self, "more_menu") and self.more_menu.isVisible():
+            self.more_menu.close()
+            return True
         if self.property_panel.close_page():
             self.property_chips.set_active(None)
             return True
@@ -1708,10 +1789,10 @@ class MemoEditor(QWidget):
         count = sum((self.always_top_check.isChecked(), self.postit_check.isChecked(),
                      self.lock_check.isChecked()))
         self.property_chips.set_summary(
-            "other", "⋯", bool(count or self.color != "vanilla" or opacity > 0),
+            "other", "더보기 ▾", bool(count or self.color != "vanilla" or opacity > 0),
         )
         self.property_chips.buttons["other"].setToolTip(
-            f"메모 색상: {color} · 투명 {opacity}% · 나머지 속성 {count}개"
+            f"기능 검색·도구 모음 고정 · 메모 색상: {color} · 투명 {opacity}%"
         )
 
     def show_action_feedback(self, message: str, level: str = "success") -> None:

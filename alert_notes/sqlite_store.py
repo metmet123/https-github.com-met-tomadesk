@@ -373,16 +373,24 @@ class NoteReminderStore(ReminderStoreMixin, ReminderRecurrenceStoreMixin):
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,),
         ).fetchone() is not None
 
-    def create_note(self, title: str | None = None, content: str = "") -> int:
+    def create_note(self, title: str | None = None, content: str = "", *, d_day_at: str = "") -> int:
+        # Optional, silent D-Day is inserted with the note in one transaction.
+        # This avoids an orphan note if the second half of an OCR save fails.
+        due = str(d_day_at or "")
+        if due and (len(due) != 12 or not due.isascii() or not due.isdigit()):
+            raise ValueError("올바른 D-Day 날짜·시간이 필요합니다.")
+        if due:
+            datetime.strptime(due, DATETIME_FMT)
         stamp = self._now_key()
         sync_stamp = utc_now_ms()
-        cursor = self.conn.execute(
-            "INSERT INTO notes(title,content,created_at,updated_at,sync_id,revision,modified_at_utc,origin_device_id) "
-            "VALUES(?,?,?,?,?,1,?,?)",
-            (str(title or "").strip() or self.default_title, content, stamp, stamp,
-             new_sync_id(), sync_stamp, self.device_id),
-        )
-        self.conn.commit()
+        resolved_title = str(title or "").strip() or self.default_title
+        with self.conn:
+            cursor = self.conn.execute(
+                "INSERT INTO notes(title,content,created_at,updated_at,sync_id,revision,modified_at_utc,origin_device_id,d_day_at,d_day_label,d_day_alert) "
+                "VALUES(?,?,?,?,?,1,?,?,?,?,0)",
+                (resolved_title, content, stamp, stamp,
+                 new_sync_id(), sync_stamp, self.device_id, due, resolved_title if due else ""),
+            )
         return int(cursor.lastrowid)
 
     def note(self, note_id: int):

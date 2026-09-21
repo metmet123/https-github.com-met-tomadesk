@@ -498,6 +498,7 @@ QWidget#memoListPanel QComboBox {
 }
 QPushButton#memoCategoryFilterChip:checked,
 QPushButton#memoTitleSymbolFilter:checked,
+QPushButton#memoTitlePrefixFilter:checked,
 QPushButton#memoMoreCategoriesButton:checked {
     background: #dbeafe; border-color: #3b82f6; color: #173b6c;
 }
@@ -698,6 +699,14 @@ def _resolve_tokens(stylesheet: str) -> str:
     return stylesheet
 
 
+BASE_STYLESHEET += """
+QPushButton#memoTitleSymbolFilter[empty="true"], QPushButton#memoTitlePrefixFilter[empty="true"] {
+    border-style: dashed; border-color: #b8c0cc; color: #8a93a3;
+}
+QPushButton#memoResetFiltersButton { color: #64748b; font-size: 12px; }
+QFrame#memoTitleFilterHelp { background: white; border: 1px solid #e2e5ea; border-radius: 10px; }
+QLabel#memoTitleFilterHelpExample { background: #f1f2f5; border-radius: 6px; padding: 6px; }
+"""
 APP_STYLESHEET = _resolve_tokens(BASE_STYLESHEET)
 
 

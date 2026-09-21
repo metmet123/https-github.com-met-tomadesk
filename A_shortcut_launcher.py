@@ -133,4 +133,7 @@ def _open_store_in_fallback() -> Store | None:
 
 
 if __name__ == "__main__":
+    if len(sys.argv) == 3 and sys.argv[1] == "--package-check":
+        from package_check import run_package_check
+        raise SystemExit(run_package_check(Path(sys.argv[2])))
     raise SystemExit(main())

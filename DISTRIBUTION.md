@@ -1,13 +1,21 @@
 # Windows standalone distribution
 
 Run the following command on a development PC with Python and the packages in
-`requirements.txt` installed:
+`requirements-build.txt` installed:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\build_release.ps1 -Clean
+python -m venv .build-venv
+.\.build-venv\Scripts\python.exe -m pip install -r requirements-build.txt
+.\build_release.ps1 -PythonExecutable .\.build-venv\Scripts\python.exe -KeepWorkFiles
 ```
 
-Give users only `release\toma_shortcut_program.exe`. Python is not required on
+Use an isolated environment: obsolete global packages such as the `pathlib`
+backport can prevent PyInstaller from starting. `-Clean` clears only the checked
+build work directory; it does not remove the last working release.
+The spec limits DLL discovery to the selected Python/Qt and Windows directories
+so unrelated tools on PATH cannot contribute incompatible ICU or CRT libraries.
+
+Give users only `release\TomaDesk.exe`. Python is not required on
 their PC.
 
 The temporary `.package-build` folder is removed automatically after a
@@ -50,7 +58,7 @@ for the program window and taskbar icon.
 
 ## Validation before delivery
 
-1. Copy `토마 데스크.exe` to a Korean-named path.
+1. Copy `TomaDesk.exe` to a Korean-named path.
 2. Launch it on a PC without Python.
 3. Add a shortcut, close the app, and reopen it to confirm the saved data.
 4. Confirm `data\hotkeys.db` exists beside the EXE, and that the next day's
@@ -58,4 +66,19 @@ for the program window and taskbar icon.
 5. Change the data folder in Settings, restart, and confirm the copied database
    opens.
 6. Copy the EXE into a folder the account cannot write to and launch it. It must
-   report the `%LOCALAPPDATA%` folder it moved to instead of failing.
+  report the `%LOCALAPPDATA%` folder it moved to instead of failing.
+
+## Isolated package diagnostics
+
+Run `TomaDesk.exe --package-check <new-report-path.json>` to exercise the packaged
+memo organizer, settings persistence, date parsing, SQLite reopen, icon, and
+TomaPet WebP/metadata with synthetic data. It uses an offscreen Qt window and a
+temporary database alongside the report. It does not open the user's database,
+register global hotkeys, run the main window, or contact an AI service. The report
+and two PNGs remain; the temporary database is removed. Existing report files are
+not overwritten. Exit code 0 and `ok: true` indicate success.
+
+This checks the actual bundled runtime; it does not replace physical testing of
+tray notifications, Windows input hooks, and operation on a separate PC without
+Python. Build failures leave the previous `TomaDesk.exe` intact. TomaPet's
+`pet.json` and `spritesheet.webp` are required inputs and bundled explicitly.

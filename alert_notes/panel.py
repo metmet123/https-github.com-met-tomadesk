@@ -33,6 +33,7 @@ from .rich_text import display_plain_text_from_content, plain_text_from_content
 from .standalone_editor import StandaloneMemoEditorWindow
 from .text_format_toolbar import TextFormatToolbar
 from .today_summary import TodaySummaryPanel
+from .memo_organizer_panel import OrganizerPanel
 from .panel_reminder_actions import PanelReminderActionsMixin
 from .memo_archive import (
     export_memo_archive, inspect_memo_archive, restore_memo_archive,
@@ -67,6 +68,7 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         "메모를 선택하거나 새 메모를 만들어 주세요.",
         "날짜를 클릭하면 일정을 추가하고, 일정을 클릭하면 편집합니다.",
         "예정된 알림을 확인하고 완료·미루기·건너뛰기를 처리할 수 있습니다.",
+        "거친 메모를 로컬에서 정리하고 검토한 항목을 반영합니다.",
     )
 
     def __init__(self, store, parent=None):
@@ -125,6 +127,9 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         self.tabs.addTab(self.splitter, "메모 편집")
         self.tabs.addTab(self.calendar, "캘린더")
         self.tabs.addTab(self.reminder_history, "알림내역")
+        self.organizer = OrganizerPanel(self.store)
+        self.tabs.addTab(self.organizer, "메모 정리")
+        self.organizer.changed.connect(self._organizer_changed)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         # 아래쪽은 상태 한 줄이면 된다.  남는 자리는 모두 탭 안 내용에 준다.
@@ -172,6 +177,12 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         self._sync_status_visibility()
         self.refresh()
         self.restore_postits()
+
+    def _organizer_changed(self) -> None:
+        # Do not reload the editor: the user may have unsaved changes in another tab.
+        self.list_panel.set_rows(self.store.notes(self.list_panel.search.text()), self.current_id)
+        self.calendar.refresh()
+        self.summary.refresh()
 
     def _escape_editor_or_go_back(self) -> None:
         body = self.editor.content_edit
@@ -239,7 +250,8 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         self.list_panel.note_moved.connect(self.move_note)
         self.list_panel.child_requested.connect(self.create_child_note)
         self.list_panel.pin_toggled.connect(self.set_note_pinned)
-        self.list_panel.filters_changed.connect(self.refresh)
+        self.list_panel.filters_changed.connect(self._refresh_list_filters)
+        self.list_panel.category_settings_requested.connect(self.editor._manage_categories)
         self.list_panel.category_assign_requested.connect(self.assign_note_categories)
         self.list_panel.copy_requested.connect(self.copy_selected_notes)
         self.list_panel.paste_requested.connect(self.paste_copied_notes)
@@ -536,6 +548,14 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         dialog.setWindowState(dialog.windowState() | Qt.WindowState.WindowMaximized)
         dialog.exec()
         self.calendar.refresh()
+
+    def _refresh_list_filters(self) -> None:
+        # Filtering is a list operation, not an instruction to reload/save a draft.
+        blocked = self.list_panel.blockSignals(True)
+        try:
+            self.list_panel.set_rows(self.store.notes(self.list_panel.search.text()), self.current_id)
+        finally:
+            self.list_panel.blockSignals(blocked)
 
     def refresh(self, *_args) -> None:
         rows = self.store.notes(self.list_panel.search.text())
@@ -1399,6 +1419,7 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
     def apply_ui_scale(self, scale: float) -> None:
         """Keep fixed-size editor controls in step with the scaled app stylesheet."""
         self._ui_scale = float(scale)
+        self.list_panel.apply_title_filter_scale(self._ui_scale)
         self.editor.format_toolbar.apply_ui_scale(self._ui_scale)
         if self.standalone_window is not None:
             self.standalone_window.editor.format_toolbar.apply_ui_scale(self._ui_scale)
@@ -1447,6 +1468,7 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         self.calendar.update_responsive_layout(width)
 
     def shutdown(self) -> None:
+        self.organizer.timer.stop()
         if self.standalone_window is not None:
             self.standalone_window.shutdown()
         self.editor.shutdown()

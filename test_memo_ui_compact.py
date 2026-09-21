@@ -118,7 +118,7 @@ class CompactMemoUiTest(unittest.TestCase):
         cursor.setPosition(0)
         cursor.setPosition(2, QTextCursor.MoveMode.KeepAnchor)
         body.setTextCursor(cursor)
-        panel.editor.property_chips.buttons["other"].click()
+        panel.editor._toggle_property_page("other")
         self.app.processEvents()
         body.setFocus()
         QTest.keyClick(body, Qt.Key.Key_Escape)

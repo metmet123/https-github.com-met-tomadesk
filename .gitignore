@@ -11,6 +11,8 @@ tmp*/
 # 빌드 결과
 build/
 dist/
+.package-build/
+.build-venv/
 
 # 실행파일/배포 결과
 output/

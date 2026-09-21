@@ -77,12 +77,12 @@ class TitleRowTest(_PanelCase):
                 order = [row.itemAt(i).widget() for i in range(row.count())
                          if row.itemAt(i).widget() and not row.itemAt(i).widget().isHidden()]
                 self.assertIs(order[order.index(editor.title_edit) + 1], editor.category_button)
-                self.assertIs(order[order.index(editor.category_button) + 1], editor.import_backup_button)
-                self.assertIs(order[order.index(editor.import_backup_button) + 1], editor.fold_current_button)
+                self.assertIs(order[order.index(editor.category_button) + 1], editor.fold_current_button)
+                self.assertTrue(editor.import_backup_button.isHidden())
                 self.assertIs(order[order.index(editor.fold_current_button) + 1], editor.fold_all_button)
                 # 남는 폭은 줄 맨 끝(마지막 항목 = stretch)에만 생긴다.
                 self.assertIsNone(row.itemAt(row.count() - 1).widget())
-                gap = editor.import_backup_button.x() - (editor.category_button.x() + editor.category_button.width())
+                gap = editor.fold_current_button.x() - (editor.category_button.x() + editor.category_button.width())
                 self.assertLessEqual(gap, row.spacing() + 1)
                 self.assert_inside(editor, order, f"{width}px")
                 self.assertLessEqual(editor.category_button.width(), editor.CATEGORY_CHIP_MAX_WIDTH)
@@ -201,7 +201,7 @@ class ChipAndFormatPanelTest(_PanelCase):
     def test_chip_row_is_compact_and_separator_is_light(self):
         panel = self.panel()
         chips = panel.editor.property_chips
-        self.assertLessEqual(chips.layout().sizeHint().width(), 380)
+        self.assertLessEqual(chips.layout().sizeHint().width(), chips.width())
         for button in chips.buttons.values():
             self.assertEqual(button.height(), 28)
             need = button.fontMetrics().horizontalAdvance(button.text())

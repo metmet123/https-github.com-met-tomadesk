@@ -235,7 +235,7 @@ def test_active_symbol_key_survives_zero_count_and_is_not_saved(memo_list, monke
     assert listing.title_symbol_filter == "✨"
     assert listing._title_symbol_counts == []
     assert listing.row_count() == 0
-    assert "✨ 0" in listing.title_symbol_button.text()
+    assert listing.title_symbol_button.text() == "✨ ▾"
     monkeypatch.setattr(QMenu, "exec", lambda self, *_args: None)
     listing._show_title_symbol_menu()
     active = next(action for action in listing.title_symbol_menu.actions() if "✨" in action.text())

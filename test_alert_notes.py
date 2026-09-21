@@ -603,9 +603,10 @@ class AlertNoteQtTest(unittest.TestCase):
 
     def test_calendar_tab_and_quick_note_creation(self):
         panel = AlertNotesPanel(self.store)
-        self.assertEqual(panel.tabs.count(), 3)
+        self.assertEqual(panel.tabs.count(), 4)
         self.assertEqual(panel.tabs.tabText(1), "캘린더")
         self.assertEqual(panel.tabs.tabText(2), "알림내역")
+        self.assertEqual(panel.tabs.tabText(3), "메모 정리")
         future = datetime.now() + timedelta(days=1)
         panel.calendar.quick_card.select_slot(future)
         panel.calendar.title_edit.setText("캘린더 메모")
