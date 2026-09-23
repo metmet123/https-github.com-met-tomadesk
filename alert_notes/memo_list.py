@@ -1,11 +1,12 @@
 import json
+import re
 
 from PyQt6.QtCore import QEvent, QRect, QRectF, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QIcon, QKeySequence, QPainter, QPen, QPixmap, QShortcut
 from PyQt6.QtWidgets import (
     QAbstractItemView, QApplication, QHBoxLayout, QHeaderView, QLabel, QLayout, QLineEdit, QMenu,
     QPushButton, QComboBox, QStyle, QStyledItemDelegate, QStyleOptionButton, QStyleOptionViewItem,
-    QSizePolicy, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QSizePolicy, QToolTip, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from .deadline import deadline_chip_text, is_deadline_done, reminder_display_text
@@ -152,6 +153,11 @@ class TitleCountDelegate(QStyledItemDelegate):
     BADGE_HEIGHT = 16
     BADGE_GAP = 10
 
+    def createEditor(self, parent, option, index):
+        if index.column() != 1:
+            return None
+        return super().createEditor(parent, option, index)
+
     @staticmethod
     def visible_count(widget, index) -> int:
         """펼쳐 두면 안이 다 보이므로 숫자를 지운다.
@@ -240,6 +246,10 @@ class MemoTree(QTreeWidget):
     note_moved = pyqtSignal(int, int, int)
     child_requested = pyqtSignal(int)
     pin_toggled = pyqtSignal(int, bool)
+    range_checked = pyqtSignal()
+    reorder_requested = pyqtSignal(int, int, int)
+    siblings_reordered = pyqtSignal(int, list)
+    reorder_blocked = pyqtSignal(str)
 
     PLUS_SIZE = 18
 
@@ -247,6 +257,11 @@ class MemoTree(QTreeWidget):
         super().__init__(parent)
         self._hover_arrow = None
         self._hover_row = None
+        self._shift_anchor = None
+        self._range_target = None
+        self._range_base = None
+        self._fold_chord_active = False
+        self._fold_chord_used = False
         self.setMouseTracking(True)
         self.viewport().setMouseTracking(True)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -281,6 +296,9 @@ class MemoTree(QTreeWidget):
         """
         self._hover_row = None
         self._hover_arrow = None
+        self._shift_anchor = None
+        self._range_target = None
+        self._range_base = None
 
     def plus_rect(self, item) -> QRect:
         """줄에 마우스를 올렸을 때 제목 열 오른쪽 끝에 뜨는 + 자리."""
@@ -348,14 +366,167 @@ class MemoTree(QTreeWidget):
             if self.viewport().cursor().shape() != Qt.CursorShape.PointingHandCursor:
                 self.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
 
+    def mousePressEvent(self, event) -> None:
+        if self._fold_chord_active:
+            self._fold_chord_used = True
+        item = self.itemAt(event.position().toPoint())
+        note_item = item is not None and item.data(0, NOTE_ID_ROLE) is not None
+        if (
+            event.button() == Qt.MouseButton.LeftButton and note_item
+            and event.modifiers() & Qt.KeyboardModifier.ShiftModifier
+        ):
+            self._range_target = item
+            event.accept()
+            return
+        if event.button() == Qt.MouseButton.LeftButton and note_item:
+            self._shift_anchor = item
+            self._range_base = None
+        super().mousePressEvent(event)
+
     def mouseReleaseEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
+            if self._range_target is not None:
+                target = self._range_target
+                self._range_target = None
+                anchor = self._shift_anchor or self.currentItem() or target
+                items = self._visible_note_items()
+                if anchor not in items:
+                    anchor = target
+                first, last = sorted((items.index(anchor), items.index(target)))
+                if self._range_base is None:
+                    self._range_base = {int(i.data(0, NOTE_ID_ROLE)) for i in items
+                                        if i.checkState(0) == Qt.CheckState.Checked}
+                blocked = self.blockSignals(True)
+                try:
+                    for index, item in enumerate(items):
+                        checked = first <= index <= last or int(item.data(0, NOTE_ID_ROLE)) in self._range_base
+                        item.setCheckState(0, Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
+                finally:
+                    self.blockSignals(blocked)
+                self._shift_anchor = anchor
+                self.setCurrentItem(target)
+                self.range_checked.emit()
+                event.accept()
+                return
             item = self.plus_item_at(event.position().toPoint())
             if item is not None:
                 self.child_requested.emit(int(item.data(0, NOTE_ID_ROLE)))
                 event.accept()
                 return
         super().mouseReleaseEvent(event)
+
+    def _visible_note_items(self) -> list[QTreeWidgetItem]:
+        items = []
+        item = self.topLevelItem(0)
+        while item is not None:
+            if item.data(0, NOTE_ID_ROLE) is not None:
+                items.append(item)
+            item = self.itemBelow(item)
+        return items
+
+    def keyPressEvent(self, event) -> None:
+        if (
+            event.key() in (Qt.Key.Key_Up, Qt.Key.Key_Down)
+            and event.modifiers() == Qt.KeyboardModifier.ControlModifier
+        ):
+            if not self.dragEnabled():
+                self.reorder_blocked.emit("기본 보기·기본 정렬에서 필터를 해제한 뒤 이동할 수 있습니다.")
+                event.accept()
+                return
+            if self.state() == QAbstractItemView.State.EditingState:
+                return super().keyPressEvent(event)
+            item = self.currentItem()
+            if item is not None and item.data(0, NOTE_ID_ROLE) is not None and self.dragEnabled():
+                parent = item.parent()
+                if parent is None:
+                    index = self.indexOfTopLevelItem(item)
+                    parent_id = TOP_LEVEL_PARENT
+                    count = self.topLevelItemCount()
+                else:
+                    index = parent.indexOfChild(item)
+                    parent_id = int(parent.data(0, NOTE_ID_ROLE))
+                    count = parent.childCount()
+                target = index + (-1 if event.key() == Qt.Key.Key_Up else 1)
+                siblings = ([self.topLevelItem(i) for i in range(count)] if parent is None
+                            else [parent.child(i) for i in range(count)])
+                checked = [i for i in self._visible_note_items() if i.checkState(0) == Qt.CheckState.Checked]
+                if len(checked) > 1:
+                    if any(i.parent() is not parent for i in checked):
+                        self.reorder_blocked.emit("같은 부모 아래의 메모만 함께 이동할 수 있습니다.")
+                    else:
+                        self._move_checked_siblings(siblings, checked, parent_id, event.key() == Qt.Key.Key_Up)
+                    event.accept()
+                    return
+                if 0 <= target < count:
+                    if bool(siblings[target].data(0, PINNED_ROLE)) == bool(item.data(0, PINNED_ROLE)):
+                        self.reorder_requested.emit(int(item.data(0, NOTE_ID_ROLE)), parent_id, target)
+                    else:
+                        self.reorder_blocked.emit("고정 메모와 일반 메모의 경계를 넘어 이동할 수 없습니다.")
+            event.accept()
+            return
+        if self._fold_chord_active and event.key() not in {
+            Qt.Key.Key_Control, Qt.Key.Key_Shift,
+        }:
+            self._fold_chord_used = True
+        if event.key() in {Qt.Key.Key_Control, Qt.Key.Key_Shift} and not event.isAutoRepeat():
+            modifiers = event.modifiers()
+            modifiers |= (
+                Qt.KeyboardModifier.ControlModifier
+                if event.key() == Qt.Key.Key_Control
+                else Qt.KeyboardModifier.ShiftModifier
+            )
+            both = Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier
+            if modifiers & both == both:
+                self._fold_chord_active = True
+                self._fold_chord_used = False
+        super().keyPressEvent(event)
+
+    def _move_checked_siblings(self, siblings, checked, parent_id, upward):
+        selected = {int(i.data(0, NOTE_ID_ROLE)) for i in checked}
+        if len({bool(i.data(0, PINNED_ROLE)) for i in checked}) > 1:
+            self.reorder_blocked.emit("고정 상태가 같은 메모끼리 이동해 주세요.")
+            return
+        order = list(siblings)
+        indexes = range(1, len(order)) if upward else range(len(order) - 2, -1, -1)
+        changed = False
+        for index in indexes:
+            target = index - 1 if upward else index + 1
+            current, neighbor = order[index], order[target]
+            if (int(current.data(0, NOTE_ID_ROLE)) in selected
+                    and int(neighbor.data(0, NOTE_ID_ROLE)) not in selected
+                    and bool(current.data(0, PINNED_ROLE)) == bool(neighbor.data(0, PINNED_ROLE))):
+                order[index], order[target] = neighbor, current
+                changed = True
+        if changed:
+            self.siblings_reordered.emit(parent_id, [int(i.data(0, NOTE_ID_ROLE)) for i in order])
+
+    def event(self, event):
+        if event.type() == QEvent.Type.ShortcutOverride and getattr(self, "_fold_chord_active", False):
+            if event.key() not in (Qt.Key.Key_Control, Qt.Key.Key_Shift):
+                self._fold_chord_used = True
+        if event.type() in (QEvent.Type.FocusOut, QEvent.Type.WindowDeactivate, QEvent.Type.Hide):
+            self._fold_chord_active = False
+        return super().event(event)
+
+    def keyReleaseEvent(self, event) -> None:
+        if (
+            event.key() in {Qt.Key.Key_Control, Qt.Key.Key_Shift}
+            and self._fold_chord_active and not event.isAutoRepeat()
+        ):
+            should_toggle = not self._fold_chord_used
+            self._fold_chord_active = False
+            self._fold_chord_used = False
+            item = self.currentItem()
+            if should_toggle and item is not None and item.childCount():
+                item.setExpanded(not item.isExpanded())
+            event.accept()
+            return
+        super().keyReleaseEvent(event)
+
+    def focusOutEvent(self, event) -> None:
+        self._fold_chord_active = False
+        self._fold_chord_used = False
+        super().focusOutEvent(event)
 
     def leaveEvent(self, event) -> None:
         self._set_hover_arrow(None)
@@ -424,6 +595,9 @@ class MemoListPanel(TitleFilterControls, QWidget):
     filters_changed = pyqtSignal()
     category_settings_requested = pyqtSignal()
     category_assign_requested = pyqtSignal(list, object)
+    group_requested = pyqtSignal(list, str)
+    siblings_reordered = pyqtSignal(int, list)
+    note_rename_requested = pyqtSignal(int, str)
 
     # 번호 carried no information the row order did not already show, and 표시
     # spent a whole column on one word; it is now a mark in front of the title.
@@ -468,6 +642,7 @@ class MemoListPanel(TitleFilterControls, QWidget):
         self.title_prefix_filter: str | None = None
         self._title_symbol_counts: list[TitleValueCount] = []
         self._title_prefix_counts: list[TitleValueCount] = []
+        self._inline_editing_id: int | None = None
         self.setObjectName("memoListPanel")
         self.rows_by_id: dict[int, object] = {}
         layout = QVBoxLayout(self)
@@ -642,6 +817,7 @@ class MemoListPanel(TitleFilterControls, QWidget):
         self.table.installEventFilter(self)
         self.table.itemClicked.connect(self._activate_row)
         self.table.itemChanged.connect(self._sync_select_all_state)
+        self.table.itemChanged.connect(self._inline_title_changed)
         self.table.itemExpanded.connect(self._sync_fold_button)
         self.table.itemCollapsed.connect(self._sync_fold_button)
         self.table.itemExpanded.connect(self._save_expanded)
@@ -650,8 +826,13 @@ class MemoListPanel(TitleFilterControls, QWidget):
         self.table.itemExpanded.connect(self._resize_table_columns)
         self.table.itemCollapsed.connect(self._resize_table_columns)
         self.table.note_moved.connect(self.note_moved)
+        self.table.reorder_requested.connect(self.note_moved)
+        self.table.siblings_reordered.connect(self.siblings_reordered)
+        self.table.reorder_blocked.connect(self._show_reorder_reason)
+        self.count_delegate.closeEditor.connect(self._end_inline_rename)
         self.table.child_requested.connect(self.child_requested)
         self.table.pin_toggled.connect(self.pin_toggled)
+        self.table.range_checked.connect(self._sync_select_all_state)
         self.table_header.check_state_changed.connect(self._set_all_checked)
         layout.addWidget(self.table, 1)
 
@@ -711,6 +892,13 @@ class MemoListPanel(TitleFilterControls, QWidget):
         self.bulk_category_button.clicked.connect(self._show_bulk_category_menu)
         self.bulk_category_button.hide()
         actions.addWidget(self.bulk_category_button)
+        self.group_button = QPushButton("묶기")
+        self.group_button.setObjectName("compactUtilityButton")
+        self.group_button.setFixedHeight(self.BUTTON_HEIGHT)
+        self.group_button.setToolTip("선택한 메모를 새 부모 메모 아래로 묶습니다")
+        self.group_button.clicked.connect(self._request_group)
+        self.group_button.hide()
+        actions.addWidget(self.group_button)
         actions.addWidget(self.delete_button)
         self.delete_button.hide()
         layout.addWidget(self.actions_host)
@@ -761,6 +949,10 @@ class MemoListPanel(TitleFilterControls, QWidget):
         self._sync_responsive_filter_controls(event.size().width())
         self._layout_category_filters()
         self._resize_table_columns()
+
+    def _show_reorder_reason(self, text: str) -> None:
+        self.action_status.setText(text)
+        QToolTip.showText(self.table.mapToGlobal(self.table.rect().center()), text, self.table)
 
     def _sync_responsive_filter_controls(self, width: int | None = None) -> None:
         # Keep the existing resize hook, but never put these back in the row.
@@ -1224,6 +1416,9 @@ class MemoListPanel(TitleFilterControls, QWidget):
 
     def set_rows(self, rows, selected_id: int | None = None) -> None:
         rows = list(rows)
+        live_ids = {int(row["id"]) for row in rows}
+        self._preview_cache = {key: value for key, value in getattr(self, "_preview_cache", {}).items()
+                               if key in live_ids}
         checked = set(self.checked_ids())
         if not self.searching():
             # 본문에 넣은 페이지는 그 메모의 줄로만 오간다.  목록에는 내놓지
@@ -1273,7 +1468,11 @@ class MemoListPanel(TitleFilterControls, QWidget):
             if selected_id is not None:
                 self.select_id(selected_id)
             return
-        self.table.setDragEnabled(True)
+        can_move = (not self.searching() and self.category_filter_id is None
+                    and self.sort_combo.currentData() == "default")
+        self.table.setDragEnabled(can_move)
+        self.table.setToolTip("Ctrl+↑/↓: 같은 부모 안에서 이동" if can_move else
+                             "기본 보기·기본 정렬에서 필터를 해제하면 순서를 이동할 수 있습니다.")
         by_parent: dict[int, list] = {}
         for row in rows:
             parent = int(row["parent_id"] or TOP_LEVEL_PARENT)
@@ -1388,7 +1587,14 @@ class MemoListPanel(TitleFilterControls, QWidget):
 
     def _fill_item(self, item: QTreeWidgetItem, row, checked: bool) -> None:
         note_id = int(row["id"])
-        preview = display_plain_text_from_content(str(row["content"])).replace("\n", " ").strip()[:80]
+        content = str(row["content"])
+        cache = getattr(self, "_preview_cache", {})
+        cached = cache.get(int(row["id"]))
+        if cached is None or cached[0] != content:
+            cached = (content, display_plain_text_from_content(content).replace("\n", " ").strip()[:80])
+            cache[int(row["id"])] = cached
+        self._preview_cache = cache
+        preview = cached[1]
         # DD3: both live in one column, so they must not look alike —
         # a reminder shows a clock, a D-Day shows a countdown chip.
         parts = []
@@ -1659,6 +1865,53 @@ class MemoListPanel(TitleFilterControls, QWidget):
         self.delete_button.setEnabled(selected > 0)
         self.delete_button.setText("선택 삭제")
         self.bulk_category_button.setVisible(selected > 0)
+        self.group_button.setVisible(selected >= 2)
+
+    def _request_group(self) -> None:
+        note_ids = self.checked_ids()
+        if len(note_ids) < 2:
+            return
+        prefixes = []
+        for note_id in note_ids:
+            row = self.rows_by_id.get(note_id)
+            title = str(row["title"] or "") if row is not None else ""
+            match = re.match(r"^\s*(\[[^\]\r\n]{1,40}\])", title)
+            prefixes.append(match.group(1) if match else "")
+        suggested = prefixes[0] if prefixes and prefixes[0] and len(set(prefixes)) == 1 else "새 묶음"
+        self.group_requested.emit(note_ids, suggested)
+
+    def begin_inline_rename(self, note_id: int) -> bool:
+        item = self._item_for(note_id)
+        if item is None:
+            return False
+        self._inline_editing_id = int(note_id)
+        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
+        self.table.setCurrentItem(item, self.TITLE_COLUMN)
+        self.table.editItem(item, self.TITLE_COLUMN)
+        return True
+
+    def _inline_title_changed(self, item: QTreeWidgetItem, column: int) -> None:
+        note_id = item.data(0, NOTE_ID_ROLE)
+        if column != self.TITLE_COLUMN or note_id is None:
+            return
+        if self._inline_editing_id != int(note_id):
+            return
+        title = item.text(self.TITLE_COLUMN).strip() or "새 묶음"
+        self._inline_editing_id = None
+        blocked = self.table.blockSignals(True)
+        item.setText(self.TITLE_COLUMN, title)
+        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        self.table.blockSignals(blocked)
+        self.note_rename_requested.emit(int(note_id), title)
+
+    def _end_inline_rename(self, *_args) -> None:
+        if self._inline_editing_id is not None:
+            item = self._item_for(self._inline_editing_id)
+            self._inline_editing_id = None
+            if item is not None:
+                blocked = self.table.blockSignals(True)
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                self.table.blockSignals(blocked)
 
     def _activate_row(self, item: QTreeWidgetItem, column: int) -> None:
         if column != 0 and item is not None and item.data(0, NOTE_ID_ROLE) is not None:

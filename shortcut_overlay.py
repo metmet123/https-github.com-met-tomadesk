@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PyQt6.QtCore import QEvent, QRect, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QPoint, QRect, Qt, pyqtSignal
 from PyQt6.QtGui import QCursor, QGuiApplication, QKeyEvent
 from PyQt6.QtWidgets import (
     QApplication,
@@ -54,6 +54,8 @@ class ShortcutOverlay(QWidget):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._listed_entries: list[ShortcutOverlayEntry] = []
         self.item_buttons: list[QPushButton] = []
+        self._drag_offset: QPoint | None = None
+        self._user_position: QPoint | None = None
 
         shell = QVBoxLayout(self)
         shell.setContentsMargins(12, 12, 12, 12)
@@ -64,7 +66,9 @@ class ShortcutOverlay(QWidget):
         surface_layout = QVBoxLayout(self.surface)
         surface_layout.setContentsMargins(22, 18, 22, 16)
         surface_layout.setSpacing(12)
-        title_row = QHBoxLayout()
+        self.header = QWidget()
+        title_row = QHBoxLayout(self.header)
+        title_row.setContentsMargins(0, 0, 0, 0)
         title = QLabel("단축키 안내")
         title.setObjectName("shortcutOverlayTitle")
         title_row.addWidget(title)
@@ -72,7 +76,11 @@ class ShortcutOverlay(QWidget):
         close_hint = QLabel("Esc로 닫기")
         close_hint.setObjectName("shortcutOverlayHint")
         title_row.addWidget(close_hint)
-        surface_layout.addLayout(title_row)
+        surface_layout.addWidget(self.header)
+        self._drag_widgets = (self.header, title, close_hint)
+        for widget in self._drag_widgets:
+            widget.setCursor(Qt.CursorShape.OpenHandCursor)
+            widget.installEventFilter(self)
 
         self.scroll = QScrollArea()
         self.scroll.setObjectName("shortcutOverlayScroll")
@@ -184,14 +192,38 @@ class ShortcutOverlay(QWidget):
         width = min(width, geometry.width())
         height = min(height, geometry.height())
         self.resize(width, height)
-        self.move(
+        centered = QPoint(
             geometry.left() + (geometry.width() - width) // 2,
             geometry.top() + (geometry.height() - height) // 2,
         )
+        self.move(self._bounded_position(self._user_position or centered, geometry))
         self.show()
         self.raise_()
         self.activateWindow()
         self.setFocus(Qt.FocusReason.ShortcutFocusReason)
+
+    def _bounded_position(self, position: QPoint, bounds: QRect) -> QPoint:
+        return QPoint(
+            max(bounds.left(), min(position.x(), bounds.right() - self.width() + 1)),
+            max(bounds.top(), min(position.y(), bounds.bottom() - self.height() + 1)),
+        )
+
+    def eventFilter(self, watched, event) -> bool:
+        if watched in self._drag_widgets:
+            if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
+                self._drag_offset = event.globalPosition().toPoint() - self.pos()
+                return True
+            if event.type() == QEvent.Type.MouseMove and self._drag_offset is not None:
+                screen = QGuiApplication.screenAt(event.globalPosition().toPoint()) or self.screen()
+                bounds = screen.availableGeometry() if screen else QRect(0, 0, 900, 650)
+                self.move(self._bounded_position(event.globalPosition().toPoint() - self._drag_offset, bounds))
+                self._user_position = self.pos()
+                return True
+            if event.type() == QEvent.Type.MouseButtonRelease and self._drag_offset is not None:
+                self._drag_offset = None
+                self._user_position = self.pos()
+                return True
+        return super().eventFilter(watched, event)
 
     def _group_card(self, group: str, entries: list[ShortcutOverlayEntry]) -> QFrame:
         card = QFrame()

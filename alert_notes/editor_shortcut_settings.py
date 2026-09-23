@@ -80,7 +80,12 @@ class EditorShortcutSettingsDialog(QDialog):
         raw.extend(builder.text() for builder in self.structure_builders.values())
         raw.extend(shortcut_text(self.modifier.currentText(), key) for key, _label, _minutes in TIME_SHORTCUTS)
         try:
-            normalized = [parse_hotkey(text).text for text in raw]
+            fold_index = 2 + len(self.format_builders) + list(self.structure_builders).index("toggle_fold")
+            normalized = [
+                "Ctrl+Shift" if index == fold_index and text == "Ctrl+Shift"
+                else parse_hotkey(text).text
+                for index, text in enumerate(raw)
+            ]
         except ValueError as exc:
             QMessageBox.warning(self, "단축키 설정", str(exc))
             return
@@ -94,9 +99,7 @@ class EditorShortcutSettingsDialog(QDialog):
                 *(item[5] for item in HEADING_ITEMS if item[5]),
             )
         }
-        fold_index = 2 + len(self.format_builders) + list(self.structure_builders).index("toggle_fold")
-        if any(value in reserved and not (index == fold_index and value == "Ctrl+Enter")
-               for index, value in enumerate(normalized)):
+        if any(value in reserved for value in normalized):
             QMessageBox.warning(self, "단축키 설정", "편집 기본 단축키와 겹칩니다.")
             return
         self.store.set_setting(SETTING_MODIFIER, self.modifier.currentText())

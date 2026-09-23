@@ -5,11 +5,11 @@ import json
 import sqlite3
 from contextlib import nullcontext
 
-from .schedule_recurrence import DATETIME_FMT, expand_occurrences, normalize_rule
+from .schedule_recurrence import DATETIME_FMT, Occurrence, expand_occurrences, normalize_rule
 
 
 ITEM_COLUMNS = (
-    "id", "title", "details", "item_type", "note_id", "start_at", "end_at",
+    "id", "title", "details", "item_type", "note_id", "start_at", "end_at", "time_mode",
     "all_day", "category", "priority", "status", "recurrence_rule", "hotkey",
     "hotkey_action", "count_as_dday", "source_reminder_id", "created_at", "updated_at",
     "deleted_at",
@@ -36,6 +36,7 @@ class ScheduleStore:
                 note_id INTEGER,
                 start_at TEXT NOT NULL,
                 end_at TEXT NOT NULL,
+                time_mode TEXT NOT NULL DEFAULT 'range',
                 all_day INTEGER NOT NULL DEFAULT 0,
                 category TEXT NOT NULL DEFAULT 'sky',
                 priority INTEGER NOT NULL DEFAULT 0,
@@ -86,6 +87,10 @@ class ScheduleStore:
         if "count_as_dday" not in columns:
             self.conn.execute(
                 "ALTER TABLE schedule_items ADD COLUMN count_as_dday INTEGER NOT NULL DEFAULT 0"
+            )
+        if "time_mode" not in columns:
+            self.conn.execute(
+                "ALTER TABLE schedule_items ADD COLUMN time_mode TEXT NOT NULL DEFAULT 'range'"
             )
         self.conn.commit()
 
@@ -155,7 +160,7 @@ class ScheduleStore:
         columns = (
             "title", "details", "item_type", "note_id", "start_at", "end_at", "all_day",
             "category", "priority", "status", "recurrence_rule", "hotkey", "hotkey_action",
-            "count_as_dday",
+            "count_as_dday", "time_mode",
         )
         payload = [data[key] for key in columns]
         payload[6] = int(bool(payload[6]))
@@ -233,7 +238,18 @@ class ScheduleStore:
                     "SELECT * FROM schedule_occurrence_exceptions WHERE item_id=?", (row["id"],)
                 )
             }
-            for occurrence in expand_occurrences(row, range_start, range_end):
+            occurrences = expand_occurrences(row, range_start, range_end)
+            known = {occurrence.key for occurrence in occurrences}
+            # Moved occurrences may enter a range outside their original date.
+            for key, exception in exceptions.items():
+                if key in known or exception["action"] != "move":
+                    continue
+                moved_start = datetime.strptime(exception["new_start_at"], DATETIME_FMT)
+                moved_end = datetime.strptime(exception["new_end_at"], DATETIME_FMT)
+                if moved_start < range_end and moved_end > range_start:
+                    original = datetime.strptime(key, DATETIME_FMT)
+                    occurrences.append(Occurrence(int(row["id"]), original, original + (moved_end - moved_start)))
+            for occurrence in occurrences:
                 exception = exceptions.get(occurrence.key)
                 if exception is not None and exception["action"] == "skip":
                     continue
@@ -272,6 +288,16 @@ class ScheduleStore:
         if datetime.strptime(end_at, DATETIME_FMT) <= datetime.strptime(start_at, DATETIME_FMT):
             raise ValueError("종료 시간은 시작 시간보다 뒤여야 합니다.")
         self._save_exception(item_id, occurrence_at, "move", start_at, end_at)
+
+    def occurrence_exception(self, item_id: int, occurrence_at: str) -> dict | None:
+        row = self.conn.execute("SELECT * FROM schedule_occurrence_exceptions WHERE item_id=? AND occurrence_at=?", (item_id, occurrence_at)).fetchone()
+        return dict(row) if row is not None else None
+
+    def restore_occurrence_exception(self, item_id: int, occurrence_at: str, snapshot: dict | None) -> None:
+        if snapshot is None:
+            self.clear_occurrence_exception(item_id, occurrence_at)
+        else:
+            self._save_exception(item_id, occurrence_at, snapshot["action"], snapshot["new_start_at"], snapshot["new_end_at"])
 
     def clear_occurrence_exception(self, item_id: int, occurrence_at: str) -> None:
         with self.conn:
@@ -312,9 +338,19 @@ class ScheduleStore:
         due = []
         for row in rows:
             minutes = int(row["minutes_before"])
-            range_start = now - timedelta(days=7)
-            range_end = now + timedelta(minutes=minutes + 2)
-            for occurrence in expand_occurrences(row, range_start, range_end):
+            range_start = now - timedelta(days=7) + timedelta(minutes=min(0, minutes))
+            range_end = now + timedelta(minutes=max(0, minutes) + 2)
+            occurrences = expand_occurrences(row, range_start, range_end)
+            known = {occurrence.key for occurrence in occurrences}
+            for moved in self.conn.execute("SELECT * FROM schedule_occurrence_exceptions WHERE item_id=? AND action='move'", (row["id"],)):
+                if moved["occurrence_at"] in known:
+                    continue
+                begin = datetime.strptime(moved["new_start_at"], DATETIME_FMT)
+                if range_start <= begin < range_end:
+                    original = datetime.strptime(moved["occurrence_at"], DATETIME_FMT)
+                    finish = datetime.strptime(moved["new_end_at"], DATETIME_FMT)
+                    occurrences.append(Occurrence(int(row["id"]), original, original + (finish - begin)))
+            for occurrence in occurrences:
                 exception = self.conn.execute(
                     "SELECT * FROM schedule_occurrence_exceptions WHERE item_id=? AND occurrence_at=?",
                     (row["id"], occurrence.key),
@@ -363,7 +399,9 @@ class ScheduleStore:
         ).fetchall()
         result = []
         for row in rows:
-            for occurrence in expand_occurrences(row, range_start, range_end):
+            for occurrence in expand_occurrences(
+                row, range_start + timedelta(minutes=min(0, int(row["minutes_before"]))), range_end,
+            ):
                 exception = self.conn.execute(
                     "SELECT * FROM schedule_occurrence_exceptions WHERE item_id=? AND occurrence_at=?",
                     (row["id"], occurrence.key),
@@ -444,14 +482,18 @@ def _normalized_item(values: dict) -> dict:
     end = datetime.strptime(end_at, DATETIME_FMT)
     if end <= start:
         raise ValueError("종료 시간은 시작 시간보다 뒤여야 합니다.")
+    time_mode = str(values.get("time_mode") or "range")
+    if time_mode not in {"point", "range"}:
+        raise ValueError("일정 시간 형식을 확인해 주세요.")
     item_type = str(values.get("item_type", "event"))
     if item_type not in {"event", "task"}:
         raise ValueError("일정 종류를 확인해 주세요.")
-    reminders = sorted({max(0, min(525600, int(value))) for value in values.get("reminders", [])})[:5]
+    reminders = sorted({max(-525600, min(525600, int(value))) for value in values.get("reminders", [])})[:5]
     return {
         "title": str(values.get("title", "")).strip() or "새 일정",
         "details": str(values.get("details", "")), "item_type": item_type,
         "note_id": values.get("note_id") or None, "start_at": start_at, "end_at": end_at,
+        "time_mode": time_mode,
         "all_day": bool(values.get("all_day", False)), "category": str(values.get("category", "sky")),
         "priority": max(0, min(3, int(values.get("priority", 0)))),
         "status": "completed" if values.get("status") == "completed" else "pending",

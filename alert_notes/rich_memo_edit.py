@@ -12,7 +12,7 @@ from PyQt6.QtCore import (
     QTimer, Qt, QUrl, pyqtSignal,
 )
 from PyQt6.QtGui import (
-    QColor, QDesktopServices, QFont, QFontMetricsF, QImage, QImageReader, QKeyEvent, QKeySequence,
+    QColor, QCursor, QDesktopServices, QFont, QFontMetricsF, QImage, QImageReader, QKeyEvent, QKeySequence,
     QMouseEvent, QPainter, QPen, QTextCharFormat, QTextCursor, QTextDocument, QTextDocumentFragment,
     QTextBlockFormat, QTextFrameFormat, QTextImageFormat, QTextLength,
     QTextListFormat, QTextTableCellFormat, QTextTableFormat,
@@ -26,13 +26,29 @@ from .insert_menu import (
 )
 from .insert_preferences import get_insert_preferences
 from .image_move import move_image
+from .table_edit import (
+    TableActionBar, active_cells, column_boundary, populate_menu as populate_table_menu,
+    set_width as set_table_width,
+)
+from .table_clipboard import augment_range_mime, paste_range
+from .table_calculation import (
+    FORMULA_URL, block_calculation, cancel_formula_edit, commit_typed_formula, edit_formula,
+    formula_from_mouse_range, recalculate,
+)
+from .table_fill import begin_fill, fill_handle, fill_target_rect, finish_fill, update_fill
+from .table_input import (
+    backspace_selected, clear_cell_selection, delete_selected, extend_cell_selection,
+    resize_selected,
+    select_current_cell, selected_cell_rect, show_split_dialog,
+)
+from .table_style import merge_cells
 from .note_shortcuts import structure_shortcut_value
 from .note_link_dialog import NoteLinkDialog
 from .line_gutter import LineGutter
 from .rich_text import editor_content, load_editor_content, sanitize_rich_html
 from .memo_clipboard import (
     BLOCK_MIME, apply_block_metadata, attachment_ids_from_html, get_json,
-    page_ids_from_html, page_sync_ids_from_html, selected_block_metadata, set_json,
+    page_ids_from_html, page_sync_ids_from_html, selected_block_metadata, set_json, single_web_url,
 )
 from .note_clone_service import NoteCloneService, rewrite_cloned_content
 from .block_selection import BlockSelectionManager
@@ -169,6 +185,15 @@ class RichMemoTextEdit(QTextEdit):
         self._image_scroll_timer = QTimer(self)
         self._image_scroll_timer.setInterval(50)
         self._image_scroll_timer.timeout.connect(self._auto_scroll_image_drag)
+        self._table_width_drag = None
+        self._table_fill_drag = None
+        self._table_selected_cell = None
+        self._table_selection_anchor = None
+        self._table_selection_endpoint = None
+        self._pending_formula_mouse = None
+        self._table_formula_edit = None
+        self._table_recalculating = False
+        self._has_table_formulas = False
         # 구조(토글·줄 수)가 바뀌었을 때만 문서를 다시 계산한다.
         self._watched_document = None
         self._structure_dirty = True
@@ -191,6 +216,8 @@ class RichMemoTextEdit(QTextEdit):
         self._section_hint_timer.setSingleShot(True)
         self._section_hint_timer.setInterval(1000)
         self._section_hint_timer.timeout.connect(self._hide_section_hint)
+        self._fold_chord_active = False
+        self._fold_chord_used = False
         self._annotations: list[dict] = []
         self.external_undo_handler = None
         self.external_redo_handler = None
@@ -205,6 +232,14 @@ class RichMemoTextEdit(QTextEdit):
         self._refit_timer = QTimer(self)
         self._refit_timer.setSingleShot(True)
         self._refit_timer.timeout.connect(self.refit_images)
+        self._table_formula_timer = QTimer(self)
+        self._table_formula_timer.setSingleShot(True)
+        self._table_formula_timer.setInterval(120)
+        self._table_formula_timer.timeout.connect(lambda: recalculate(self))
+        self.textChanged.connect(
+            lambda: self._table_formula_timer.start()
+            if self._has_table_formulas and not self._table_recalculating else None
+        )
         self.textChanged.connect(self._refresh_checklist_display)
         self.textChanged.connect(self._refresh_structure)
         self.textChanged.connect(self._clear_selected_image)
@@ -236,6 +271,7 @@ class RichMemoTextEdit(QTextEdit):
         self.block_action_bar = BlockActionBar(self, self.block_commands)
         self.character_action_bar = CharacterRangeActionBar(self)
         self.text_format_bar = TextFormatRangeBar(self)
+        self.table_action_bar = TableActionBar(self)
         self.block_selection.changed.connect(self._block_selection_changed)
         self.character_selection.changed.connect(self._character_selection_changed)
         self.block_selection.changed.connect(self.text_format_bar.sync)
@@ -243,6 +279,8 @@ class RichMemoTextEdit(QTextEdit):
         self.verticalScrollBar().valueChanged.connect(lambda _value: self.block_action_bar.sync())
         self.verticalScrollBar().valueChanged.connect(lambda _value: self.text_format_bar.sync())
         self.selectionChanged.connect(self._queue_text_format_bar_sync)
+        self.cursorPositionChanged.connect(self.table_action_bar.sync)
+        self.selectionChanged.connect(self.table_action_bar.sync)
         # 넣을 수 있는 것들의 단축키.  목록 한곳에 적힌 것을 그대로 건다.
         self.insert_shortcuts = install_insert_shortcuts(self)
 
@@ -381,15 +419,21 @@ class RichMemoTextEdit(QTextEdit):
 
     def _refresh_structure(self) -> None:
         """줄 수가 달라졌거나 토글이 건드려졌을 때만 문서 전체를 다시 본다."""
+        if getattr(self, "_refreshing_structure", False):
+            return
         document = self.document()
         if document.blockCount() != self._block_count:
             self._structure_dirty = True
         if not self._structure_dirty:
             return
         self._structure_dirty = False
-        self._refresh_toggle_visibility()
-        self._ensure_toggle_children()
-        self._block_count = document.blockCount()
+        self._refreshing_structure = True
+        try:
+            self._refresh_toggle_visibility()
+            self._ensure_toggle_children()
+            self._block_count = document.blockCount()
+        finally:
+            self._refreshing_structure = False
 
     def _reset_typing_format(self) -> None:
         """앞 문서에서 쓰던 입력 서식을 새 문서로 끌고 오지 않는다.
@@ -425,6 +469,11 @@ class RichMemoTextEdit(QTextEdit):
     def set_content(self, content: str) -> None:
         self._hide_section_hint()
         self._cancel_image_drag(clear_selection=True)
+        self._table_formula_edit = None
+        self._pending_formula_mouse = None
+        self._table_fill_drag = None
+        clear_cell_selection(self)
+        self._has_table_formulas = FORMULA_URL in str(content or "")
         source = self.document().property("tomaSourceContent")
         if self.document().isModified():
             return
@@ -652,12 +701,16 @@ class RichMemoTextEdit(QTextEdit):
         # stylesheet still gives Latin glyphs Segoe UI Variable priority.
         font = QFont("Malgun Gothic")
         font.setPointSizeF(10.5)
-        document.setDefaultFont(font)
-        document.setIndentWidth(INDENT_WIDTH)
-        document.setDefaultStyleSheet(
+        if document.defaultFont() != font:
+            document.setDefaultFont(font)
+        if document.indentWidth() != INDENT_WIDTH:
+            document.setIndentWidth(INDENT_WIDTH)
+        stylesheet = (
             "body, p, li { font-family:'Segoe UI Variable','Malgun Gothic'; "
             "font-size:14px; line-height:140%; }"
         )
+        if document.defaultStyleSheet() != stylesheet:
+            document.setDefaultStyleSheet(stylesheet)
 
     def toggle_character_style(self, style: str) -> None:
         current = self.currentCharFormat()
@@ -954,6 +1007,8 @@ class RichMemoTextEdit(QTextEdit):
             height = self.character_action_bar.HEIGHT + 4
         elif height == 0 and self.text_format_bar.is_reserved:
             height = self.text_format_bar.HEIGHT + 4
+        elif height == 0 and self.current_table() is not None:
+            height = self.table_action_bar.HEIGHT + 4
         self._set_block_action_bar_height(height)
 
     def set_format_toolbar(self, toolbar, open_more) -> None:
@@ -961,7 +1016,11 @@ class RichMemoTextEdit(QTextEdit):
         self._queue_text_format_bar_sync()
 
     def _queue_text_format_bar_sync(self) -> None:
-        QTimer.singleShot(0, self.text_format_bar.sync)
+        QTimer.singleShot(0, self._sync_text_and_table_bars)
+
+    def _sync_text_and_table_bars(self) -> None:
+        self.text_format_bar.sync()
+        self.table_action_bar.sync()
 
     # ------------------------------------------------------------ 본문 찾기 --
     FIND_BACKGROUND = "#fde68a"
@@ -1168,6 +1227,30 @@ class RichMemoTextEdit(QTextEdit):
         restored.setPosition(max(0, min(restore_at, document.characterCount() - 1)))
         self.setTextCursor(restored)
         self._restore_inner_scroll(scroll_value)
+
+    def _delete_outside_empty_block(self, block) -> bool:
+        """접힌 내용 뒤의 빈 줄만 지우고 다음 줄의 서식과 경계를 보존한다."""
+        following = block.next()
+        if not block.isValid() or block.text().strip() or not following.isValid():
+            return False
+        fmt = QTextBlockFormat(following.blockFormat())
+        if is_section_break(block):
+            fmt.setProperty(SECTION_BREAK_PROPERTY, True)
+        position = block.position()
+        scroll_value = self.verticalScrollBar().value()
+        transaction = QTextCursor(self.document())
+        transaction.beginEditBlock()
+        try:
+            self._delete_empty_block(block)
+            merged = self.document().findBlock(position)
+            QTextCursor(merged).setBlockFormat(fmt)
+        finally:
+            transaction.endEditBlock()
+        self._refresh_toggle_visibility()
+        restored = QTextCursor(self.document().findBlock(position))
+        self.setTextCursor(restored)
+        self._restore_inner_scroll(scroll_value)
+        return True
 
     def _restore_inner_scroll(self, value: int) -> None:
         scroll_bar = self.verticalScrollBar()
@@ -1427,10 +1510,13 @@ class RichMemoTextEdit(QTextEdit):
         if self._is_toggle_block(block):
             self._remove_toggle_prefix(block)
             return
+        empty_title = not block.text().strip()
         cursor = QTextCursor(block)
         cursor.beginEditBlock()
         self._syncing_toggle_children = True
         try:
+            if empty_title:
+                self._clear_empty_toggle_title_style(block)
             cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock)
             cursor.insertText(TOGGLE_OPEN_PREFIX)
             block = cursor.block()
@@ -1447,6 +1533,20 @@ class RichMemoTextEdit(QTextEdit):
         self._structure_dirty = True
         self._refresh_structure()
         self.setFocus()
+
+    @staticmethod
+    def _clear_empty_toggle_title_style(block) -> None:
+        """A blank heading line must not lend its spacing to a new toggle."""
+        fmt = QTextBlockFormat(block.blockFormat())
+        fmt.clearProperty(HEADING_LEVEL_PROPERTY)
+        fmt.setHeadingLevel(0)
+        fmt.setTopMargin(0)
+        fmt.setBottomMargin(0)
+        if abs(fmt.leftMargin() - 18.0) < 0.1:
+            fmt.setLeftMargin(0)
+        cursor = QTextCursor(block)
+        cursor.setBlockFormat(fmt)
+        cursor.setBlockCharFormat(QTextCharFormat())
 
     # 줄 앞에서 이렇게 치면 그 기능이 된다.
     # (친 글, 뒤에 스페이스가 있어야 하는가, 편집기 메서드)
@@ -1608,13 +1708,28 @@ class RichMemoTextEdit(QTextEdit):
         level = int(block.blockFormat().headingLevel())
         if level in HEADING_STYLES:
             return level
-        probe = QTextCursor(block)
+        # NextCharacter can force table layout for every inspected block.
+        # Inspect the first text fragment instead, including legacy fold markers.
+        position = block.position()
         if block.text().startswith(HEADING_FOLDED_PREFIX):
-            probe.setPosition(block.position() + len(HEADING_FOLDED_PREFIX))
-        probe.movePosition(
-            QTextCursor.MoveOperation.NextCharacter, QTextCursor.MoveMode.KeepAnchor,
-        )
-        size = probe.charFormat().fontPointSize()
+            position += len(HEADING_FOLDED_PREFIX)
+        size = block.charFormat().fontPointSize()
+        fragment_it = block.begin()
+        found_format = False
+        while not fragment_it.atEnd():
+            fragment = fragment_it.fragment()
+            if fragment.isValid() and fragment.position() <= position < fragment.position() + fragment.length():
+                size = fragment.charFormat().fontPointSize()
+                found_format = True
+                break
+            fragment_it += 1
+        if not found_format:
+            # Empty headings (including marker-only legacy headings) retain
+            # the old cursor boundary behavior at the paragraph separator.
+            probe = QTextCursor(block)
+            probe.setPosition(position)
+            probe.movePosition(QTextCursor.MoveOperation.NextCharacter, QTextCursor.MoveMode.KeepAnchor)
+            size = probe.charFormat().fontPointSize()
         for candidate, (point_size, _spacing, top, _bottom) in HEADING_STYLES.items():
             if abs(size - point_size) < 0.1 and abs(block.blockFormat().topMargin() - top) < 0.1:
                 return candidate
@@ -1630,11 +1745,15 @@ class RichMemoTextEdit(QTextEdit):
     def _convert_to_toggle(self, block) -> None:
         """줄 맨 앞의 '>' 한 글자를 토글 표시로 바꾼다."""
         cursor = QTextCursor(block)
+        cursor.beginEditBlock()
+        if block.text() == ">":
+            self._clear_empty_toggle_title_style(block)
         cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock)
         cursor.movePosition(
             QTextCursor.MoveOperation.NextCharacter, QTextCursor.MoveMode.KeepAnchor, 1
         )
         cursor.insertText(TOGGLE_OPEN_PREFIX)
+        cursor.endEditBlock()
 
     def _remove_toggle_prefix(self, block) -> None:
         if not self._is_toggle_block(block):
@@ -1781,7 +1900,7 @@ class RichMemoTextEdit(QTextEdit):
         return True
 
     def clear_section_break(self, block) -> bool:
-        """끝 표시 줄 맨 앞 Backspace: 표시만 지워 다시 제목에 넣는다."""
+        """명시적 명령에서 제목 밖 경계 표시를 제거한다."""
         if not is_section_break(block):
             return False
         fmt = block.blockFormat()
@@ -1808,10 +1927,9 @@ class RichMemoTextEdit(QTextEdit):
         cursor.beginEditBlock()
         try:
             self._open_clean_block(cursor, depth)
-            if last != heading:
-                fmt = cursor.blockFormat()
-                fmt.setProperty(SECTION_BREAK_PROPERTY, True)
-                cursor.setBlockFormat(fmt)
+            fmt = cursor.blockFormat()
+            fmt.setProperty(SECTION_BREAK_PROPERTY, True)
+            cursor.setBlockFormat(fmt)
         finally:
             cursor.endEditBlock()
         self.setTextCursor(cursor)
@@ -1922,6 +2040,65 @@ class RichMemoTextEdit(QTextEdit):
         if parent is None:
             return False
         self.setTextCursor(QTextCursor(parent))
+        self.ensureCursorVisible()
+        return True
+
+    def _exit_fold_for_editing(self) -> bool:
+        """Open or reuse a plain paragraph immediately after the current fold."""
+        active = self.textCursor()
+        if active.hasSelection() or self.current_table() is not None:
+            return False
+        block = active.block()
+        toggle = block if self._is_toggle_block(block) else self._parent_toggle(block)
+        heading = None if toggle is not None else (
+            block if self.heading_level(block) else self._heading_section_owner(block)
+        )
+        parent = toggle if toggle is not None else heading
+        if parent is None:
+            return False
+        depth = self._block_indent(parent)
+        heading_toggle = toggle is not None and self.heading_level(toggle) > 0
+        outside_depth = 0 if heading_toggle else depth
+        needs_section_break = heading is not None or heading_toggle
+        last = parent
+        following = parent.next()
+        if toggle is not None:
+            while following.isValid() and self._block_indent(following) > depth:
+                last = following
+                following = following.next()
+        else:
+            level = self.heading_level(parent)
+            while following.isValid():
+                if (self._block_indent(following) <= depth and (
+                    (self.heading_level(following) and self.heading_level(following) <= level)
+                    or is_section_break(following)
+                )):
+                    break
+                last = following
+                following = following.next()
+        if (following.isValid() and not following.text().strip()
+                and self._block_indent(following) == outside_depth
+                and (not needs_section_break or is_section_break(following))):
+            self.setTextCursor(QTextCursor(following))
+            self.ensureCursorVisible()
+            return True
+        if self._table_at_block(last) is not None:
+            return False
+        cursor = QTextCursor(last)
+        cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+        cursor.beginEditBlock()
+        try:
+            self._open_clean_block(cursor, outside_depth)
+            if needs_section_break:
+                fmt = cursor.blockFormat()
+                fmt.setProperty(SECTION_BREAK_PROPERTY, True)
+                cursor.setBlockFormat(fmt)
+        finally:
+            cursor.endEditBlock()
+        self.setTextCursor(cursor)
+        self.setCurrentCharFormat(QTextCharFormat())
+        if needs_section_break:
+            self._refresh_toggle_visibility()
         self.ensureCursorVisible()
         return True
 
@@ -3446,6 +3623,15 @@ class RichMemoTextEdit(QTextEdit):
             self.viewport().update()
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if self._table_fill_drag is not None and event.buttons() & Qt.MouseButton.LeftButton:
+            update_fill(self, event.position().toPoint())
+            event.accept()
+            return
+        if self._table_width_drag is not None and event.buttons() & Qt.MouseButton.LeftButton:
+            self._table_width_drag["current_x"] = event.position().x()
+            self.viewport().update()
+            event.accept()
+            return
         if self._image_move_press is not None and event.buttons() & Qt.MouseButton.LeftButton:
             state = self._image_move_press
             state["point"] = event.position().toPoint()
@@ -3490,6 +3676,9 @@ class RichMemoTextEdit(QTextEdit):
             return
         if self.image_at(event.position()) is not None:
             self.viewport().setCursor(Qt.CursorShape.OpenHandCursor)
+            return
+        if column_boundary(self, event.position().toPoint()) is not None:
+            self.viewport().setCursor(Qt.CursorShape.SplitHCursor)
             return
         block = self._marker_block_at(event.position())
         self._set_hover_marker(block)
@@ -3549,6 +3738,22 @@ class RichMemoTextEdit(QTextEdit):
             painter.setBrush(QColor(59, 84, 232, 30))
             painter.drawRoundedRect(hover, 5.0, 5.0)
             painter.setBrush(Qt.BrushStyle.NoBrush)
+        selected_cell = selected_cell_rect(self)
+        if selected_cell is not None and selected_cell.intersects(QRectF(viewport_rect)):
+            painter.setPen(QPen(QColor("#3b54e8"), 1.0))
+            painter.setBrush(QColor(59, 84, 232, 35))
+            painter.drawRect(selected_cell)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+        fill_marker = fill_handle(self)
+        if fill_marker is not None and fill_marker.intersects(QRectF(viewport_rect)):
+            painter.setPen(QPen(QColor("#ffffff"), 1.0))
+            painter.setBrush(QColor("#3b54e8"))
+            painter.drawRect(fill_marker)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+        fill_target = fill_target_rect(self)
+        if fill_target is not None:
+            painter.setPen(QPen(QColor("#3b54e8"), 2.0))
+            painter.drawRect(fill_target)
         self._paint_empty_toggle_hints(painter, viewport_rect)
         self._paint_dividers(painter, viewport_rect)
         self._paint_section_breaks(painter, viewport_rect)
@@ -3569,6 +3774,10 @@ class RichMemoTextEdit(QTextEdit):
             rect = self.cursorRect(marker_cursor)
             painter.setPen(QPen(QColor("#3b54e8"), 2.0))
             painter.drawLine(QLineF(4.0, rect.top(), self.viewport().width() - 8.0, rect.top()))
+        if self._table_width_drag is not None:
+            painter.setPen(QPen(QColor("#3b54e8"), 2.0))
+            x = self._table_width_drag["current_x"]
+            painter.drawLine(QLineF(x, 0.0, x, float(self.viewport().height())))
         for block in self._visible_blocks():
             text = block.text()
             if text.startswith((UNCHECKED_PREFIX, CHECKED_PREFIX)):
@@ -3709,6 +3918,12 @@ class RichMemoTextEdit(QTextEdit):
         payload = get_json(source, BLOCK_MIME)
         if payload is not None and self._paste_internal_blocks(payload):
             return
+        if payload is None:
+            handled, error = paste_range(self, source)
+            if handled:
+                if error:
+                    QToolTip.showText(self.mapToGlobal(self.cursorRect().bottomRight()), error, self)
+                return
         if source.hasImage():
             image = source.imageData()
             if isinstance(image, QImage) and self.insert_image(image):
@@ -3723,6 +3938,19 @@ class RichMemoTextEdit(QTextEdit):
         ] if source.hasUrls() else []
         if document_paths:
             self.structured_files_dropped.emit(document_paths)
+            return
+        web_url = single_web_url(source)
+        if web_url is not None:
+            fmt = QTextCharFormat()
+            fmt.setAnchor(True)
+            fmt.setAnchorHref(web_url)
+            fmt.setForeground(Qt.GlobalColor.blue)
+            fmt.setFontUnderline(True)
+            def insert_web_url():
+                cursor = self.textCursor()
+                cursor.insertText(web_url, fmt)
+                self.setTextCursor(cursor)
+            self._paste_into_lone_empty_toggle(insert_web_url)
             return
         if source.hasHtml():
             html = self._html_for_paste(source)
@@ -3765,6 +3993,7 @@ class RichMemoTextEdit(QTextEdit):
             "pages": page_snapshot,
             "attachments": attachments,
         })
+        augment_range_mime(self, mime)
         return mime
 
     def _page_ids_for_html(self, html: str) -> list[int]:
@@ -4050,7 +4279,122 @@ class RichMemoTextEdit(QTextEdit):
             message, self, self.rect(), 1800,
         )
 
+    def event(self, event) -> bool:
+        if (event.type() == QEvent.Type.ShortcutOverride and self._fold_chord_active
+                and event.key() not in {Qt.Key.Key_Control, Qt.Key.Key_Shift}):
+            self._fold_chord_used = True
+        return super().event(event)
+
+    def keyReleaseEvent(self, event: QKeyEvent) -> None:
+        if (event.key() in {Qt.Key.Key_Control, Qt.Key.Key_Shift}
+                and self._fold_chord_active and not event.isAutoRepeat()):
+            should_fold = not self._fold_chord_used
+            self._fold_chord_active = False
+            self._fold_chord_used = False
+            if should_fold:
+                self.toggle_current_fold()
+            event.accept()
+            return
+        super().keyReleaseEvent(event)
+
+    def focusOutEvent(self, event) -> None:
+        self._fold_chord_active = False
+        self._fold_chord_used = False
+        super().focusOutEvent(event)
+
     def keyPressEvent(self, event: QKeyEvent) -> None:
+        if self._fold_chord_active and event.key() not in {
+            Qt.Key.Key_Control, Qt.Key.Key_Shift,
+        }:
+            self._fold_chord_used = True
+        if (event.key() in {Qt.Key.Key_Control, Qt.Key.Key_Shift}
+                and not event.isAutoRepeat()
+                and (structure_shortcut_value(self.store, "toggle_fold") if self.store else "Ctrl+Shift")
+                == "Ctrl+Shift"):
+            modifiers = event.modifiers()
+            if event.key() == Qt.Key.Key_Control:
+                modifiers |= Qt.KeyboardModifier.ControlModifier
+            else:
+                modifiers |= Qt.KeyboardModifier.ShiftModifier
+            if modifiers & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier) == (
+                Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier
+            ):
+                self._fold_chord_active = True
+                self._fold_chord_used = False
+        if event.key() == Qt.Key.Key_Escape and cancel_formula_edit(self):
+            event.accept()
+            return
+        if event.key() == Qt.Key.Key_Escape and self._table_fill_drag is not None:
+            self._table_fill_drag = None
+            self.viewport().update()
+            event.accept()
+            return
+        if event.key() == Qt.Key.Key_Escape and self._table_selected_cell is not None:
+            clear_cell_selection(self)
+            event.accept()
+            return
+        if event.key() == Qt.Key.Key_F2 and self.current_table() is not None and edit_formula(self):
+            event.accept()
+            return
+        if event.key() == Qt.Key.Key_F5 and select_current_cell(self):
+            event.accept()
+            return
+        if (event.modifiers() == Qt.KeyboardModifier.ShiftModifier
+                and extend_cell_selection(self, event.key())):
+            event.accept()
+            return
+        table_selected = bool(
+            self.current_table() is not None
+            and (self._table_selected_cell is not None or self.textCursor().hasComplexSelection())
+        )
+        if table_selected and event.modifiers() == Qt.KeyboardModifier.NoModifier:
+            if event.key() == Qt.Key.Key_S and not event.isAutoRepeat():
+                show_split_dialog(self)
+                event.accept()
+                return
+            if event.key() == Qt.Key.Key_M and not event.isAutoRepeat():
+                _handled, error = merge_cells(self)
+                if error:
+                    QToolTip.showText(QCursor.pos(), error, self)
+                clear_cell_selection(self)
+                event.accept()
+                return
+            if event.key() == Qt.Key.Key_Delete:
+                delete_selected(self)
+                event.accept()
+                return
+            if event.key() == Qt.Key.Key_Backspace:
+                backspace_selected(self)
+                event.accept()
+                return
+        if table_selected and event.modifiers() == Qt.KeyboardModifier.ControlModifier and event.key() in {
+            Qt.Key.Key_Left, Qt.Key.Key_Right, Qt.Key.Key_Up, Qt.Key.Key_Down,
+        }:
+            resize_selected(self, event.key())
+            event.accept()
+            return
+        if (event.key() in {Qt.Key.Key_Return, Qt.Key.Key_Enter}
+                and event.modifiers() == Qt.KeyboardModifier.NoModifier
+                and self.current_table() is not None):
+            handled, error = commit_typed_formula(self)
+            if handled:
+                self._has_table_formulas = True
+                event.accept()
+                return
+            if error:
+                QToolTip.showText(QCursor.pos(), error, self)
+                event.accept()
+                return
+        if (self._table_selected_cell is not None
+                and event.modifiers() == Qt.KeyboardModifier.NoModifier
+                and (event.text() or event.key() in {Qt.Key.Key_Return, Qt.Key.Key_Enter,
+                                                    Qt.Key.Key_Tab, Qt.Key.Key_Backtab})):
+            clear_cell_selection(self)
+        if event.key() == Qt.Key.Key_Escape and self._table_width_drag is not None:
+            self._table_width_drag = None
+            self.viewport().update()
+            event.accept()
+            return
         if event.key() == Qt.Key.Key_Escape and self._image_move_press is not None:
             self._cancel_image_drag()
             event.accept()
@@ -4062,10 +4406,8 @@ class RichMemoTextEdit(QTextEdit):
             event.accept()
             return
         if (event.key() in {Qt.Key.Key_Return, Qt.Key.Key_Enter}
-                and event.modifiers() == Qt.KeyboardModifier.ControlModifier):
-            fold_key = structure_shortcut_value(self.store, "toggle_fold") if self.store else "Ctrl+Enter"
-            if fold_key == "Ctrl+Enter" and not event.isAutoRepeat():
-                self.toggle_current_fold()
+                and event.modifiers() == Qt.KeyboardModifier.ShiftModifier
+                and self._exit_fold_for_editing()):
             event.accept()
             return
         if event.key() == Qt.Key.Key_M and event.modifiers() == (
@@ -4181,9 +4523,27 @@ class RichMemoTextEdit(QTextEdit):
                     return
                 self._shift_indent(block, -1)
                 return
-            if (event.key() == Qt.Key.Key_Backspace and offset == 0
-                    and is_section_break(block) and self.clear_section_break(block)):
-                return
+            if event.key() == Qt.Key.Key_Backspace and offset == 0:
+                previous = block.previous()
+                if (not block.text().strip() and block.next().isValid()
+                        and block.isVisible() and
+                        (is_section_break(block)
+                         or (previous.isValid() and not previous.isVisible()))):
+                    preceding_toggle = self._toggle_for_lone_empty_child(previous)
+                    if preceding_toggle is not None and not is_section_break(block):
+                        self._delete_empty_block_and_restore(block, preceding_toggle)
+                    else:
+                        self._delete_outside_empty_block(block)
+                    return
+                if is_section_break(block):
+                    # This boundary keeps the following lines outside a heading.
+                    return
+                if (block.isVisible() and previous.isValid() and not previous.isVisible()
+                        and (block.text().strip()
+                             or self._toggle_for_lone_empty_child(previous) is None)):
+                    # Qt would join this visible line into a hidden child and
+                    # take its toggle/heading ownership with it.
+                    return
         if not cursor.hasSelection() and event.key() in {Qt.Key.Key_Return, Qt.Key.Key_Enter}:
             if self.heading_level(block):
                 if self._heading_is_folded(block):
@@ -4226,15 +4586,15 @@ class RichMemoTextEdit(QTextEdit):
                 return
         if toggle and not cursor.hasSelection():
             if event.key() in {Qt.Key.Key_Return, Qt.Key.Key_Enter}:
-                if not block.text()[2:].strip():
-                    self._remove_toggle_prefix(block)
-                    return
                 waiting = self._lone_empty_child(block) if cursor.atBlockEnd() else None
                 if waiting is not None:
                     # 안내가 떠 있던 빈 줄이 곧 첫 내용 줄이다.  줄을 또 만들지 않는다.
                     moved = QTextCursor(waiting)
                     moved.movePosition(QTextCursor.MoveOperation.EndOfBlock)
                     self.setTextCursor(moved)
+                    return
+                if not block.text()[2:].strip():
+                    self._remove_toggle_prefix(block)
                     return
                 depth = self._block_indent(block)
                 super().keyPressEvent(event)
@@ -4338,6 +4698,22 @@ class RichMemoTextEdit(QTextEdit):
         else:
             self._wire_context_history_actions(menu)
         menu.addSeparator()
+        if self.current_table() is not None and not block_mode:
+            table_menu = menu.addMenu("표")
+            populate_table_menu(table_menu, self)
+            active = active_cells(self)
+            if active is not None and active[2] * active[4] > 1:
+                calculations = menu.addMenu("블록 계산식")
+                for label, name in (("블록 합계", "SUM"), ("블록 평균", "AVERAGE"),
+                                    ("블록 곱", "PRODUCT")):
+                    def run_calculation(_checked=False, function=name):
+                        _handled, error = block_calculation(self, function)
+                        if error:
+                            QToolTip.showText(QCursor.pos(), error, self)
+                    calculations.addAction(label, run_calculation)
+            menu.addSeparator()
+        elif not block_mode:
+            menu.addAction("표 만들기", lambda _checked=False: self.insert_table())
         self._populate_block_context_menu(menu)
         if not block_mode:
             menu.addSeparator()
@@ -4410,7 +4786,7 @@ class RichMemoTextEdit(QTextEdit):
         pin.setCheckable(True)
         pin.setChecked(all(is_pinned(block) for block in self.block_commands.blocks()))
         pin.triggered.connect(self.toggle_selected_block_pins)
-        fold_key = structure_shortcut_value(self.store, "toggle_fold") if self.store else "Ctrl+Enter"
+        fold_key = structure_shortcut_value(self.store, "toggle_fold") if self.store else "Ctrl+Shift"
         fold = block_menu.addAction(f"현재 제목·토글 접기/펴기\t{fold_key}")
         fold.setEnabled(bool(self.heading_level(self.textCursor().block()) or self.current_block_is_toggle()))
         fold.triggered.connect(self.toggle_current_fold)
@@ -4566,7 +4942,68 @@ class RichMemoTextEdit(QTextEdit):
                 return name, block.position()
         return None
 
+    def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            point_cursor = self.cursorForPosition(event.position().toPoint())
+            if point_cursor.currentTable() is not None:
+                self.setTextCursor(point_cursor)
+                if edit_formula(self):
+                    event.accept()
+                    return
+        super().mouseDoubleClickEvent(event)
+
     def mousePressEvent(self, event: QMouseEvent) -> None:
+        if self._fold_chord_active:
+            self._fold_chord_used = True
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._pending_formula_mouse = None
+            editing = self._table_formula_edit
+            if editing is not None:
+                source_table = self.textCursor().currentTable()
+                pointed_table = self.cursorForPosition(event.position().toPoint()).currentTable()
+                pointed_cell = (pointed_table.cellAt(self.cursorForPosition(event.position().toPoint()))
+                                if pointed_table is not None else None)
+                other_cell = (pointed_cell is None or pointed_table.firstPosition() != editing[0]
+                              or (pointed_cell.row(), pointed_cell.column()) != editing[1:3])
+                if other_cell and source_table is not None:
+                    source = source_table.cellAt(editing[1], editing[2])
+                    if not source.firstCursorPosition().block().text().rstrip().endswith("("):
+                        handled, error = commit_typed_formula(self)
+                        if not handled:
+                            cancel_formula_edit(self)
+                            if error:
+                                QToolTip.showText(QCursor.pos(), error, self)
+                    elif pointed_table is None or pointed_table.firstPosition() != editing[0]:
+                        cancel_formula_edit(self)
+        if event.button() == Qt.MouseButton.LeftButton and not event.modifiers():
+            if begin_fill(self, event.position().toPoint()):
+                self.setFocus()
+                event.accept()
+                return
+        if event.button() == Qt.MouseButton.LeftButton:
+            current = self.textCursor().currentTable()
+            pointed = self.cursorForPosition(event.position().toPoint()).currentTable()
+            if current is not None and pointed is not None and current.firstPosition() == pointed.firstPosition():
+                source_cell = current.cellAt(self.textCursor())
+                target_cell = pointed.cellAt(self.cursorForPosition(event.position().toPoint()))
+                if (source_cell.isValid() and target_cell.isValid()
+                        and (source_cell.row(), source_cell.column()) != (target_cell.row(), target_cell.column())
+                        and source_cell.firstCursorPosition().block().text().startswith("=")
+                        and source_cell.firstCursorPosition().block().text().rstrip().endswith("(")):
+                    self._pending_formula_mouse = (current, source_cell.row(), source_cell.column())
+            clear_cell_selection(self)
+        if event.button() == Qt.MouseButton.LeftButton and not event.modifiers():
+            boundary = column_boundary(self, event.position().toPoint())
+            if boundary is not None:
+                key, column, x, widths = boundary
+                self.setTextCursor(self.cursorForPosition(event.position().toPoint()))
+                self._table_width_drag = {
+                    "table": key, "column": column, "start_x": x,
+                    "current_x": event.position().x(), "widths": widths,
+                }
+                self.setFocus()
+                event.accept()
+                return
         if event.button() == Qt.MouseButton.LeftButton and event.modifiers() & Qt.KeyboardModifier.AltModifier:
             self.character_selection.clear()
             self._left_press_point = None
@@ -4643,6 +5080,30 @@ class RichMemoTextEdit(QTextEdit):
         return float(self.cursorRect(spot).left())
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if (event.button() == Qt.MouseButton.LeftButton
+                and (self._image_move_press is not None or self._table_width_drag is not None
+                     or self._claimed_press)):
+            self._pending_formula_mouse = None
+        if event.button() == Qt.MouseButton.LeftButton and self._table_fill_drag is not None:
+            _handled, error = finish_fill(self, event.position().toPoint())
+            if error:
+                QToolTip.showText(QCursor.pos(), error, self)
+            event.accept()
+            return
+        if event.button() == Qt.MouseButton.LeftButton and self._table_width_drag is not None:
+            drag = self._table_width_drag
+            self._table_width_drag = None
+            delta = event.position().x() - drag["start_x"]
+            if abs(delta) >= QApplication.startDragDistance() and self.current_table() is not None:
+                widths = list(drag["widths"])
+                left, right = drag["column"] - 1, drag["column"]
+                delta = max(48.0 - widths[left], min(delta, widths[right] - 48.0))
+                widths[left] += delta
+                widths[right] -= delta
+                set_table_width(self, "drag", widths)
+            self.viewport().update()
+            event.accept()
+            return
         if event.button() == Qt.MouseButton.LeftButton and self._image_move_press is not None:
             self._finish_image_drag(event.position().toPoint())
             self._left_press_point = None
@@ -4743,6 +5204,14 @@ class RichMemoTextEdit(QTextEdit):
             event.accept()
             return
         super().mouseReleaseEvent(event)
+        if self._pending_formula_mouse is not None:
+            table, row, column = self._pending_formula_mouse
+            self._pending_formula_mouse = None
+            handled, error = formula_from_mouse_range(self, table, row, column)
+            if handled:
+                self._has_table_formulas = True
+            elif error:
+                QToolTip.showText(QCursor.pos(), error, self)
         self.text_format_bar.sync()
 
     def _place_gutter(self) -> None:
@@ -4768,6 +5237,7 @@ class RichMemoTextEdit(QTextEdit):
             self.block_action_bar.sync()
             self.character_action_bar.sync()
             self.text_format_bar.sync()
+            self.table_action_bar.sync()
         self._refit_timer.start(0)
 
     def refit_images(self) -> None:

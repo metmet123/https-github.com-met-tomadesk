@@ -5,10 +5,10 @@
 오전/오후·매주) 어순이 안정적이라, 정규식 층을 앞에서부터 벗겨 내는 쪽이 훨씬
 정확하다.  외부 의존성은 쓰지 않는다.
 
-안전한 쪽으로 설계했다.  날짜·시간은 **문장 맨 앞에서만** 읽고, 뒤에 나오는
-숫자는 건드리지 않는다.  "9월 매출 정리"처럼 달만 있고 날짜가 없는 표현은 아예
-패턴에 없으므로 제목 그대로 남는다.  분류(``#업무``)와 알림(``!30분전``)은 사람이
-일부러 찍은 표시이므로 위치와 상관없이 읽는다.
+안전한 쪽으로 설계했다.  날짜·시간은 명확한 단위(``일``·``시``·``:``)나 완성된
+구분 표기만 읽고, 일반 숫자는 건드리지 않는다.  "9월 매출 정리"처럼 달만 있고
+날짜가 없는 표현은 패턴에 없으므로 제목 그대로 남는다.  분류(``#업무``)와
+알림(``!30분전``)은 사람이 일부러 찍은 표시이므로 위치와 상관없이 읽는다.
 
 인식한 구간은 ``spans``로 함께 돌려준다.  입력창에 밑줄을 긋고 클릭으로 인식을
 취소하려면 결과값이 아니라 위치가 필요하기 때문이다.
@@ -29,6 +29,7 @@ DAY_WORDS = {
     "내일": 1, "낼": 1, "명일": 1, "모레": 2, "글피": 3,
 }
 WEEK_OFFSETS = {
+    "다다음주": 2,
     "이번주": 0, "금주": 0,
     "다음주": 1, "담주": 1, "차주": 1, "낼주": 1,
     "저번주": -1, "지난주": -1, "전주": -1,
@@ -40,16 +41,29 @@ _SPACE = r"[ \t]*"
 _MERIDIEM_GROUP = f"({'|'.join(MERIDIEM)})?"
 
 _RE_CATEGORY = re.compile(r"#([가-힣A-Za-z0-9]+)")
-_RE_REMINDER = re.compile(r"!(\d{1,3})\s*(시간|분)?\s*(?:전)?")
+_RE_REMINDER = re.compile(r"!(\d{1,3})\s*(시간|분)?\s*([전후])?")
+_RE_NATURAL_REMINDER = re.compile(
+    r"(?<![!\d])(?:(\d{1,5})\s*분\s*([전후])\s*알(?:람|림)|"
+    r"알(?:람|림)\s*(\d{1,5})\s*분\s*([전후])|"
+    r"알(?:람|림)|"
+    r"(\d{1,5})\s*분\s*([전후]))(?![가-힣A-Za-z0-9])"
+)
 _RE_REPEAT_WEEKDAY = re.compile(rf"매주{_SPACE}([{WEEKDAY_LETTERS}])요일?")
 _RE_REPEAT = re.compile(r"매(일|주|달|월|년)")
 _RE_ABS_YMD = re.compile(r"(\d{4})[-./](\d{1,2})[-./](\d{1,2})")
 _RE_ABS_MD_KO = re.compile(rf"(\d{{1,2}})월{_SPACE}(\d{{1,2}})일")
-_RE_ABS_MD_SLASH = re.compile(r"(\d{1,2})/(\d{1,2})")
+_RE_ABS_MD_SLASH = re.compile(r"(?<!\d)(\d{1,2})/(\d{1,2})(?!\d)")
+_RE_ABS_MD_DOT = re.compile(r"(?<!\d)(\d{1,2})\.(\d{1,2})\.(?!\d)")
 _RE_REL_DAY = re.compile(rf"(\d{{1,2}})일{_SPACE}(?:뒤|후)")
+_RE_KO_REL_DAY = re.compile(r"(하루|이틀|사흘|나흘)\s*(?:뒤|후)(?![가-힣A-Za-z0-9])")
 _RE_REL_WEEK = re.compile(rf"(\d{{1,2}})주{_SPACE}(?:뒤|후)")
+_RE_WEEK_WORD = re.compile(rf"(?<![가-힣A-Za-z0-9])(다다음{_SPACE}주|다음{_SPACE}주)(?![가-힣A-Za-z0-9])")
+_RE_REL_TIME = re.compile(
+    rf"(?:(\d{{1,3}}){_SPACE}시간(?:{_SPACE}(\d{{1,2}}){_SPACE}분)?|"
+    rf"(\d{{1,3}}){_SPACE}분){_SPACE}(?:뒤|후)"
+)
 _RE_WEEKDAY = re.compile(
-    rf"(이번{_SPACE}주|다음{_SPACE}주|담주|차주|낼주|금주|저번{_SPACE}주|지난{_SPACE}주|전주)?"
+    rf"(이번{_SPACE}주|다다음{_SPACE}주|다음{_SPACE}주|담주|차주|낼주|금주|저번{_SPACE}주|지난{_SPACE}주|전주)?"
     rf"{_SPACE}([{WEEKDAY_LETTERS}])요일"
 )
 _RE_DAY_WORD = re.compile(rf"({'|'.join(sorted(DAY_WORDS, key=len, reverse=True))})")
@@ -57,10 +71,11 @@ _RE_TIME_COLON = re.compile(rf"{_MERIDIEM_GROUP}{_SPACE}(\d{{1,2}}):(\d{{2}})")
 # "16시 30분"의 분과 "16시 30분간"의 길이는 같은 글자로 시작한다.  뒤에 간·동안이
 # 붙으면 분이 아니라 길이이므로 여기서 넘긴다.
 _RE_TIME_HOUR = re.compile(
-    rf"{_MERIDIEM_GROUP}{_SPACE}(\d{{1,2}}){_SPACE}시{_SPACE}"
-    rf"(?:(반)|(\d{{1,2}}){_SPACE}분(?!{_SPACE}(?:간|동안)))?"
+    rf"{_MERIDIEM_GROUP}{_SPACE}(\d{{1,2}}){_SPACE}시(?!간){_SPACE}"
+    rf"(?:(반)|(\d{{1,2}}){_SPACE}분(?!{_SPACE}(?:간|동안|전|후)))?"
 )
 _RE_RANGE_MARK = re.compile(rf"(?:~|-|–|—|부터){_SPACE}")
+_RE_BARE_HOUR = re.compile(r"(\d{1,2})(?=$|[\s,.;!?~\-–—]|까지)")
 _RE_DURATION = re.compile(
     rf"(?:(\d{{1,2}}){_SPACE}시간{_SPACE}(?:(\d{{1,2}}){_SPACE}분)?|(\d{{1,3}}){_SPACE}분{_SPACE}(?:간|동안))"
 )
@@ -86,10 +101,12 @@ class ParsedSchedule:
     start: datetime | None = None
     end: datetime | None = None
     all_day: bool = False
+    time_mode: str | None = None
     category: str | None = None
     reminders: tuple[int, ...] = ()
     recurrence: dict | None = None
     spans: tuple[Span, ...] = field(default=())
+    issues: tuple[str, ...] = field(default=())
 
     @property
     def has_datetime(self) -> bool:
@@ -104,6 +121,8 @@ class ParsedSchedule:
 def parse(
     text: str, now: datetime | None = None,
     base: datetime | None = None, base_end: datetime | None = None,
+    relative_base: datetime | None = None,
+    ignored_spans: tuple[tuple[int, int, str], ...] = (),
 ) -> ParsedSchedule:
     """한 줄을 일정 값으로 나눈다.
 
@@ -115,23 +134,65 @@ def parse(
     raw = str(text or "")
     now = now or datetime.now()
     base = (base or now).replace(second=0, microsecond=0)
+    relative_base = (relative_base or now).replace(second=0, microsecond=0)
     kept_span = (base_end - base) if base_end and base_end > base else timedelta(hours=1)
     spans: list[Span] = []
 
+    ignored = tuple(ignored_spans or ())
     category = _take_category(raw, spans)
-    reminders = _take_reminders(raw, spans)
+    reminders = _take_reminders(raw, spans, ignored)
     cursor = _skip_space(raw, 0)
     recurrence, cursor = _take_recurrence(raw, cursor, spans)
-    parsed_date, parsed_time, end_time, duration, all_day, cursor = _take_datetime(
-        raw, cursor, spans, now
+    parsed_date, parsed_time, end_time, duration, all_day, offset, cursor = _take_datetime(
+        raw, cursor, spans, now, ignored
     )
+    if parsed_date is None:
+        found = _find_explicit_date(raw, now, spans, ignored)
+        if found is not None:
+            parsed_date, match = found
+            spans.append(Span(match.start(), match.end(), "date", match.group(0)))
+    issues = []
+    if parsed_date is not None:
+        checked_spans = list(spans)
+        while (extra := _find_explicit_date(raw, now, checked_spans, ignored)) is not None:
+            extra_date, match = extra
+            checked_spans.append(Span(match.start(), match.end(), "date", match.group(0)))
+            if extra_date != parsed_date:
+                issues.append("날짜가 서로 다릅니다. 사용할 날짜 하나만 남겨 주세요.")
+                spans[:] = [span for span in spans if span.kind != "date"]
+                parsed_date = None
+                break
+    if parsed_time is None and offset is None and not all_day:
+        found_time = _find_explicit_time(raw, spans, ignored)
+        if found_time is not None:
+            parsed_time, end_time, duration, found_spans = found_time
+            spans.extend(found_spans)
+        else:
+            # 상대시간도 제목 뒤에 입력할 수 있다. 취소한 알림을 상대시간으로
+            # 재해석하지 않도록 종류와 관계없이 제외 범위를 검사한다.
+            for match in _RE_REL_TIME.finditer(raw):
+                if _overlaps_spans(match.start(), match.end(), spans):
+                    continue
+                if any(a < match.end() and match.start() < b for a, b, _ in ignored):
+                    continue
+                offset = _relative_offset(match)
+                if offset is not None:
+                    spans.append(Span(match.start(), match.end(), "time", match.group(0)))
+                    break
 
     start = end = None
-    if parsed_date is not None or parsed_time is not None or all_day:
+    if parsed_date is not None or parsed_time is not None or all_day or offset is not None:
         day = parsed_date or base.date()
         if all_day:
             start = datetime.combine(day, time.min)
             end = datetime.combine(day, time(23, 59))
+        elif offset is not None and parsed_time is None:
+            reference = (
+                datetime.combine(parsed_date, relative_base.time())
+                if parsed_date is not None else relative_base
+            )
+            start = reference + offset
+            end = start + kept_span
         else:
             clock = parsed_time or base.time().replace(second=0, microsecond=0)
             start = datetime.combine(day, clock)
@@ -149,10 +210,17 @@ def parse(
         start, end = _align_to_weekday(start, end, recurrence["weekdays"][0])
 
     title = _remaining_title(raw, spans)
+    time_mode = (
+        "range" if all_day or end_time is not None or duration is not None
+        else "point" if parsed_time is not None or offset is not None
+        else None
+    )
     return ParsedSchedule(
         title=title, start=start, end=end, all_day=all_day, category=category,
+        time_mode=time_mode,
         reminders=tuple(reminders), recurrence=recurrence,
         spans=tuple(sorted(spans, key=lambda span: span.start)),
+        issues=tuple(issues),
     )
 
 
@@ -168,13 +236,44 @@ def _take_category(raw: str, spans: list[Span]) -> str | None:
     return None
 
 
-def _take_reminders(raw: str, spans: list[Span]) -> list[int]:
+def _take_reminders(
+    raw: str, spans: list[Span], ignored: tuple[tuple[int, int, str], ...]
+) -> list[int]:
     values: list[int] = []
+    # 알림은 날짜를 분리하기 전에 읽는다. ISO 날짜의 `10-02` 등을
+    # 시각 범위로 오인해 상대시간을 알림으로 바꾸지 않도록 가린다.
+    clock_exclusions = [
+        Span(m.start(), m.end(), "context", m.group(0))
+        for pattern in (_RE_ABS_YMD, _RE_ABS_MD_KO, _RE_ABS_MD_SLASH, _RE_ABS_MD_DOT, _RE_REL_TIME)
+        for m in pattern.finditer(raw)
+    ]
     for match in _RE_REMINDER.finditer(raw):
+        if _is_ignored(match.start(), match.end(), "reminder", ignored):
+            continue
         amount = int(match.group(1))
         minutes = amount * 60 if match.group(2) == "시간" else amount
         if 0 < minutes <= 60 * 24 * 7 and len(values) < 5:
+            if match.group(3) == "후":
+                minutes = -minutes
             values.append(minutes)
+            spans.append(Span(match.start(), match.end(), "reminder", match.group(0)))
+    for match in _RE_NATURAL_REMINDER.finditer(raw):
+        if _overlaps_spans(match.start(), match.end(), spans):
+            continue
+        if _is_ignored(match.start(), match.end(), "reminder", ignored):
+            continue
+        if match.group(5) is not None and match.group(6) == "후":
+            # `1시간 30분 후`의 뒤쪽만 알림으로 떼지 않는다.
+            if any(m.start() < match.start() < m.end() for m in _RE_REL_TIME.finditer(raw)):
+                continue
+            # 원문 시각을 기준으로 분류한다. 시간 칩을 취소한 경우에도
+            # 남은 알림이 상대시간으로 바뀌어 일정 시각을 이동시키면 안 된다.
+            if _find_explicit_time(raw, spans + clock_exclusions, ()) is None:
+                continue
+        pairs = list(zip(match.groups()[::2], match.groups()[1::2]))
+        amount, direction = next(((int(a), d) for a, d in pairs if a is not None), (0, "전"))
+        if 0 <= amount <= 60 * 24 * 7 and len(values) < 5:
+            values.append(-amount if direction == "후" else amount)
             spans.append(Span(match.start(), match.end(), "reminder", match.group(0)))
     return values
 
@@ -197,16 +296,28 @@ def _take_recurrence(raw: str, cursor: int, spans: list[Span]) -> tuple[dict | N
 
 
 # --------------------------------------------------------------- 날짜·시각 --
-def _take_datetime(raw: str, cursor: int, spans: list[Span], now: datetime):
+def _take_datetime(
+    raw: str, cursor: int, spans: list[Span], now: datetime,
+    ignored: tuple[tuple[int, int, str], ...],
+):
     """맨 앞에서부터 날짜·시각 조각을 더 이상 안 읽힐 때까지 벗겨 낸다."""
     parsed_date: date | None = None
     parsed_time: time | None = None
     end_time: time | None = None
     duration: timedelta | None = None
+    offset: timedelta | None = None
     all_day = False
 
     while cursor < len(raw):
         cursor = _skip_space(raw, cursor)
+        occupied = [span.end for span in spans if span.start <= cursor < span.end]
+        if occupied:
+            cursor = max(occupied)
+            continue
+        ignored_end = _ignored_end_at(cursor, ignored)
+        if ignored_end is not None:
+            cursor = ignored_end
+            continue
         if all_day is False:
             match = _RE_ALL_DAY.match(raw, cursor)
             if match:
@@ -221,8 +332,22 @@ def _take_datetime(raw: str, cursor: int, spans: list[Span], now: datetime):
                 spans.append(Span(match.start(), match.end(), "date", match.group(0)))
                 cursor = match.end()
                 continue
+        if offset is None and parsed_time is None and not all_day:
+            match = _RE_REL_TIME.match(raw, cursor)
+            if match:
+                offset = _relative_offset(match)
+                if offset is not None:
+                    spans.append(Span(match.start(), match.end(), "time", match.group(0)))
+                    cursor = match.end()
+                    continue
         if parsed_time is None and not all_day:
             found = _match_time(raw, cursor)
+            if found is None:
+                bare = _match_bare_hour(raw, cursor)
+                if bare is not None:
+                    mark = _RE_RANGE_MARK.match(raw, _skip_space(raw, bare[1].end()))
+                    if mark and (_match_time(raw, mark.end()) or _match_bare_hour(raw, mark.end())):
+                        found = bare
             if found is not None:
                 parsed_time, match = found
                 spans.append(Span(match.start(), match.end(), "time", match.group(0)))
@@ -232,7 +357,7 @@ def _take_datetime(raw: str, cursor: int, spans: list[Span], now: datetime):
             after = _skip_space(raw, cursor)
             mark = _RE_RANGE_MARK.match(raw, after)
             if mark:
-                found = _match_time(raw, mark.end())
+                found = _match_time(raw, mark.end()) or _match_bare_hour(raw, mark.end())
                 if found is not None:
                     end_time, match = found
                     stop = _skip_trailing(raw, match.end(), "까지")
@@ -246,7 +371,7 @@ def _take_datetime(raw: str, cursor: int, spans: list[Span], now: datetime):
                 cursor = match.end()
                 continue
         break
-    return parsed_date, parsed_time, end_time, duration, all_day, cursor
+    return parsed_date, parsed_time, end_time, duration, all_day, offset, cursor
 
 
 def _match_date(raw: str, cursor: int, now: datetime):
@@ -258,13 +383,18 @@ def _match_date(raw: str, cursor: int, now: datetime):
     if match:
         value = _month_day(now, int(match.group(1)), int(match.group(2)))
         return (value, match) if value else None
-    match = _RE_ABS_MD_SLASH.match(raw, cursor)
-    if match:
-        value = _month_day(now, int(match.group(1)), int(match.group(2)))
-        return (value, match) if value else None
+    for pattern in (_RE_ABS_MD_SLASH, _RE_ABS_MD_DOT):
+        match = pattern.match(raw, cursor)
+        if match:
+            value = _month_day(now, int(match.group(1)), int(match.group(2)))
+            return (value, match) if value else None
     match = _RE_REL_DAY.match(raw, cursor)
     if match:
         return now.date() + timedelta(days=int(match.group(1))), match
+    match = _RE_KO_REL_DAY.match(raw, cursor)
+    if match:
+        days = {"하루": 1, "이틀": 2, "사흘": 3, "나흘": 4}[match.group(1)]
+        return now.date() + timedelta(days=days), match
     match = _RE_REL_WEEK.match(raw, cursor)
     if match:
         return now.date() + timedelta(weeks=int(match.group(1))), match
@@ -276,6 +406,9 @@ def _match_date(raw: str, cursor: int, now: datetime):
     match = _RE_DAY_WORD.match(raw, cursor)
     if match:
         return now.date() + timedelta(days=DAY_WORDS[match.group(1)]), match
+    match = _RE_WEEK_WORD.match(raw, cursor)
+    if match:
+        return now.date() + timedelta(weeks=WEEK_OFFSETS[re.sub(r"\s+", "", match.group(1))]), match
     return None
 
 
@@ -300,6 +433,93 @@ def _match_time(raw: str, cursor: int):
     return None
 
 
+def _find_explicit_date(
+    raw: str, now: datetime, spans: list[Span],
+    ignored: tuple[tuple[int, int, str], ...],
+):
+    """제목 뒤에 둔 명확한 월/일 표기도 날짜로 읽는다."""
+    for pattern in (_RE_ABS_YMD, _RE_ABS_MD_KO, _RE_ABS_MD_SLASH, _RE_ABS_MD_DOT, _RE_WEEKDAY,
+                    _RE_DAY_WORD, _RE_KO_REL_DAY, _RE_REL_DAY, _RE_REL_WEEK, _RE_WEEK_WORD):
+        for match in pattern.finditer(raw):
+            if _overlaps_spans(match.start(), match.end(), spans):
+                continue
+            if _is_ignored(match.start(), match.end(), "date", ignored):
+                continue
+            if pattern in (_RE_DAY_WORD, _RE_KO_REL_DAY, _RE_REL_DAY, _RE_REL_WEEK, _RE_WEEK_WORD):
+                if match.start() and raw[match.start() - 1].isalnum():
+                    continue
+                if match.end() < len(raw) and raw[match.end()].isalnum():
+                    continue
+                found = _match_date(raw, match.start(), now)
+                value = found[0] if found else None
+            elif pattern is _RE_WEEKDAY:
+                prefix = re.sub(r"\s+", "", match.group(1) or "") or None
+                value = _resolve_weekday(
+                    now.date(), WEEKDAY_LETTERS.index(match.group(2)),
+                    WEEK_OFFSETS.get(prefix), prefix is not None,
+                )
+            elif pattern is _RE_ABS_YMD:
+                value = _safe_date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+            else:
+                value = _month_day(now, int(match.group(1)), int(match.group(2)))
+            if value is not None:
+                return value, match
+    return None
+
+
+def _find_explicit_time(
+    raw: str, spans: list[Span], ignored: tuple[tuple[int, int, str], ...],
+):
+    """문장 중간·끝의 명확한 시각 또는 시각 범위를 찾는다."""
+    for cursor in range(len(raw)):
+        found = _match_time(raw, cursor)
+        if found is None:
+            bare = _match_bare_hour(raw, cursor)
+            if bare is not None:
+                mark = _RE_RANGE_MARK.match(raw, _skip_space(raw, bare[1].end()))
+                if mark and (_match_time(raw, mark.end()) or _match_bare_hour(raw, mark.end())):
+                    found = bare
+        if found is None:
+            continue
+        start_time, first = found
+        if first.start() > 0 and raw[first.start() - 1].isdigit():
+            continue
+        if _overlaps_spans(first.start(), first.end(), spans):
+            continue
+        if _is_ignored(first.start(), first.end(), "time", ignored):
+            continue
+        found_spans = [Span(first.start(), first.end(), "time", first.group(0))]
+        end_time = None
+        duration = None
+        after = _skip_space(raw, first.end())
+        mark = _RE_RANGE_MARK.match(raw, after)
+        if mark:
+            second = _match_time(raw, mark.end()) or _match_bare_hour(raw, mark.end())
+            if second is not None:
+                end_time, match = second
+                stop = _skip_trailing(raw, match.end(), "까지")
+                if not _is_ignored(mark.start(), stop, "time", ignored):
+                    found_spans.append(Span(mark.start(), stop, "time", raw[mark.start():stop]))
+                else:
+                    end_time = None
+        if end_time is None:
+            length = _RE_DURATION.match(raw, after)
+            if length and not _is_ignored(length.start(), length.end(), "time", ignored):
+                duration = _duration_of(length)
+                found_spans.append(Span(length.start(), length.end(), "time", length.group(0)))
+        return start_time, end_time, duration, found_spans
+    return None
+
+
+def _match_bare_hour(raw: str, cursor: int):
+    match = _RE_BARE_HOUR.match(raw, _skip_space(raw, cursor))
+    if match:
+        hour = _apply_meridiem(int(match.group(1)), None)
+        if hour is not None:
+            return time(hour), match
+    return None
+
+
 def _apply_meridiem(hour: int, meridiem: str | None) -> int | None:
     if hour > 23:
         return None
@@ -319,6 +539,14 @@ def _duration_of(match: re.Match) -> timedelta:
     if match.group(1):
         return timedelta(hours=int(match.group(1)), minutes=int(match.group(2) or 0))
     return timedelta(minutes=int(match.group(3)))
+
+
+def _relative_offset(match: re.Match) -> timedelta | None:
+    hours = int(match.group(1) or 0)
+    minutes = int(match.group(2) or match.group(3) or 0)
+    if match.group(2) is not None and minutes >= 60:
+        return None
+    return timedelta(hours=hours, minutes=minutes) if hours or minutes else None
 
 
 def _resolve_weekday(today: date, index: int, offset: int | None, explicit: bool) -> date:
@@ -374,3 +602,46 @@ def _skip_space(raw: str, cursor: int) -> int:
 def _skip_trailing(raw: str, cursor: int, word: str) -> int:
     cursor = _skip_space(raw, cursor)
     return cursor + len(word) if raw.startswith(word, cursor) else cursor
+
+
+def _is_ignored(
+    start: int, end: int, kind: str,
+    ignored: tuple[tuple[int, int, str], ...],
+) -> bool:
+    return any(
+        ignored_kind == kind and ignored_start < end and start < ignored_end
+        for ignored_start, ignored_end, ignored_kind in ignored
+    )
+
+
+def _ignored_end_at(
+    cursor: int, ignored: tuple[tuple[int, int, str], ...]
+) -> int | None:
+    ends = [end for start, end, kind in ignored if start <= cursor < end]
+    return max(ends) if ends else None
+
+
+def _overlaps_spans(start: int, end: int, spans: list[Span]) -> bool:
+    return any(span.start < end and start < span.end for span in spans)
+
+
+def remap_ignored_spans(old: str, new: str, spans) -> set[tuple[int, int, str]]:
+    """주변 글자 편집은 취소 위치만 이동시키고, 표현 자체의 수정만 취소를 푼다."""
+    if old == new:
+        return set(spans)
+    prefix = 0
+    while prefix < min(len(old), len(new)) and old[prefix] == new[prefix]:
+        prefix += 1
+    suffix = 0
+    while (suffix < min(len(old), len(new)) - prefix
+           and old[len(old) - suffix - 1] == new[len(new) - suffix - 1]):
+        suffix += 1
+    old_end = len(old) - suffix
+    delta = len(new) - len(old)
+    kept = set()
+    for start, end, kind in spans:
+        if end <= prefix:
+            kept.add((start, end, kind))
+        elif start >= old_end:
+            kept.add((start + delta, end + delta, kind))
+    return kept

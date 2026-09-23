@@ -1,4 +1,4 @@
-from PyQt6.QtCore import QPoint, Qt
+from PyQt6.QtCore import QEvent, QPoint, Qt
 from PyQt6.QtGui import QGuiApplication, QKeySequence, QShortcut, QTextCursor
 from PyQt6.QtWidgets import QFrame, QMainWindow, QScrollArea, QToolTip
 
@@ -35,6 +35,8 @@ class StandaloneMemoEditorWindow(QMainWindow):
         self.escape_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Escape), self.editor)
         self.escape_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self.escape_shortcut.activated.connect(self._escape_editor_tools)
+        self.editor.content_edit.installEventFilter(self)
+        self.editor.content_edit.viewport().installEventFilter(self)
         self.scroll = QScrollArea()
         self.scroll.setObjectName("standaloneMemoEditorScroll")
         self.scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -77,19 +79,14 @@ class StandaloneMemoEditorWindow(QMainWindow):
         self.editor.content_edit.setFocus()
 
     def _escape_editor_tools(self) -> None:
-        if self.editor.close_compact_panel():
-            return
-        body = self.editor.content_edit
-        if body.character_selection.count():
-            body.character_selection.clear()
-        elif body.block_selection.count():
-            body.block_selection.clear()
-        elif body.insert_popup_visible():
-            body.close_insert_popup()
-        elif body.textCursor().hasSelection():
-            cursor = body.textCursor()
-            cursor.clearSelection()
-            body.setTextCursor(cursor)
+        self.close()
+
+    def eventFilter(self, watched, event) -> bool:
+        if (watched in (self.editor.content_edit, self.editor.content_edit.viewport())
+                and event.type() == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_Escape):
+            self._escape_editor_tools()
+            return True
+        return super().eventFilter(watched, event)
 
     def _open_block_link(self, note_id: int, block_id: str) -> None:
         row = self.store.note(int(note_id))
@@ -112,6 +109,10 @@ class StandaloneMemoEditorWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         self.editor.flush_pending_save()
+        if (not self._shutting_down and self.editor.auto_save_enabled
+                and self.editor.saved_status.text() == "● 저장 실패"):
+            event.ignore()
+            return
         self.geometry_controller.save()
         if self._shutting_down:
             event.accept()

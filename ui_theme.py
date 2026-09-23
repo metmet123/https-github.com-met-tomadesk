@@ -51,7 +51,7 @@ QPushButton#workspaceSubTabButton:checked {
     background: #e7efff; border-color: #9eb8ff; color: @blue-dark;
 }
 QPushButton#calendarModeButton {
-    min-width: 62px; padding: 0 14px; background: @surface; color: #334155;
+    min-width: 28px; padding: 0 8px; background: @surface; color: #334155;
     border: 1px solid @line; border-radius: 0; font-weight: 600;
 }
 QPushButton#calendarModeButton[segment="first"] {
@@ -146,12 +146,25 @@ QLabel#popoverRange { color: @muted; }
 QLabel#popoverFieldLabel { color: @muted; font-size: 12px; }
 QLabel#popoverHint { color: @muted; font-size: 12px; }
 QLabel#popoverParse {
-    color: @green; background: @green-soft; border: 1px solid #a7f3d0;
-    border-radius: 7px; padding: 4px 9px; font-size: 12px; font-weight: 600;
+    color: @ink; background: transparent; border: 0;
+    padding: 0px 2px; font-size: 12px;
 }
 QLabel#popoverKeyHint {
     color: @muted; font-size: 11px; border: 1px solid @line;
     border-radius: 5px; padding: 2px 6px;
+}
+QPushButton#calendarCategoryChip {
+    min-width: 26px; padding: 0 8px; background: @surface; color: @ink;
+    border: 1px solid @line; border-radius: 7px;
+}
+QPushButton#calendarCategoryChip:checked {
+    background: @blue-soft; border-color: @blue; color: @blue-dark;
+}
+QPushButton#calendarIconButton {
+    min-width: 18px; padding: 2px 4px;
+}
+QLabel#popoverSaveShortcutHint {
+    color: @muted; font-size: 10px;
 }
 QFrame#popoverDivider { color: @line; }
 /* 본문 스크롤 영역이 제 바탕을 칠하면 팝오버 가운데만 회색 띠가 생긴다. */
@@ -169,7 +182,7 @@ QDateEdit#popoverDateField:focus, QTimeEdit#popoverTimeField:focus {
    화살표 그림이 사라져 빈 상자만 남는다. */
 QLineEdit#popoverTitleEdit {
     border: 0; border-bottom: 2px solid @line; border-radius: 0;
-    padding: 6px 2px; font-size: 15px; background: transparent;
+    padding: 3px 2px; font-size: 15px; background: transparent;
 }
 QLineEdit#popoverTitleEdit:focus { border-bottom: 2px solid @blue; }
 QPushButton#popoverEscButton, QPushButton#popoverLinkButton {
@@ -179,15 +192,47 @@ QPushButton#popoverEscButton:hover, QPushButton#popoverLinkButton:hover {
     color: @blue-dark; background: @blue-soft; border-radius: 6px;
 }
 QPushButton#popoverTimeChip {
-    min-height: 26px; padding: 2px 10px; border-radius: 11px;
-    background: @green-soft; border: 1px solid #a7f3d0; color: @green; font-weight: 700;
+    min-height: 22px; padding: 2px 5px; border-radius: 9px; font-size: 12px;
+    background: @surface; border: 1px solid @line; color: @ink; font-weight: 600;
 }
-QPushButton#popoverTimeChip:checked { background: #d1fae5; border-color: @green; }
+QPushButton#popoverTimeChip:checked { background: @blue-soft; border-color: @blue; color: @blue-dark; }
 QPushButton#popoverDurationChip, QPushButton#popoverAddChip {
-    min-height: 26px; padding: 2px 7px; border-radius: 11px;
+    min-height: 22px; padding: 2px 7px; border-radius: 9px;
     background: @surface-muted; border: 1px solid @line; color: #475569;
 }
 QPushButton#popoverAddChip:checked {
+    background: @blue-soft; border-color: @blue; color: @blue-dark; font-weight: 700;
+}
+QPushButton#popoverDurationChip { font-size: 12px; }
+QPushButton#popoverAlarmNow, QPushButton#popoverAlarmFive {
+    min-height: 22px; padding: 1px 7px; border-radius: 10px;
+    background: @surface-muted; border: 1px solid @line; color: @ink;
+}
+QPushButton#popoverAlarmNow:checked,
+QPushButton#popoverAlarmFive:checked {
+    background: @blue-soft; border-color: @blue; color: @blue-dark; font-weight: 700;
+}
+QPushButton#popoverCategoryChip {
+    min-height: 24px; padding: 1px 3px; border-radius: 8px;
+    background: transparent; border: 1px solid transparent; color: @ink;
+}
+QPushButton#popoverCategoryChip:hover { background: @surface-muted; }
+QPushButton#popoverCategoryChip:checked {
+    background: @blue-soft; border-color: @blue; color: @blue-dark;
+}
+QPushButton#popoverDetailLink {
+    min-height: 24px; padding: 0px 2px; border: 0; background: transparent; color: @muted;
+}
+QLineEdit#popoverAlarmInput {
+    min-height: 22px; padding: 1px 7px; border-radius: 9px;
+    background: @surface; border: 1px solid @line; color: @ink;
+}
+QLineEdit#popoverAlarmInput:focus { border-color: @blue; }
+QPushButton#popoverReminderPreset, QPushButton#popoverReminderAction {
+    min-height: 21px; padding: 1px 2px; border-radius: 8px; font-size: 10px;
+    background: @surface; border: 1px solid @line; color: @ink;
+}
+QPushButton#popoverReminderPreset:checked {
     background: @blue-soft; border-color: @blue; color: @blue-dark; font-weight: 700;
 }
 QLineEdit#quickScheduleInput {
@@ -215,7 +260,8 @@ QTableWidget#scheduleTimeline, QTableWidget#scheduleMonthGrid {
     gridline-color: transparent; outline: 0;
 }
 QTableWidget#scheduleTimeline::item { padding: 8px; }
-QTableWidget#scheduleMonthGrid::item { padding: 9px; border: 2px solid @surface; }
+QTableWidget#scheduleMonthGrid { gridline-color: @line; border-radius: 0; }
+QTableWidget#scheduleMonthGrid::item { padding: 0; border: none; }
 QTableWidget#scheduleMonthGrid::item:selected {
     border: 2px solid @blue; background: @blue-soft; color: #173b6c;
 }

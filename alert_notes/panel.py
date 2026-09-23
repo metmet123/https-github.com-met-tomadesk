@@ -8,7 +8,7 @@ from PyQt6.QtGui import QKeySequence, QShortcut, QTextCursor
 from datetime import date, datetime, timedelta
 
 from PyQt6.QtWidgets import (
-    QApplication, QFileDialog, QFrame, QLabel, QMessageBox, QScrollArea, QSizePolicy, QSplitter,
+    QApplication, QFileDialog, QFrame, QInputDialog, QLabel, QMessageBox, QScrollArea, QSizePolicy, QSplitter,
     QTabWidget, QToolTip, QVBoxLayout, QWidget,
 )
 
@@ -248,11 +248,14 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         self.list_panel.export_requested.connect(self.export_memos)
         self.list_panel.delete_requested.connect(self.delete_selected_notes)
         self.list_panel.note_moved.connect(self.move_note)
+        self.list_panel.siblings_reordered.connect(self.reorder_siblings)
         self.list_panel.child_requested.connect(self.create_child_note)
         self.list_panel.pin_toggled.connect(self.set_note_pinned)
         self.list_panel.filters_changed.connect(self._refresh_list_filters)
         self.list_panel.category_settings_requested.connect(self.editor._manage_categories)
         self.list_panel.category_assign_requested.connect(self.assign_note_categories)
+        self.list_panel.group_requested.connect(self.group_selected_notes)
+        self.list_panel.note_rename_requested.connect(self.rename_group_note)
         self.list_panel.copy_requested.connect(self.copy_selected_notes)
         self.list_panel.paste_requested.connect(self.paste_copied_notes)
         self.list_panel.clone_undo_requested.connect(self.undo_note_clone)
@@ -1019,11 +1022,82 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         if not self.store.set_note_parent(note_id, parent_id, position):
             self._list_status("메모를 자기 자신이나 그 안의 메모 밑으로는 옮길 수 없습니다.", "warning")
             return
-        self.refresh()
+        scroll = self.list_panel.table.verticalScrollBar().value()
+        self._refresh_list_filters()
+        self.editor.refresh_breadcrumb()
         if parent_id:
             self.list_panel.expand_to(note_id)
         self.list_panel.select_id(note_id)
+        self.list_panel.table.verticalScrollBar().setValue(scroll)
         self._list_status("메모를 옮겼습니다.", "success")
+        self.shortcuts_changed.emit()
+
+    def reorder_siblings(self, parent_id: int, ordered_ids: list[int]) -> None:
+        scroll = self.list_panel.table.verticalScrollBar().value()
+        current = self.list_panel.table.currentItem()
+        current_note_id = current.data(0, Qt.ItemDataRole.UserRole) if current else None
+        actual = [int(row["id"]) for row in self.store.child_notes(parent_id)]
+        if len(set(ordered_ids)) != len(ordered_ids) or not set(ordered_ids).issubset(actual):
+            self._list_status("목록이 변경되었습니다. 다시 선택해 주세요.", "warning")
+            return
+        # 본문 안의 페이지처럼 목록에 숨긴 형제의 위치는 그대로 둔다.
+        wanted = iter(ordered_ids)
+        selected = set(ordered_ids)
+        result = [next(wanted) if value in selected else value for value in actual]
+        self.store.reorder_notes(parent_id, result)
+        self._refresh_list_filters()
+        if current_note_id is not None:
+            item = self.list_panel._item_for(int(current_note_id))
+            if item is not None:
+                self.list_panel.table.setCurrentItem(item)
+        self.list_panel.table.verticalScrollBar().setValue(scroll)
+        self._list_status("선택 메모의 순서를 변경했습니다.", "success")
+        self.shortcuts_changed.emit()
+
+    def group_selected_notes(self, note_ids: list[int], suggested_title: str) -> int | None:
+        """체크한 메모를 새 부모 아래로 묶고 부모 제목을 바로 고치게 한다."""
+        nested = set()
+        for note_id in note_ids:
+            nested.update(self.store.note_descendants(note_id))
+        roots = [value for value in note_ids if value not in nested]
+        parents = {int(self.store.note(value)["parent_id"] or 0) for value in roots
+                   if self.store.note(value) is not None}
+        destination = None
+        if len(parents) > 1:
+            destinations = [(0, "최상위")]
+            destinations.extend((int(row["id"]), f"{row['title']} (#{row['id']})")
+                                for row in self.store.notes()
+                                if all(self.store.can_reparent(value, int(row["id"])) for value in roots))
+            labels = [label for _, label in destinations]
+            chosen, accepted = QInputDialog.getItem(
+                self, "묶을 위치", "서로 다른 부모의 메모입니다. 새 묶음을 만들 위치:", labels, 0, False,
+            )
+            if not accepted:
+                return None
+            destination = destinations[labels.index(chosen)][0]
+        try:
+            group_id = self.store.group_notes(note_ids, suggested_title, parent_id=destination)
+        except ValueError as exc:
+            self._list_status(str(exc), "warning")
+            return None
+        self.list_panel._set_all_checked(False)
+        self._refresh_list_filters()
+        item = self.list_panel._item_for(group_id)
+        if item is not None:
+            item.setExpanded(True)
+        self.list_panel.begin_inline_rename(group_id)
+        self._list_status(
+            f"메모 {len(note_ids)}개를 묶었습니다. 부모 제목을 입력해 주세요.",
+            "success",
+        )
+        self.shortcuts_changed.emit()
+        return group_id
+
+    def rename_group_note(self, note_id: int, title: str) -> None:
+        self.store.update_note(int(note_id), title=title)
+        if self.current_id == int(note_id):
+            self.editor.set_note(self.store.note(int(note_id)))
+        self._list_status("묶음 제목을 저장했습니다.", "success")
         self.shortcuts_changed.emit()
 
     def delete_selected_notes(self) -> None:

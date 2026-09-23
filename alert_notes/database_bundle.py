@@ -205,6 +205,7 @@ def _column_default(table: str, column: str, schema: dict | None = None):
         ("schedule_items", "hotkey"): "",
         ("schedule_items", "hotkey_action"): "open",
         ("schedule_items", "count_as_dday"): 0,
+        ("schedule_items", "time_mode"): "range",
         ("schedule_items", "deleted_at"): "",
         ("hotkey_actions", "deleted_at"): "",
     }

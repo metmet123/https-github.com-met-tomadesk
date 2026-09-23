@@ -224,7 +224,10 @@ class SettingsDialog(QDialog):
             self.hotkey_conflict_labels[key] = conflict
             field_layout.addWidget(conflict)
             builder.changed.connect(self._refresh_hotkey_conflicts)
-            self.hotkey_field_widgets.append(field)
+            if key == "quick_schedule_hotkey":
+                quick_schedule_hotkey_field = field
+            else:
+                self.hotkey_field_widgets.append(field)
         split_index = (len(self.hotkey_field_widgets) + 1) // 2
         for index, field in enumerate(self.hotkey_field_widgets):
             row = index if index < split_index else index - split_index
@@ -292,6 +295,7 @@ class SettingsDialog(QDialog):
         # Judgement calls the program should not make on the user's behalf.
         deadline_card, deadline_layout = _card("일정 · D-Day")
         self.deadline_card = deadline_card
+        deadline_layout.addWidget(quick_schedule_hotkey_field)
         options = dict(deadline_options or {})
         self.deadline_checks: dict[str, QCheckBox] = {}
         deadline_grid = QGridLayout()

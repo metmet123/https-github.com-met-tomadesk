@@ -7,7 +7,7 @@ from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QBoxLayout, QCalendarWidget, QCheckBox, QFrame, QHBoxLayout, QLabel, QListWidget,
     QListWidgetItem, QPushButton, QScrollArea, QSizePolicy, QStackedWidget,
-    QVBoxLayout, QWidget,
+    QVBoxLayout, QWidget, QMenu, QLineEdit, QMessageBox, QLayout,
 )
 
 from ui_polish import apply_numeric_font, polish_button
@@ -28,7 +28,7 @@ COLORS = {
 INTERACTION_HINTS = {
     "day": "빈 시간을 클릭하면 일정 추가 · 일정을 클릭하면 편집 · 드래그하면 기간 지정",
     "week": "빈 시간을 클릭하면 일정 추가 · 일정을 클릭하면 편집 · 드래그하면 기간 지정",
-    "month": "날짜를 클릭하면 일정 추가 · 일정을 클릭하면 편집",
+    "month": "날짜 클릭: 일정 목록 · 일정 클릭: 편집 · 빈 곳 더블클릭: 추가",
     "list": "일정을 더블클릭하면 편집합니다.",
 }
 
@@ -46,6 +46,11 @@ class CalendarPanel(QWidget):
         self._last_move = None
         self._responsive_width = 1440
         self._drawer_open = False
+        self._category_filter = ""
+        self._navigation_open = False
+        self._day_list_open = store.setting("calendar_day_list", "true") == "true"
+        self._workweek = store.setting("calendar_workweek", "false") == "true"
+        self._scroll_positions = {}
         self.anchor = datetime.now().date()
         saved_mode = store.setting("calendar_view_mode", "")
         self._mode_was_saved = bool(saved_mode)
@@ -55,8 +60,11 @@ class CalendarPanel(QWidget):
 
     def _build_ui(self) -> None:
         self.root_layout = QBoxLayout(QBoxLayout.Direction.LeftToRight, self)
-        self.root_layout.setContentsMargins(16, 14, 16, 14)
-        self.root_layout.setSpacing(14)
+        # Responsive controls decide what fits; hidden wide-state size hints
+        # must not keep the top-level window permanently above the breakpoint.
+        self.root_layout.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
+        self.root_layout.setContentsMargins(8, 8, 8, 8)
+        self.root_layout.setSpacing(8)
 
         self.navigation = QFrame()
         self.navigation.setObjectName("calendarNavigation")
@@ -124,6 +132,10 @@ class CalendarPanel(QWidget):
         left.setContentsMargins(0, 0, 0, 0)
         left.setSpacing(10)
         header = QHBoxLayout()
+        self.navigation_toggle = _button("☰", "날짜 탐색 펼치기")
+        self.navigation_toggle.setCheckable(True)
+        self.navigation_toggle.toggled.connect(self._toggle_navigation)
+        header.addWidget(self.navigation_toggle)
         self.previous_button = _button("‹", "이전 기간")
         self.today_button = _button("오늘", "오늘로 이동")
         self.next_button = _button("›", "다음 기간")
@@ -154,13 +166,21 @@ class CalendarPanel(QWidget):
         self.mode_buttons["day"].setProperty("segment", "first")
         self.mode_buttons["list"].setProperty("segment", "last")
         header.addWidget(self.mode_group)
+        self.mode_picker = QPushButton("일간")
+        self.mode_picker.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        mode_menu = QMenu(self.mode_picker)
+        for key, label in (("day", "일간"), ("week", "주간"), ("month", "월간"), ("list", "목록")):
+            mode_menu.addAction(label, lambda value=key: self._set_mode(value))
+        self.mode_picker.setMenu(mode_menu)
+        self.mode_picker.hide()
+        header.addWidget(self.mode_picker)
         header.addSpacing(14)
         self.header_quick_memo_button = _button("빠른 메모", "빠른 메모 열기")
         self.header_quick_memo_button.hide()
         header.addWidget(self.header_quick_memo_button)
         self.day_button = self.mode_buttons["day"]
         self.week_button = self.mode_buttons["week"]
-        self.new_schedule_button = _button("+ 새 일정", "전체 일정 편집 열기")
+        self.new_schedule_button = _button("+ 새 일정", "간단한 일정 추가 열기")
         self.new_schedule_button.setObjectName("primaryButton")
         header.addWidget(self.new_schedule_button)
         self.new_task_button = _button("+ 새 할 일", "전체 할 일 편집 열기")
@@ -168,6 +188,70 @@ class CalendarPanel(QWidget):
         self.fullscreen_button = _button("전체 화면", "캘린더 전체 화면 열기")
         header.addWidget(self.fullscreen_button)
         left.addLayout(header)
+        self.header_overflow = _button("⋯", "캘린더 추가 작업")
+        overflow = QMenu(self.header_overflow)
+        for label, button in (("빠른 메모", self.header_quick_memo_button), ("새 할 일", self.new_task_button), ("전체 화면", self.fullscreen_button)):
+            overflow.addAction(label, button.click)
+            button.hide()
+        self.header_overflow.setMenu(overflow)
+        for button in (self.navigation_toggle, self.previous_button, self.next_button, self.header_overflow):
+            button.setObjectName("calendarIconButton")
+        header.addWidget(self.header_overflow)
+        self.new_schedule_button.setText("+ 일정")
+
+        category_row = QHBoxLayout()
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("일정 검색")
+        self.search_edit.setMaximumWidth(160)
+        self.search_edit.setMinimumWidth(100)
+        self.search_edit.setClearButtonEnabled(True)
+        self.search_edit.setAccessibleName("일정 제목 검색")
+        self.search_timer = QTimer(self)
+        self.search_timer.setSingleShot(True)
+        self.search_timer.timeout.connect(self.refresh)
+        self.search_edit.textChanged.connect(lambda: self.search_timer.start(180))
+        category_row.addWidget(self.search_edit)
+        self.category_buttons = {}
+        for label, key in [("전체", "")] + list(CATEGORIES):
+            button = QPushButton(label)
+            button.setCheckable(True)
+            button.setChecked(not key)
+            button.setObjectName("calendarCategoryChip")
+            button.clicked.connect(lambda _checked=False, value=key: self._select_category(value))
+            category_row.addWidget(button)
+            self.category_buttons[key] = button
+        self.category_picker = QPushButton("분류: 전체")
+        category_menu = QMenu(self.category_picker)
+        for label, key in [("전체", "")] + list(CATEGORIES):
+            category_menu.addAction(label, lambda value=key: self._select_category(value))
+        self.category_picker.setMenu(category_menu)
+        self.category_picker.hide()
+        category_row.addWidget(self.category_picker)
+        category_row.addStretch()
+        self.filter_toggle = QPushButton("표시 설정 ▾")
+        self.filter_toggle.setCheckable(True)
+        self.filter_toggle.toggled.connect(lambda checked: self.calendar_filter_bar.setVisible(checked))
+        category_row.addWidget(self.filter_toggle)
+        self.view_settings = QPushButton("보기")
+        view_menu = QMenu(self.view_settings)
+        view_menu.addAction("현재 시각으로", lambda: self.canvas.scroll_to_now(force=True))
+        view_menu.addAction("검색·분류 초기화", lambda: (self.search_edit.clear(), self._select_category("")))
+        day_list_action = view_menu.addAction("하루 일정 목록")
+        self.day_list_action = day_list_action
+        day_list_action.setCheckable(True)
+        day_list_action.setChecked(self._day_list_open)
+        day_list_action.toggled.connect(self._toggle_day_list)
+        workweek_action = view_menu.addAction("주간: 평일만 보기")
+        workweek_action.setCheckable(True)
+        workweek_action.setChecked(self._workweek)
+        workweek_action.toggled.connect(self._toggle_workweek)
+        density_action = view_menu.addAction("시간표 촘촘하게")
+        density_action.setCheckable(True)
+        density_action.setChecked(self.store.setting("calendar_compact", "false") == "true")
+        density_action.toggled.connect(self._toggle_density)
+        self.view_settings.setMenu(view_menu)
+        category_row.addWidget(self.view_settings)
+        left.addLayout(category_row)
 
         self.calendar_filter_bar = QFrame()
         self.calendar_filter_bar.setObjectName("scheduleSubCard")
@@ -191,6 +275,7 @@ class CalendarPanel(QWidget):
         self.dday_only_button.clicked.connect(self._show_only_dday)
         filter_layout.addWidget(self.dday_only_button)
         left.addWidget(self.calendar_filter_bar)
+        self.calendar_filter_bar.hide()
         self.calendar_deadline_strip = QLabel()
         self.calendar_deadline_strip.setObjectName("scheduleMirrorNotice")
         self.calendar_deadline_strip.setWordWrap(True)
@@ -208,7 +293,34 @@ class CalendarPanel(QWidget):
 
         self.view_stack = QStackedWidget()
         self.canvas = self._build_canvas()
-        self.view_stack.addWidget(self.canvas)
+        self.canvas.set_compact(self.store.setting("calendar_compact", "false") == "true")
+        self.timeline_page = QWidget()
+        timeline_layout = QBoxLayout(QBoxLayout.Direction.LeftToRight, self.timeline_page)
+        self.timeline_layout = timeline_layout
+        timeline_layout.setContentsMargins(0, 0, 0, 0)
+        timeline_layout.addWidget(self.canvas, 1)
+        self.day_detail = QWidget()
+        day_layout = QVBoxLayout(self.day_detail)
+        self.day_agenda_title = QLabel("하루 일정")
+        day_header = QHBoxLayout()
+        day_header.addWidget(self.day_agenda_title, 1)
+        day_close = QPushButton("×")
+        day_close.setAccessibleName("하루 일정 목록 접기")
+        day_close.clicked.connect(lambda: (self.day_list_action.setChecked(False), self.day_detail.hide()))
+        day_header.addWidget(day_close)
+        day_layout.addLayout(day_header)
+        self.day_focus_button = QPushButton("이 날짜 일간 보기")
+        self.day_focus_button.clicked.connect(lambda: self._set_mode("day"))
+        day_layout.addWidget(self.day_focus_button)
+        self.day_agenda = QListWidget()
+        self.day_agenda.setObjectName("scheduleAgendaList")
+        self.day_agenda.setAccessibleName("하루 일정 목록: 클릭해 시간 이동, 더블클릭해 편집")
+        self.day_agenda.itemClicked.connect(self._locate_day_item)
+        self.day_agenda.itemDoubleClicked.connect(self._open_list_item)
+        day_layout.addWidget(self.day_agenda, 1)
+        self.day_detail.setMaximumWidth(280)
+        timeline_layout.addWidget(self.day_detail)
+        self.view_stack.addWidget(self.timeline_page)
         self.month_page = self._build_month_page()
         self.view_stack.addWidget(self.month_page)
         self.list_widget = QListWidget()
@@ -283,11 +395,12 @@ class CalendarPanel(QWidget):
         self.schedule_popover.deleted.connect(self._popover_deleted)
         self.schedule_popover.full_edit_requested.connect(self._open_full_editor)
         self.schedule_popover.closed.connect(self._hide_popover)
+        self.canvas.editing_guard = lambda: self.schedule_popover.isVisible() or self._drawer_open
 
         self.previous_button.clicked.connect(lambda: self._move(-1))
         self.next_button.clicked.connect(lambda: self._move(1))
         self.today_button.clicked.connect(self._today)
-        self.new_schedule_button.clicked.connect(lambda: self._new_full_item("event"))
+        self.new_schedule_button.clicked.connect(lambda: self._new_schedule())
         self.new_task_button.clicked.connect(lambda: self._new_full_item("task"))
         self.undo_move_button.clicked.connect(self._undo_last_move)
         self.quick_card.note_saved.connect(self._quick_saved)
@@ -302,7 +415,7 @@ class CalendarPanel(QWidget):
         self.month_calendar.dateSelectionChanged.connect(self._month_selection_changed)
         self.month_calendar.scheduleActivated.connect(self._open_schedule)
         self.month_calendar.dateActivated.connect(self._new_schedule_on_date)
-        self.month_agenda.itemDoubleClicked.connect(self._open_list_item)
+        self.month_agenda.itemClicked.connect(self._open_list_item)
         self._set_mode(self.mode, refresh=False, persist=False)
 
     def _build_canvas(self) -> CalendarCanvas:
@@ -315,11 +428,20 @@ class CalendarPanel(QWidget):
         canvas.scheduleActivated.connect(self._activate_schedule)
         canvas.scheduleMoved.connect(self._canvas_changed)
         canvas.scheduleResized.connect(self._canvas_changed)
+        canvas.dateSelected.connect(self._timeline_date_selected)
         return canvas
+
+    def _timeline_date_selected(self, day):
+        self.anchor = day
+        self._fill_agenda(self.day_agenda, day, day + timedelta(days=1))
+        self.day_agenda_title.setText(f"{day:%m월 %d일} · 하루 일정")
+        self.day_detail.show()
+        self.day_focus_button.setVisible(self.mode == "week")
 
     def _build_month_page(self) -> QWidget:
         page = QWidget()
-        layout = QBoxLayout(QBoxLayout.Direction.TopToBottom, page)
+        layout = QBoxLayout(QBoxLayout.Direction.LeftToRight, page)
+        self.month_layout = layout
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(10)
         self.month_calendar = CalendarMonthView()
@@ -327,13 +449,80 @@ class CalendarPanel(QWidget):
         self.month_agenda_title.setObjectName("sectionTitle")
         self.month_agenda = QListWidget()
         self.month_agenda.setObjectName("scheduleAgendaList")
-        self.month_agenda.setMinimumHeight(180)
+        self.month_agenda.setMinimumHeight(100)
         layout.addWidget(self.month_calendar, 1)
-        layout.addWidget(self.month_agenda_title)
-        layout.addWidget(self.month_agenda)
-        self.month_agenda_title.hide()
-        self.month_agenda.hide()
+        self.month_detail = QWidget()
+        details = QVBoxLayout(self.month_detail)
+        details.setContentsMargins(6, 0, 0, 0)
+        detail_header = QHBoxLayout()
+        detail_header.addWidget(self.month_agenda_title, 1)
+        close = QPushButton("×")
+        close.setAccessibleName("선택 날짜 목록 닫기")
+        close.clicked.connect(self.month_detail.hide)
+        detail_header.addWidget(close)
+        details.addLayout(detail_header)
+        self.month_add_button = QPushButton("+ 일정 추가")
+        self.month_add_button.clicked.connect(lambda: self._new_schedule_on_date(self.month_calendar.selectedDate()))
+        details.addWidget(self.month_add_button)
+        details.addWidget(self.month_agenda, 1)
+        layout.addWidget(self.month_detail)
+        self.month_detail.setMaximumWidth(300)
+        self.month_detail.hide()
         return page
+
+    def _toggle_navigation(self, checked):
+        if self._responsive_width < 900:
+            self._navigation_open = False
+            self.navigation_toggle.blockSignals(True)
+            self.navigation_toggle.setChecked(False)
+            self.navigation_toggle.blockSignals(False)
+            if checked:
+                menu = QMenu(self)
+                from PyQt6.QtWidgets import QWidgetAction
+                calendar = QCalendarWidget(menu)
+                calendar.setSelectedDate(QDate(self.anchor.year, self.anchor.month, self.anchor.day))
+                action = QWidgetAction(menu)
+                action.setDefaultWidget(calendar)
+                menu.addAction(action)
+                calendar.clicked.connect(lambda value: (self._jump_to_date(value), menu.close()))
+                menu.aboutToHide.connect(menu.deleteLater)
+                menu.popup(self.navigation_toggle.mapToGlobal(self.navigation_toggle.rect().bottomLeft()))
+            return
+        self._navigation_open = checked
+        self.update_responsive_layout(self._responsive_width)
+
+    def _select_category(self, key):
+        self._category_filter = key
+        for value, button in self.category_buttons.items():
+            button.setChecked(key == value)
+        self.category_picker.setText("분류: " + self.category_buttons[key].text())
+        self.refresh()
+
+    def _toggle_day_list(self, checked):
+        self._day_list_open = checked
+        self.store.set_setting("calendar_day_list", str(checked).lower())
+        self.day_detail.setVisible(checked and self.mode == "day" and self._responsive_width >= 1100)
+
+    def _toggle_workweek(self, checked):
+        self._workweek = checked
+        self.store.set_setting("calendar_workweek", str(checked).lower())
+        self.refresh()
+
+    def _toggle_density(self, checked):
+        self.store.set_setting("calendar_compact", str(checked).lower())
+        self.canvas.set_compact(checked)
+
+    def _locate_day_item(self, item):
+        value = item.data(Qt.ItemDataRole.UserRole)
+        if not value or value[0] == "deadline":
+            return
+        for block in self.canvas.blocks():
+            if (block.item_id, block.occurrence_at) == value:
+                self.canvas.view.scene().clearSelection()
+                block.setSelected(True)
+                self.canvas.view.ensureVisible(block, 20, 50)
+                self.canvas.mark_user_scroll()
+                break
 
     def eventFilter(self, watched, event):
         canvas = getattr(self, "canvas", None)
@@ -361,7 +550,12 @@ class CalendarPanel(QWidget):
         return super().eventFilter(watched, event)
 
     def _set_mode(self, mode: str, refresh: bool = True, persist: bool = True) -> None:
+        if hasattr(self, "canvas") and self.mode in {"day", "week"}:
+            self._scroll_positions[self.mode] = self.canvas.view.verticalScrollBar().value() / self.canvas.view.transform().m22()
         self.mode = mode if mode in {"day", "week", "month", "list"} else "week"
+        self.canvas.follow_now = self.mode == "day"
+        self.canvas.set_working_hours(self.mode == "day")
+        self.mode_picker.setText({"day": "일간", "week": "주간", "month": "월간", "list": "목록"}[self.mode])
         for name, button in self.mode_buttons.items():
             button.setChecked(name == self.mode)
         self.view_stack.setCurrentIndex(0 if self.mode in {"day", "week"} else 1 if self.mode == "month" else 2)
@@ -379,8 +573,12 @@ class CalendarPanel(QWidget):
             self.refresh()
         # 탭을 고른 것은 "지금을 보여 달라"는 뜻이다.  스크롤을 내렸던 자리에
         # 그대로 두지 않고 현재 시각으로 다시 맞춘다.
-        if self.mode in {"day", "week"}:
+        if self.mode == "day" and self.anchor == date.today():
             self.canvas.scroll_to_now(force=True)
+        elif self.mode in self._scroll_positions:
+            self.canvas.view.verticalScrollBar().setValue(int(self._scroll_positions[self.mode] * self.canvas.view.transform().m22()))
+        self.day_detail.setVisible(self.mode == "day" and self._day_list_open and self._responsive_width >= 1100)
+        self.day_focus_button.setVisible(self.mode == "week")
 
     def _sync_nav_range(self) -> None:
         """Light the button for the range on screen, so a click leaves a mark."""
@@ -436,9 +634,8 @@ class CalendarPanel(QWidget):
         )
 
     def _set_stacked_period(self, year: int, month: int) -> None:
-        self.period_label.setText(
-            self._stacked_period_html(year, month, self._stacked_year_size(year, month))
-        )
+        self.period_label.setText(f"{year}.{month}" if self._responsive_width < 900 else f"{year}년 {month}월")
+        self.period_label.setToolTip(f"{year}년 {month}월")
 
     def _stacked_year_size(self, year: int, month: int) -> int:
         """Biggest pair that still fits the header band — measured, not guessed.
@@ -469,11 +666,11 @@ class CalendarPanel(QWidget):
         start, end = self._range()
         if self.mode == "week":
             last = end - timedelta(days=1)
-            self.period_label.setText(f"{start.month}/{start.day} – {last.month}/{last.day}")
+            self.period_label.setText(f"{start.month}/{start.day}–{last.day}" if self._responsive_width < 900 and start.month == last.month else f"{start.month}/{start.day}–{last.month}/{last.day}")
         elif self.mode == "month":
             self._set_stacked_period(start.year, start.month)
         elif self.mode == "list":
-            self.period_label.setText("다가오는 60일")
+            self.period_label.setText(f"{start:%m/%d}–{(end - timedelta(days=1)):%m/%d}")
         else:
             self.period_label.setText(f"{start.month}월 {start.day}일")
         self._refresh_deadline_strip(start, end)
@@ -487,7 +684,18 @@ class CalendarPanel(QWidget):
 
     def _refresh_timeline(self, start: date, end: date) -> None:
         items = self._filtered_schedule_items(start, end)
-        self.canvas.render_range(start, end, items)
+        visible_end = start + timedelta(days=5) if self.mode == "week" and self._workweek else end
+        self.canvas.render_range(start, visible_end, items)
+        if self.mode == "day":
+            self._fill_agenda(self.day_agenda, start, end)
+            self.day_agenda_title.setText(f"{start:%m월 %d일} · 하루 일정")
+        if self.mode == "week" and self._workweek:
+            count = len(self._filtered_schedule_items(visible_end, end))
+            self.view_settings.setText("보기")
+            self.view_settings.setToolTip(f"숨겨진 주말 일정 {count}개 · 보기에서 평일만 보기를 해제하면 표시합니다.")
+        else:
+            self.view_settings.setText("보기")
+            self.view_settings.setToolTip("하루 목록·평일 보기·시간표 밀도")
 
     def _refresh_month_agenda(self) -> None:
         selected = self.month_calendar.selectedDate().toPyDate()
@@ -536,8 +744,12 @@ class CalendarPanel(QWidget):
         entries: list[tuple[datetime, QListWidgetItem]] = []
         for event in items:
             begin = datetime.strptime(event["display_start_at"], DATETIME_FMT)
+            finish = datetime.strptime(event["display_end_at"], DATETIME_FMT)
             marker = "✓" if event["status"] == "completed" else "□" if event["item_type"] == "task" else "●"
-            item = QListWidgetItem(f"{begin:%m/%d %H:%M}  {marker}  {event['title']}")
+            span = "종일" if event.get("all_day") else f"{begin:%H:%M} · 종료 없음" if event.get("time_mode") == "point" else f"{begin:%H:%M}–{finish:%H:%M}"
+            if begin.date() != finish.date() and not event.get("all_day"):
+                span = f"{begin:%m/%d %H:%M}–{finish:%m/%d %H:%M}"
+            item = QListWidgetItem(f"{begin:%m/%d} {span}\n{marker} {event['title']}")
             item.setData(Qt.ItemDataRole.UserRole, (int(event["id"]), str(event["occurrence_at"])))
             item.setToolTip(str(event["details"]))
             item.setForeground(QColor("#64748b" if event["status"] == "completed" else "#0f172a"))
@@ -557,7 +769,7 @@ class CalendarPanel(QWidget):
         for _moment, item in sorted(entries, key=lambda pair: pair[0]):
             widget.addItem(item)
         if not entries:
-            empty = QListWidgetItem("아직 일정이 없습니다. 위 ‘＋ 새 일정’으로 만들어 보세요.")
+            empty = QListWidgetItem("조건에 맞는 일정이 없습니다." if self._category_filter or self.search_edit.text().strip() else "일정이 없습니다. ‘+ 일정’으로 추가하세요.")
             empty.setFlags(Qt.ItemFlag.NoItemFlags)
             widget.addItem(empty)
 
@@ -567,6 +779,11 @@ class CalendarPanel(QWidget):
         show_dday = self.calendar_filter_checks["dday"].isChecked()
         result = []
         for item in self.store.schedules.items_for_range(_day_key(start), _day_key(end)):
+            if self._category_filter and item["category"] != self._category_filter:
+                continue
+            query = self.search_edit.text().strip().casefold()
+            if query and query not in str(item["title"]).casefold():
+                continue
             item_type = str(item.get("item_type") or "event")
             if item_type == "event" and show_events:
                 result.append(item)
@@ -638,9 +855,19 @@ class CalendarPanel(QWidget):
     def _canvas_range(self, start: datetime, end: datetime) -> None:
         """빈 자리를 끌어 만든 범위.  그 자리에 팝오버를 연다."""
         self.quick_card.select_slot(start)
-        self._open_popover_new(start, end)
+        self._open_popover_new(start, end, relative_base=start)
 
     def _canvas_changed(
+        self, item_id: int, occurrence_at: str,
+        old_start: datetime, old_end: datetime, new_start: datetime, new_end: datetime,
+    ) -> None:
+        try:
+            self._save_canvas_change(item_id, occurrence_at, old_start, old_end, new_start, new_end)
+        except Exception as error:
+            self.refresh()
+            QMessageBox.warning(self, "일정 변경 실패", f"변경을 저장하지 못해 기존 일정으로 표시를 복원했습니다.\n{error}")
+
+    def _save_canvas_change(
         self, item_id: int, occurrence_at: str,
         old_start: datetime, old_end: datetime, new_start: datetime, new_end: datetime,
     ) -> None:
@@ -657,11 +884,12 @@ class CalendarPanel(QWidget):
             return
         rule = str(item["recurrence_rule"] or "{}")
         if '"frequency": "none"' not in rule and occurrence_at:
+            snapshot = self.store.schedules.occurrence_exception(item_id, occurrence_at)
             self.store.schedules.move_occurrence(
                 item_id, occurrence_at,
                 new_start.strftime(DATETIME_FMT), new_end.strftime(DATETIME_FMT),
             )
-            self._last_move = ("exception", item_id, occurrence_at)
+            self._last_move = ("exception", item_id, occurrence_at, snapshot)
         else:
             values = dict(item)
             values.update({
@@ -677,9 +905,13 @@ class CalendarPanel(QWidget):
             )
         self.undo_move_button.setEnabled(True)
         self.undo_move_button.show()
-        self.move_status_label.setText(
-            f"{new_start:%H:%M} – {new_end:%H:%M} 으로 옮겼습니다.  Ctrl+Z 로 되돌립니다."
+        moved_time = (
+            f"{new_start:%H:%M}" if item["time_mode"] == "point"
+            else f"{new_start:%H:%M} – {new_end:%H:%M}"
         )
+        self.move_status_label.setText(f"{moved_time} 으로 옮겼습니다.  Ctrl+Z 로 되돌립니다.")
+        if self._last_move[0] == "exception":
+            self.move_status_label.setText(self.move_status_label.text() + " (이번 일정만)")
         self.move_status.show()
         QTimer.singleShot(5000, self.move_status.hide)
         self.refresh()
@@ -692,7 +924,7 @@ class CalendarPanel(QWidget):
         if kind == "deleted":
             self.store.schedules.restore_item(item_id)
         elif kind == "exception":
-            self.store.schedules.clear_occurrence_exception(item_id, values[0])
+            self.store.schedules.restore_occurrence_exception(item_id, values[0], values[1])
         else:
             item = self.store.schedules.item(item_id)
             if item is not None:
@@ -762,9 +994,12 @@ class CalendarPanel(QWidget):
         self.schedule_popover.raise_()
 
     # ------------------------------------------------------------- 팝오버 --
-    def _open_popover_new(self, start: datetime, end: datetime) -> None:
+    def _open_popover_new(
+        self, start: datetime, end: datetime,
+        *, relative_base: datetime | None = None,
+    ) -> None:
         self._close_drawer()
-        self.schedule_popover.open_new(start, end)
+        self.schedule_popover.open_new(start, end, relative_base=relative_base)
         self._popover_slot = (start, end)
         self.schedule_popover.place_near(
             self._anchor_rect(start, end), bounds=self._visible_bounds()
@@ -859,6 +1094,7 @@ class CalendarPanel(QWidget):
         picked = self.month_calendar.selectedDate()
         self.anchor = picked.toPyDate()
         self._refresh_month_agenda()
+        self.month_detail.show()
         # Clicking a day while a draft is open used to change nothing, so the
         # editor kept the date it opened with.  A saved item is left alone.
         # 새 일정은 이제 팝오버로 열리므로 둘 다 따라가게 한다.
@@ -942,6 +1178,8 @@ class CalendarPanel(QWidget):
         좌표에 남아 오른쪽이 잘린다.
         """
         super().resizeEvent(event)
+        if hasattr(self, "day_detail") and hasattr(self, "drawer_frame"):
+            self.update_responsive_layout(self.width())
         popover = getattr(self, "schedule_popover", None)
         if popover is None or not popover.isVisible():
             return
@@ -951,12 +1189,27 @@ class CalendarPanel(QWidget):
     def update_responsive_layout(self, width: int) -> None:
         self._responsive_width = width
         narrow = width < 900
+        self.mode_group.setVisible(not narrow)
+        self.mode_picker.setVisible(narrow)
+        self.category_picker.setVisible(narrow)
+        for button in self.category_buttons.values():
+            button.setVisible(not narrow)
         self.root_layout.setDirection(QBoxLayout.Direction.TopToBottom if narrow else QBoxLayout.Direction.LeftToRight)
-        show_navigation = width >= 1180 and not narrow
+        show_navigation = self._navigation_open and not narrow
+        self.navigation_toggle.blockSignals(True)
+        self.navigation_toggle.setChecked(show_navigation)
+        self.navigation_toggle.blockSignals(False)
         self.navigation.setVisible(show_navigation)
         # The sidebar carries 빠른 메모; when it hides, the header has to.
-        self.header_quick_memo_button.setVisible(not show_navigation)
-        self.fullscreen_button.setVisible(width >= 1180)
+        self.header_quick_memo_button.hide()
+        self.fullscreen_button.hide()
+        self.month_layout.setDirection(QBoxLayout.Direction.TopToBottom if narrow else QBoxLayout.Direction.LeftToRight)
+        self.month_detail.setMaximumWidth(16_777_215 if narrow else 300)
+        self.month_detail.setMaximumHeight(210 if narrow else 16_777_215)
+        self.timeline_layout.setDirection(QBoxLayout.Direction.TopToBottom if narrow else QBoxLayout.Direction.LeftToRight)
+        self.day_detail.setMaximumWidth(16_777_215 if narrow else 280)
+        self.day_detail.setMaximumHeight(210 if narrow else 16_777_215)
+        self.day_detail.setVisible(self.mode == "day" and self._day_list_open and width >= 1100)
         self._sync_drawer_placement()
         if narrow:
             self.drawer_frame.setMinimumWidth(0)
@@ -972,8 +1225,7 @@ class CalendarPanel(QWidget):
             self.calendar_body.show()
         if width < 900 and not self._mode_was_saved:
             self._set_mode("day")
-        if width < 900 and self.mode == "week":
-            self.canvas.setMinimumWidth(620)
+        self.canvas.setMinimumWidth(0)
 
     def _sync_drawer_placement(self) -> None:
         medium_overlay = 900 <= self._responsive_width < 1180
@@ -997,6 +1249,7 @@ class CalendarPanel(QWidget):
         self.month_calendar.clearContents()
         self.list_widget.clear()
         self.month_agenda.clear()
+        self.day_agenda.clear()
 
 
 def _button(text: str, accessible_name: str) -> QPushButton:

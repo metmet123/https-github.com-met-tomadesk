@@ -22,8 +22,8 @@ from alert_notes.deadline import (
     set_count_today_as_one,
 )
 from alert_notes.panel import AlertNotesPanel
+from alert_notes.schedule_popover import StandaloneSchedulePopover
 from alert_notes.quick_capture import MemoSearchDialog, QuickMemoDialog
-from alert_notes.quick_schedule import QuickScheduleDialog
 from alert_notes.service import AlertService
 from alert_notes.toma_pet_window import TomaPetController
 from alert_notes.schedule_store import (
@@ -458,7 +458,7 @@ class MainWindow(QMainWindow):
         self._foreground_hotkey_timer.timeout.connect(self._sync_action_hotkeys_for_foreground)
         self._resize_drag = None
         self._quick_memo_dialog = None
-        self._quick_schedule_dialog = None
+        self._quick_schedule_popover = None
         self._memo_search_dialog = None
         self._restoring_column_widths = False
         self._restoring_splitter_ratio = False
@@ -934,25 +934,26 @@ class MainWindow(QMainWindow):
         self.alert_panel.open_standalone_note(note_id)
 
     def show_quick_schedule(self) -> None:
-        """어느 프로그램에 있든 한 줄로 일정을 넣는 창."""
-        if self._quick_schedule_dialog is None:
-            self._quick_schedule_dialog = QuickScheduleDialog(
-                self.note_store, self, self.quick_schedule_hotkey
-            )
-            self._quick_schedule_dialog.schedule_saved.connect(self._quick_schedule_saved)
-            self._quick_schedule_dialog.note_saved.connect(self._quick_note_saved)
-            self._quick_schedule_dialog.detail_requested.connect(self.open_schedule_item)
-        self._quick_schedule_dialog.prepare(self.quick_schedule_hotkey)
-        self._quick_schedule_dialog.show()
-        self._quick_schedule_dialog.raise_()
-        self._quick_schedule_dialog.activateWindow()
+        """메인 창을 복원하지 않고 간단한 새 일정 창만 연다."""
+        if self._quick_schedule_popover is None:
+            popover = StandaloneSchedulePopover(self.note_store)
+            popover.saved.connect(self._standalone_schedule_saved)
+            popover.full_edit_requested.connect(self._standalone_schedule_full_edit)
+            self._quick_schedule_popover = popover
+        self._quick_schedule_popover.open_at_current_time(self._ui_scale)
+
+    def _standalone_schedule_saved(self, item_id: int) -> None:
+        self.alert_panel.calendar._popover_saved(item_id)
+        self.alert_panel.refresh()
+
+    def _standalone_schedule_full_edit(self, values: dict) -> None:
+        self._quick_schedule_popover.hide()
+        self.open_today_schedule()
+        self.alert_panel.calendar.schedule_editor.apply_draft(values)
+        self.alert_panel.calendar._open_drawer(0)
 
     def toggle_schedule_postit(self) -> None:
         self.alert_panel.toggle_schedule_postit()
-
-    def _quick_schedule_saved(self, _item_id: int) -> None:
-        self.alert_panel.refresh()
-        self.alert_panel.calendar.refresh()
 
     def _quick_note_saved(self, note_id: int) -> None:
         self.alert_panel.current_id = note_id
@@ -3980,6 +3981,8 @@ class MainWindow(QMainWindow):
             event.ignore()
             return
         self._restore_hidden_windows_on_exit()
+        if self._quick_schedule_popover is not None:
+            self._quick_schedule_popover.close()
         self._cancel_resize_drag()
         self._foreground_hotkey_timer.stop()
         if hasattr(self, "alert_service"):

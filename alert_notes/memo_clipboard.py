@@ -4,12 +4,49 @@ import json
 import html as html_module
 import re
 
-from PyQt6.QtCore import QByteArray, QMimeData
-from PyQt6.QtGui import QTextCursor
+from PyQt6.QtCore import QByteArray, QMimeData, QUrl
+from PyQt6.QtGui import QTextCursor, QTextDocument
 
 
 BLOCK_MIME = "application/x-tomadesk-blocks+json"
 NOTES_MIME = "application/x-tomadesk-notes+json"
+
+
+def single_web_url(source: QMimeData) -> str | None:
+    """Return the URL represented by a lone external web link on the clipboard."""
+    if source.hasFormat(BLOCK_MIME) or source.hasFormat(NOTES_MIME):
+        return None
+    plain = source.text().strip() if source.hasText() else ""
+    if plain and not any(char.isspace() for char in plain):
+        url = QUrl(plain)
+        if url.scheme().casefold() in {"http", "https"} and url.host():
+            return url.toString()
+    urls = source.urls() if source.hasUrls() else []
+    if len(urls) == 1 and urls[0].scheme().casefold() in {"http", "https"} and urls[0].host():
+        return urls[0].toString()
+    if not source.hasHtml() or not plain or "\n" in plain:
+        return None
+    document = QTextDocument()
+    document.setHtml(source.html())
+    if document.toPlainText().strip() != plain or "\ufffc" in plain:
+        return None
+    hrefs = set()
+    block = document.begin()
+    while block.isValid():
+        fragment = block.begin()
+        while not fragment.atEnd():
+            item = fragment.fragment()
+            if item.isValid() and item.text().strip():
+                href = item.charFormat().anchorHref()
+                if not href:
+                    return None
+                hrefs.add(href)
+            fragment += 1
+        block = block.next()
+    if len(hrefs) != 1:
+        return None
+    url = QUrl(next(iter(hrefs)))
+    return url.toString() if url.scheme().casefold() in {"http", "https"} and url.host() else None
 _PAGE_ANCHOR_RE = re.compile(
     r"<a\b[^>]*\bhref=(['\"])toma-note://(\d+)\1[^>]*>(.*?)</a>",
     re.IGNORECASE | re.DOTALL,

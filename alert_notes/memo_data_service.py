@@ -35,14 +35,28 @@ class MemoDataService:
     # ---------------------------------------------------------- backlinks --
     def rebuild_backlinks(self) -> list[dict]:
         by_local = {int(row["id"]): str(row["sync_id"]) for row in self.conn.execute("SELECT id,sync_id FROM notes")}
+        # Cache parsing only, not rows or query results: renames, trash/restore,
+        # external writes and transaction rollbacks must be visible immediately.
+        if by_local != getattr(self, "_backlink_local_ids", None):
+            self._backlink_targets = {}
+            self._backlink_local_ids = by_local
+        cache = self._backlink_targets
+        live_ids = set()
         found: list[dict] = []
         for source in self.conn.execute("SELECT id,sync_id,title,content FROM notes WHERE deleted_at='' "):
+            source_id = int(source["id"])
+            live_ids.add(source_id)
             content = str(source["content"] or "")
             seen: set[tuple[str, str]] = set()
-            targets = [(by_local.get(int(match.group(1)), ""), "") for match in _NOTE_V1.finditer(content)]
-            targets += [(match.group(1), "") for match in _NOTE_V2.finditer(content)]
-            targets += [(by_local.get(int(match.group(1)), ""), match.group(2)) for match in _BLOCK_V1.finditer(content)]
-            targets += [(match.group(1), match.group(2)) for match in _BLOCK_V2.finditer(content)]
+            cached = cache.get(source_id)
+            if cached is None or cached[0] != content:
+                targets = [(by_local.get(int(match.group(1)), ""), "") for match in _NOTE_V1.finditer(content)]
+                targets += [(match.group(1), "") for match in _NOTE_V2.finditer(content)]
+                targets += [(by_local.get(int(match.group(1)), ""), match.group(2)) for match in _BLOCK_V1.finditer(content)]
+                targets += [(match.group(1), match.group(2)) for match in _BLOCK_V2.finditer(content)]
+                cache[source_id] = (content, targets)
+            else:
+                targets = cached[1]
             for memo_sync_id, block_id in targets:
                 key = (memo_sync_id, block_id)
                 if not memo_sync_id or key in seen:
@@ -53,6 +67,7 @@ class MemoDataService:
                     "source_title": str(source["title"]), "target_sync_id": memo_sync_id,
                     "target_block_id": block_id,
                 })
+        self._backlink_targets = {key: value for key, value in cache.items() if key in live_ids}
         return found
 
     def backlinks_for(self, memo_sync_id: str) -> list[dict]:

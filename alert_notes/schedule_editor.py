@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from .schedule_reminders import parse_reminder_value, reminder_input_value
 
 from PyQt6.QtCore import QDateTime, Qt, pyqtSignal
 from PyQt6.QtGui import QColor
@@ -74,12 +75,14 @@ class ScheduleEditor(QWidget):
         self.start_edit = _datetime_edit()
         self.end_edit = _datetime_edit()
         self.all_day_check = QCheckBox("종일")
+        self.end_none_check = QCheckBox("종료 없음")
         # CAL4: moving the start drags the end along instead of refusing to save.
         self._span_minutes = 60
         self._syncing_range = False
         self.start_edit.changed.connect(self._start_moved)
         self.end_edit.changed.connect(self._end_moved)
         self.all_day_check.toggled.connect(self._all_day_toggled)
+        self.end_none_check.toggled.connect(self._end_none_toggled)
         self.completed_check = QCheckBox("완료")
         self.count_as_dday_check = QCheckBox("D-Day로 세기")
         self.count_as_dday_check.setAccessibleName("할 일을 D-Day로 세기")
@@ -101,6 +104,7 @@ class ScheduleEditor(QWidget):
         form.setRowVisible(self.type_combo, False)
         flags = QHBoxLayout()
         flags.addWidget(self.all_day_check)
+        flags.addWidget(self.end_none_check)
         flags.addWidget(self.completed_check)
         flags.addWidget(self.count_as_dday_check)
         flags.addStretch()
@@ -170,7 +174,7 @@ class ScheduleEditor(QWidget):
         self.repeat_count_spin.setSuffix("회")
         apply_numeric_font(self.repeat_count_spin)
         self.reminders_edit = QLineEdit()
-        self.reminders_edit.setPlaceholderText("예: 10, 30, 60 (분 전, 최대 5개)")
+        self.reminders_edit.setPlaceholderText("예: 10, 5분 후 (숫자는 분 전, 최대 5개)")
         repeat_layout.addRow("반복", self.repeat_combo)
         repeat_layout.addRow("반복 간격", self.repeat_interval)
         repeat_layout.addRow("반복 요일", self.weekdays_edit)
@@ -252,6 +256,7 @@ class ScheduleEditor(QWidget):
         self.start_edit.setDateTime(QDateTime(start))
         self.end_edit.setDateTime(QDateTime(end))
         self.all_day_check.setChecked(False)
+        self.end_none_check.setChecked(False)
         self.completed_check.setChecked(False)
         self.count_as_dday_check.setChecked(False)
         self.category_combo.setCurrentIndex(0)
@@ -300,8 +305,13 @@ class ScheduleEditor(QWidget):
         self.details_edit.setPlainText(str(item["details"]))
         self.type_combo.setCurrentIndex(max(0, self.type_combo.findData(item["item_type"])))
         self.start_edit.setDateTime(QDateTime(datetime.strptime(item["start_at"], DATETIME_FMT)))
-        self.end_edit.setDateTime(QDateTime(datetime.strptime(item["end_at"], DATETIME_FMT)))
+        saved_start = datetime.strptime(item["start_at"], DATETIME_FMT)
+        saved_end = datetime.strptime(item["end_at"], DATETIME_FMT)
+        self.end_edit.setDateTime(QDateTime(
+            saved_start + timedelta(hours=1) if item["time_mode"] == "point" else saved_end
+        ))
         self.all_day_check.setChecked(bool(item["all_day"]))
+        self.end_none_check.setChecked(item["time_mode"] == "point")
         self.completed_check.setChecked(item["status"] == "completed")
         self.count_as_dday_check.setChecked(bool(item["count_as_dday"]))
         self.category_combo.setCurrentIndex(max(0, self.category_combo.findData(item["category"])))
@@ -316,7 +326,7 @@ class ScheduleEditor(QWidget):
         if rule["until"]:
             self.repeat_until_edit.setDateTime(QDateTime(datetime.strptime(rule["until"], DATETIME_FMT)))
         self.repeat_count_spin.setValue(rule["count"] or 10)
-        self.reminders_edit.setText(", ".join(map(str, self.store.schedules.notifications(self.item_id))))
+        self.reminders_edit.setText(", ".join(map(reminder_input_value, self.store.schedules.notifications(self.item_id))))
         self.hotkey_enabled.setChecked(bool(item["hotkey"]))
         self.hotkey_edit.setText(str(item["hotkey"] or "Ctrl+Alt+1"))
         self.hotkey_action_combo.setCurrentIndex(max(0, self.hotkey_action_combo.findData(item["hotkey_action"])))
@@ -342,7 +352,7 @@ class ScheduleEditor(QWidget):
         self.mirror_notice.setVisible(read_only)
         controls = (
             self.title_edit, self.details_edit, self.type_combo, self.start_edit, self.end_edit,
-            self.all_day_check, self.completed_check, self.count_as_dday_check,
+            self.all_day_check, self.end_none_check, self.completed_check, self.count_as_dday_check,
             self.category_combo, self.priority_combo,
             self.note_combo, self.repeat_combo, self.repeat_interval, self.weekdays_edit,
             self.repeat_end_combo, self.repeat_until_edit, self.repeat_count_spin,
@@ -355,6 +365,8 @@ class ScheduleEditor(QWidget):
     def _range_values(self) -> tuple[str, str]:
         start = self.start_edit.dateTime().toPyDateTime()
         end = self.end_edit.dateTime().toPyDateTime()
+        if self.end_none_check.isChecked() and self._editor_kind == "event":
+            end = start + timedelta(minutes=1)
         if self.all_day_check.isChecked():
             start = start.replace(hour=0, minute=0)
             end = max(end, start).replace(hour=23, minute=59)
@@ -390,8 +402,17 @@ class ScheduleEditor(QWidget):
 
     def _all_day_toggled(self, checked: bool) -> None:
         """A whole-day item has no clock, so hide the time boxes."""
+        if checked:
+            self.end_none_check.setChecked(False)
         self.start_edit.set_time_visible(not checked)
         self.end_edit.set_time_visible(not checked)
+
+    def _end_none_toggled(self, _checked: bool) -> None:
+        if self.end_none_check.isChecked():
+            self.all_day_check.setChecked(False)
+        self.form.setRowVisible(
+            self.end_edit, self._editor_kind == "event" and not self.end_none_check.isChecked()
+        )
 
     def values(self) -> dict:
         hotkey = self.hotkey_edit.text().strip() if self.hotkey_enabled.isChecked() else ""
@@ -400,11 +421,12 @@ class ScheduleEditor(QWidget):
         reminders = []
         for value in self.reminders_edit.text().replace(" ", "").split(","):
             if value:
-                reminders.append(int(value))
+                reminders.append(parse_reminder_value(value))
         return {
             "id": self.item_id, "title": self.title_edit.text(), "details": self.details_edit.toPlainText(),
             "item_type": self._editor_kind,
             "start_at": self._range_values()[0], "end_at": self._range_values()[1],
+            "time_mode": "point" if self.end_none_check.isChecked() and self._editor_kind == "event" else "range",
             "all_day": self.all_day_check.isChecked(), "category": self.category_combo.currentData(),
             "priority": self.priority_combo.currentData(),
             "note_id": self.note_combo.currentData(),
@@ -522,16 +544,19 @@ class ScheduleEditor(QWidget):
             start = datetime.strptime(str(values["start_at"]), DATETIME_FMT)
             end = datetime.strptime(str(values["end_at"]), DATETIME_FMT)
             self.start_edit.setDateTime(QDateTime(start))
-            self.end_edit.setDateTime(QDateTime(end))
-            self._span_minutes = max(1, int((end - start).total_seconds() // 60))
+            is_point = values.get("time_mode") == "point"
+            visible_end = start + timedelta(hours=1) if is_point else end
+            self.end_edit.setDateTime(QDateTime(visible_end))
+            self._span_minutes = max(1, int((visible_end - start).total_seconds() // 60))
             self.all_day_check.setChecked(bool(values.get("all_day")))
+            self.end_none_check.setChecked(is_point)
             self.category_combo.setCurrentIndex(
                 max(0, self.category_combo.findData(values.get("category")))
             )
             rule = normalize_rule(values.get("recurrence_rule"))
             self.repeat_combo.setCurrentIndex(max(0, self.repeat_combo.findData(rule["frequency"])))
             self.repeat_interval.setValue(rule["interval"])
-            self.reminders_edit.setText(", ".join(str(value) for value in values.get("reminders", [])))
+            self.reminders_edit.setText(", ".join(reminder_input_value(value) for value in values.get("reminders", [])))
             self.note_combo.setCurrentIndex(max(0, self.note_combo.findData(values.get("note_id"))))
             self.count_as_dday_check.setChecked(bool(values.get("count_as_dday", False)))
             self._sync_repeat_controls()
@@ -554,7 +579,8 @@ class ScheduleEditor(QWidget):
         )
         self.title_edit.setPlaceholderText("할 일 제목" if is_task else "일정 제목")
         self.form.labelForField(self.start_edit).setText("마감" if is_task else "시작")
-        self.form.setRowVisible(self.end_edit, not is_task)
+        self.end_none_check.setVisible(not is_task)
+        self.form.setRowVisible(self.end_edit, not is_task and not self.end_none_check.isChecked())
         self.count_as_dday_check.setVisible(is_task)
         self.new_button.setText("새 할 일" if is_task else "새 일정")
 

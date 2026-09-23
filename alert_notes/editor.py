@@ -4,7 +4,7 @@ import weakref
 
 from html import escape
 
-from PyQt6.QtCore import QEvent, QSize, QTimer, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QPoint, QSize, QTimer, Qt, pyqtSignal
 from PyQt6 import sip
 from PyQt6.QtGui import QCursor, QKeySequence, QShortcut, QTextLength, QTextTable
 from PyQt6.QtWidgets import (
@@ -733,6 +733,14 @@ class MemoEditor(QWidget):
         for view in tuple(getattr(self.store, "_memo_editor_views", ())):
             view.reading_width_mode = self.reading_width_mode
             view._refresh_reading_media()
+
+    def _open_heading_auto_toggle_settings(self) -> None:
+        """Open the existing import defaults directly on their settings tab."""
+        menu = self.format_toolbar.insert_menu
+        panel = menu.actions()[0].defaultWidget()
+        panel._load_import_settings()
+        panel.tabs.setCurrentIndex(panel.tabs.count() - 1)
+        menu.popup(self.function_button.mapToGlobal(QPoint(0, self.function_button.height())))
 
     @staticmethod
     def _drain(layout) -> None:
@@ -1775,6 +1783,7 @@ class MemoEditor(QWidget):
             EditorCommand("annotations", "연결·주석", "주석 보기", self._show_annotations, has_note),
             EditorCommand("options", "메모 설정", "포스트잇·색상·저장 설정", lambda: self._toggle_property_page("other")),
             EditorCommand("reading_width", "메모 설정", "본문 읽기 폭", self._choose_reading_width),
+            EditorCommand("heading_auto_toggle", "메모 설정", "가져온 제목 자동 토글 기본값", self._open_heading_auto_toggle_settings),
             EditorCommand("shortcuts", "메모 설정", "편집 단축키 설정", self._open_shortcut_settings),
         ]
         try:
@@ -1934,7 +1943,10 @@ class MemoEditor(QWidget):
             shortcut.deleteLater()
         self.structure_shortcuts = []
         for action, (_label, setting, default) in STRUCTURE_SHORTCUTS.items():
-            shortcut = QShortcut(QKeySequence(structure_shortcut_value(self.store, action)), self.content_edit)
+            value = structure_shortcut_value(self.store, action)
+            # A modifier-only chord is handled on key release by the editor.
+            sequence = "" if action == "toggle_fold" and value == "Ctrl+Shift" else value
+            shortcut = QShortcut(QKeySequence(sequence), self.content_edit)
             shortcut.setContext(Qt.ShortcutContext.WidgetShortcut)
             if action == "toggle_fold":
                 shortcut.setAutoRepeat(False)

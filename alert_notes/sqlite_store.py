@@ -79,7 +79,9 @@ class NoteReminderStore(ReminderStoreMixin, ReminderRecurrenceStoreMixin):
             {str(row[1]) for row in self.conn.execute("PRAGMA table_info(schedule_items)")}
             if "schedule_items" in tables else set()
         )
-        needs_schedule_shape = bool(schedule_columns) and "count_as_dday" not in schedule_columns
+        needs_schedule_shape = bool(schedule_columns) and not {
+            "count_as_dday", "time_mode"
+        }.issubset(schedule_columns)
         note_columns = {str(row[1]) for row in self.conn.execute("PRAGMA table_info(notes)")}
         needs_notes = not {
             "postit_visible", "postit_startup", "postit_display_mode", "background_transparency",
@@ -509,6 +511,77 @@ class NoteReminderStore(ReminderStoreMixin, ReminderRecurrenceStoreMixin):
             self._touch_note(note_id, {"parent_id": parent_id, "updated_at": self._now_key()})
             self._write_sort_order(siblings)
         return True
+
+    def group_notes(self, note_ids, title: str = "새 묶음", parent_id: int | None = None) -> int:
+        """선택 메모를 새 부모 아래로 묶고 새 부모 ID를 돌려준다.
+
+        부모와 그 자식이 함께 선택된 경우 부모만 이동한다. 같은 부모 아래의
+        메모들이면 그 자리에 묶음을 만들고, 서로 다른 층이면 위치를 지정해야 한다.
+        """
+        ordered = list(dict.fromkeys(int(value) for value in note_ids))
+        hierarchy = {
+            int(row["id"]): int(row["parent_id"] or TOP_LEVEL_PARENT)
+            for row in self.conn.execute("SELECT id,parent_id FROM notes WHERE deleted_at='' ")
+        }
+        selected = {value for value in ordered if value in hierarchy}
+        roots = []
+        for note_id in ordered:
+            if note_id not in selected:
+                continue
+            parent = hierarchy.get(note_id, TOP_LEVEL_PARENT)
+            seen = {note_id}
+            nested = False
+            while parent and parent not in seen:
+                if parent in selected:
+                    nested = True
+                    break
+                seen.add(parent)
+                parent = hierarchy.get(parent, TOP_LEVEL_PARENT)
+            if not nested:
+                roots.append(note_id)
+        if len(roots) < 2:
+            raise ValueError("서로 독립된 메모를 2개 이상 선택해 주세요.")
+
+        rows = [self.note(note_id) for note_id in roots]
+        if any(row is None for row in rows):
+            raise ValueError("선택한 메모를 찾을 수 없습니다.")
+        parent_ids = {int(row["parent_id"] or TOP_LEVEL_PARENT) for row in rows}
+        if parent_id is None:
+            if len(parent_ids) != 1:
+                raise ValueError("서로 다른 부모의 메모입니다. 묶을 위치를 선택해 주세요.")
+            parent_id = next(iter(parent_ids))
+        parent_id = int(parent_id)
+        if parent_id != TOP_LEVEL_PARENT and parent_id not in hierarchy:
+            raise ValueError("묶을 위치를 찾을 수 없습니다.")
+        if any(not self.can_reparent(note_id, parent_id) for note_id in roots):
+            raise ValueError("선택 메모 자신이나 그 하위에는 묶을 수 없습니다.")
+        category_ids = {row["category_id"] for row in rows}
+        category_id = category_ids.pop() if len(category_ids) == 1 else None
+        siblings = [int(row["id"]) for row in self.child_notes(parent_id)]
+        positions = [siblings.index(note_id) for note_id in roots if note_id in siblings]
+        insert_at = min(positions) if positions else len(siblings)
+        remaining = [note_id for note_id in siblings if note_id not in set(roots)]
+
+        stamp = self._now_key()
+        sync_stamp = utc_now_ms()
+        resolved_title = str(title or "").strip() or "새 묶음"
+        with self.conn:
+            cursor = self.conn.execute(
+                "INSERT INTO notes(title,content,created_at,updated_at,parent_id,category_id,"
+                "sync_id,revision,modified_at_utc,origin_device_id) "
+                "VALUES(?,'',?,?,?,?,?,1,?,?)",
+                (
+                    resolved_title, stamp, stamp, int(parent_id), category_id,
+                    new_sync_id(), sync_stamp, self.device_id,
+                ),
+            )
+            group_id = int(cursor.lastrowid)
+            for note_id in roots:
+                self._touch_note(note_id, {"parent_id": group_id})
+            self._write_sort_order(roots)
+            remaining.insert(max(0, min(insert_at, len(remaining))), group_id)
+            self._write_sort_order(remaining)
+        return group_id
 
     def reorder_notes(self, parent_id: int, ordered_ids) -> None:
         """끌어 놓은 차례를 그대로 굳힌다."""

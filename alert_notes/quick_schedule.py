@@ -21,6 +21,8 @@ from PyQt6.QtWidgets import (
 from .categories import CATEGORIES, category_name
 from . import ko_schedule_parser
 from .schedule_recurrence import DATETIME_FMT, normalize_rule
+from .schedule_token_edit import ScheduleTokenLineEdit
+from .schedule_reminders import reminder_label
 
 
 REPEAT_NAMES = {"daily": "매일", "weekly": "매주", "monthly": "매월", "yearly": "매년"}
@@ -36,6 +38,8 @@ class QuickScheduleDialog(QDialog):
         super().__init__(parent)
         self.store = store
         self._parsed = None
+        self._ignored_tokens: set[tuple[int, int, str]] = set()
+        self._parse_source = ""
         self.setWindowTitle("빠른 일정")
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
         self.setMinimumWidth(540)
@@ -57,7 +61,7 @@ class QuickScheduleDialog(QDialog):
         header.addWidget(self.hotkey_label)
         root.addLayout(header)
 
-        self.input_edit = QLineEdit()
+        self.input_edit = ScheduleTokenLineEdit()
         self.input_edit.setObjectName("quickScheduleInput")
         self.input_edit.setPlaceholderText("내일 오후 3시 팀 회의 #업무 !30분전")
         self.input_edit.setAccessibleName("일정 한 줄 입력")
@@ -84,13 +88,16 @@ class QuickScheduleDialog(QDialog):
         root.addWidget(self.hint_label)
 
         self.input_edit.textChanged.connect(self._refresh_preview)
+        self.input_edit.token_double_clicked.connect(self._cancel_parsed_token)
         self.input_edit.returnPressed.connect(self.save)
 
     # ------------------------------------------------------------------ 열기 --
     def prepare(self, hotkey: str | None = None) -> None:
         if hotkey:
             self.hotkey_label.setText(hotkey.upper())
+        self._ignored_tokens.clear()
         self.input_edit.clear()
+        self.input_edit.set_token_spans(())
         self._refresh_preview("")
         self.input_edit.setFocus()
 
@@ -106,9 +113,17 @@ class QuickScheduleDialog(QDialog):
 
     def _refresh_preview(self, text: str | None = None) -> None:
         raw = self.input_edit.text() if text is None else text
+        self._ignored_tokens = ko_schedule_parser.remap_ignored_spans(
+            self._parse_source, raw, self._ignored_tokens,
+        )
+        self._parse_source = raw
         base = self.default_start()
-        self._parsed = ko_schedule_parser.parse(raw, base=base, base_end=base + timedelta(hours=1))
+        self._parsed = ko_schedule_parser.parse(
+            raw, base=base, base_end=base + timedelta(hours=1),
+            ignored_spans=tuple(sorted(self._ignored_tokens)),
+        )
         parsed = self._parsed
+        self.input_edit.set_token_spans(parsed.spans)
         title = parsed.title.strip()
         self.title_label.setText(title or "제목을 적어 주세요")
         self.title_label.setProperty("empty", "true" if not title else "false")
@@ -119,16 +134,32 @@ class QuickScheduleDialog(QDialog):
         pieces = [f"{start:%Y-%m-%d} ({'월화수목금토일'[start.weekday()]})"]
         pieces.append("종일" if parsed.all_day else f"{start:%H:%M} – {end:%H:%M}")
         pieces.append(category_name(parsed.category) if parsed.category else "분류 없음")
-        pieces.append(f"{parsed.reminders[0]}분 전 알림" if parsed.reminders else "알림 없음")
+        pieces.append(
+            reminder_label(parsed.reminders[0])
+            if parsed.reminders else "알림 없음"
+        )
         if parsed.recurrence and parsed.recurrence.get("frequency", "none") != "none":
             pieces.append(REPEAT_NAMES.get(parsed.recurrence["frequency"], "반복"))
-        self.fields_label.setText("  ·  ".join(pieces))
+        self.fields_label.setText("  ·  ".join(parsed.issues or pieces))
         clashes = self.overlapping(start, end)
         self.conflict_label.setText(self.conflict_text(start, end, clashes))
         # 겹치는 게 있으면 색이 먼저 말한다.  초록은 "비어 있다"는 뜻으로만 쓴다.
         self.conflict_label.setProperty("conflict", "true" if clashes else "false")
         self.conflict_label.style().unpolish(self.conflict_label)
         self.conflict_label.style().polish(self.conflict_label)
+
+    def _cancel_parsed_token(self, start: int, end: int, kind: str) -> None:
+        if self._parsed is None:
+            return
+        if kind == "time":
+            targets = [span for span in self._parsed.spans if span.kind == "time"]
+        else:
+            targets = [
+                span for span in self._parsed.spans
+                if span.kind == kind and span.start < end and start < span.end
+            ]
+        self._ignored_tokens.update((span.start, span.end, span.kind) for span in targets)
+        self._refresh_preview()
 
     def range_values(self) -> tuple[datetime, datetime]:
         parsed = self._parsed
@@ -173,7 +204,7 @@ class QuickScheduleDialog(QDialog):
         rule = normalize_rule(parsed.recurrence if parsed else None)
         return {
             "id": None,
-            "title": (parsed.title.strip() if parsed else "") or self.input_edit.text().strip() or "새 일정",
+            "title": parsed.title.strip() if parsed else self.input_edit.text().strip(),
             "details": "",
             "item_type": "event",
             "start_at": start.strftime(DATETIME_FMT),
@@ -190,8 +221,13 @@ class QuickScheduleDialog(QDialog):
         }
 
     def _has_text(self) -> bool:
-        if self.input_edit.text().strip():
+        if self._parsed is not None and self._parsed.issues:
+            self.fields_label.setText(" · ".join(self._parsed.issues))
+            self.input_edit.setFocus()
+            return False
+        if self.values()["title"].strip():
             return True
+        self.title_label.setText("날짜·시간 외에 일정 제목을 입력해 주세요")
         self.input_edit.setFocus()
         return False
 
