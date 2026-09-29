@@ -78,6 +78,7 @@ exe = EXE(
     a.datas,
     [],
     name="toma_shortcut_program",
+    version=str(PROJECT_ROOT / "desktop_version.txt"),
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

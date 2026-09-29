@@ -753,7 +753,14 @@ QPushButton#memoResetFiltersButton { color: #64748b; font-size: 12px; }
 QFrame#memoTitleFilterHelp { background: white; border: 1px solid #e2e5ea; border-radius: 10px; }
 QLabel#memoTitleFilterHelpExample { background: #f1f2f5; border-radius: 6px; padding: 6px; }
 """
-APP_STYLESHEET = _resolve_tokens(BASE_STYLESHEET)
+MOBILE_STYLESHEET = """
+QPushButton#mobileConnectButton { background: @blue-soft; color: @blue-dark; border: 1px solid @line; padding: 4px 12px; border-radius: 9px; }
+QDialog#mobileConnectionDialog { background: @canvas; }
+QLabel#mobileConnectionTitle { font-size: 20px; font-weight: 700; padding: 4px 0; }
+QLabel#mobileConnectionHint { color: @muted; padding: 4px 0; }
+QLineEdit#mobileConnectionUrl { background: @blue-soft; color: @blue-dark; font-weight: 600; }
+"""
+APP_STYLESHEET = _resolve_tokens(BASE_STYLESHEET + MOBILE_STYLESHEET)
 
 
 def scaled_stylesheet(scale: float) -> str:

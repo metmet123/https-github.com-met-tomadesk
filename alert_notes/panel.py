@@ -3,7 +3,7 @@ from datetime import datetime
 from html import escape
 from pathlib import Path
 
-from PyQt6.QtCore import QMimeData, QPoint, Qt, pyqtSignal
+from PyQt6.QtCore import QMimeData, QPoint, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QShortcut, QTextCursor
 from datetime import date, datetime, timedelta
 
@@ -242,7 +242,12 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         self.editor.summary_button.setVisible(not narrow and not self.editor_fullscreen)
 
     def _connect(self) -> None:
-        self.list_panel.search.textChanged.connect(self.refresh)
+        self.search_timer = QTimer(self)
+        self.search_timer.setSingleShot(True)
+        self.search_timer.setInterval(180)
+        self.search_timer.timeout.connect(self._refresh_search)
+        self.list_panel.search.textChanged.connect(lambda: self.search_timer.start())
+        self.list_panel.search.returnPressed.connect(self._refresh_search)
         self.list_panel.note_selected.connect(self.select_note)
         self.list_panel.new_requested.connect(self.create_note)
         self.list_panel.export_requested.connect(self.export_memos)
@@ -560,7 +565,12 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         finally:
             self.list_panel.blockSignals(blocked)
 
+    def _refresh_search(self, *_args) -> None:
+        self.search_timer.stop()
+        self._refresh_list_filters()
+
     def refresh(self, *_args) -> None:
+        self.search_timer.stop()
         rows = self.store.notes(self.list_panel.search.text())
         ids = {int(row["id"]) for row in rows}
         if self.current_id not in ids:
@@ -661,7 +671,10 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         return True
 
     def select_note(self, note_id: int) -> None:
-        self._finish_version_session()
+        if self.current_id == int(note_id):
+            return
+        self.editor.flush_pending_save()
+        self._finish_version_session(flush=False)
         self._remember_visit(int(note_id))
         self._remember_recent(int(note_id))
         self.current_id = note_id
@@ -1542,6 +1555,7 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         self.calendar.update_responsive_layout(width)
 
     def shutdown(self) -> None:
+        self.search_timer.stop()
         self.organizer.timer.stop()
         if self.standalone_window is not None:
             self.standalone_window.shutdown()

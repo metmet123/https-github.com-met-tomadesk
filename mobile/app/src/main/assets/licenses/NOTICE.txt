@@ -1,0 +1,4 @@
+Markdown preview uses Markwon 4.6.2 (Apache License 2.0) and its CommonMark parser (BSD 2-Clause).
+https://github.com/noties/Markwon
+https://github.com/commonmark/commonmark-java
+Full license texts are included in this directory. Existing Toma artwork is reused from TomaDesk.

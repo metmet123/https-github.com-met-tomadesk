@@ -1,0 +1,12 @@
+<resources>
+    <style name="TomaTheme" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">#2C654C</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:windowBackground">#F9F8F4</item>
+        <item name="android:statusBarColor">#F9F8F4</item>
+        <item name="android:navigationBarColor">#F9F8F4</item>
+        <item name="android:windowActionModeOverlay">true</item>
+    </style>
+</resources>

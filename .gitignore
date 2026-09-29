@@ -29,6 +29,8 @@ env/
 # 환경변수 / 비밀정보
 .env
 .env.*
+.qa/
+.package-build/
 *.key
 *.pem
 

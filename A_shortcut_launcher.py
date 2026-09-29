@@ -21,6 +21,9 @@ from store import Store
 
 def main() -> int:
     app = QApplication(sys.argv)
+    if len(sys.argv)==3 and sys.argv[1]=='--mobile-self-test':
+        from mobile_bridge.smoke import run
+        return run(sys.argv[2])
     app.setApplicationName(APP_NAME)
     icon = application_icon()
     app.setWindowIcon(icon)
@@ -35,6 +38,8 @@ def main() -> int:
             return 1
         _install_exception_hook(store.data_dir / "tomadesk_error.log")
         window = MainWindow(store)
+        from mobile_bridge.ui import MobileController
+        window.mobile_controller = MobileController(window)
         window.setWindowIcon(icon)
         window.show_initial_state()
         return app.exec()

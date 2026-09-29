@@ -35,7 +35,7 @@ from alert_notes.sqlite_store import (
     SETTING_COLUMNS, NoteReminderStore,
 )
 from app_icon import application_icon
-from app_config import APP_NAME
+from app_config import APP_NAME, APP_VERSION
 from app_utils import now_key
 from excel_io import ExcelImportError, export_actions_xlsx, import_actions_xlsx
 from excluded_apps_dialog import ExcludedAppsDialog
@@ -466,7 +466,7 @@ class MainWindow(QMainWindow):
         self._action_form_baseline: dict | None = None
         self._restoring_action_selection = False
         self._ui_scale = 1.0
-        self.setWindowTitle(APP_NAME)
+        self.setWindowTitle(f"{APP_NAME} {APP_VERSION}")
         self.setWindowIcon(application_icon())
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
         self.setMinimumSize(820, 560)

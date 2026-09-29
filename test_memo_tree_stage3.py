@@ -119,6 +119,7 @@ class MemoTreeListTest(unittest.TestCase):
     def test_searching_opens_everything_so_matches_are_visible(self):
         self._item(self.hobby).setExpanded(False)
         self.list.search.setText("드라마")
+        self.panel.search_timer.timeout.emit()
         self.app.processEvents()
         drama = self._item(self.drama)
         self.assertIsNotNone(drama, "찾은 메모가 목록에 없습니다")
@@ -128,6 +129,7 @@ class MemoTreeListTest(unittest.TestCase):
 
     def test_a_match_whose_parent_is_filtered_out_still_shows(self):
         self.list.search.setText("젤다")
+        self.panel.search_timer.timeout.emit()
         self.app.processEvents()
         game = self._item(self.game)
         self.assertIsNotNone(game)
@@ -137,6 +139,7 @@ class MemoTreeListTest(unittest.TestCase):
         self._item(self.hobby).setExpanded(False)
         saved = str(self.store.setting(self.list.EXPANDED_SETTING, ""))
         self.list.search.setText("드라마")
+        self.panel.search_timer.timeout.emit()
         self.app.processEvents()
         self.assertEqual(str(self.store.setting(self.list.EXPANDED_SETTING, "")), saved)
 

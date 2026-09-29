@@ -4,6 +4,7 @@ from storage_config import application_dir, load_storage_paths
 
 
 APP_NAME = "TomaDesk"
+APP_VERSION = "0.1.2"
 
 
 def app_dir() -> Path:
