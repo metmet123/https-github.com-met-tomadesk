@@ -2,6 +2,10 @@
 
 > 최신 읽기용 계획과 화면 시안: [전체 계획 HTML](TOMADESK_HUB_MASTER_PLAN.html), [Telegram 상세 계획 HTML](TOMADESK_TELEGRAM_HUB_PLAN.html). 이 Markdown은 최초 초안이다. 유사 제품 비교와 Telegram 수신 방식 검증 게이트를 반영한 HTML을 기준으로 읽는다.
 
+> 모바일 연동 결정(2026-10-02): Android 앱의 개인 메모·첨부·미동기화 변경은 휴대폰에만 저장하고, PC에 직접 연결될 때 동기화한다. Telegram과 Drive는 Android 앱 동기화의 필수 경로가 아니다. 세부 동작과 검증 기준은 최신 HTML 계획의 「추후 Android 앱 연동 결정」 및 9–10단계를 따른다.
+
+> AI 계층 결정(2026-10-02): Dot을 ChatGPT와 함께 7–8단계의 선택 가능한 AI 운영 계층으로 고려한다. Dot은 기준 DB나 필수 동기화 경로가 아니며, 허용된 Snapshot을 읽고 Action 초안을 제안한다. 계정·연결 권한은 초기 소규모 시험으로 확인한다.
+
 작성: 2026-10-02 · 상태: 구현 전 계획 · 범위: 개인용 TomaDesk와 외부 채널의 단계적 연결
 
 > 이 문서는 **1. 허브화 전체 방향 및 개발 계획**이다. **2. Telegram 허브화 상세 계획**은 웹훅, 인증, Drive 구조, 명령, 버튼, 배포 절차를 별도 문서에서 정한다.
@@ -41,11 +45,12 @@ flowchart LR
     GAS --> TG
     PC --> GC[Google Calendar: 선택 일정의 복제]
     GC --> SC[Samsung Calendar: Google 계정 표시]
-    AI[ChatGPT: 브리핑·초안] --> Q
-    DB <--> MB[기존 모바일 브리지·Android 앱]
+    S --> AI[ChatGPT / Dot: 허용 Snapshot 브리핑·Action 초안]
+    AI --> Q
+    DB <--> MB[기존 모바일 브리지·Android 앱: PC 직접 동기화]
 ```
 
-**기준 데이터:** PC의 TomaDesk DB. Telegram은 조작 화면이고 Drive는 전달·조회용 저장소다. Telegram 메시지, Drive 파일, Google Calendar 이벤트가 서로 다른 최신본을 주장하지 않도록 각 데이터 종류의 소유권을 정한다.
+**기준 데이터:** PC의 TomaDesk DB. Telegram은 조작 화면이고 Drive는 Telegram 및 허용된 AI 채널의 전달·조회용 저장소다. Android 개인 메모는 PC와 직접 동기화하며 Drive를 거치지 않는다. Telegram 메시지, AI의 기억·요약, Drive 파일, Google Calendar 이벤트가 서로 다른 최신본을 주장하지 않도록 각 데이터 종류의 소유권을 정한다.
 
 | 데이터 | 기준 및 쓰기 규칙 | 외부로 내보내는 범위 |
 | --- | --- | --- |
@@ -59,7 +64,7 @@ PC가 꺼져 있어도 Telegram 입력은 대기열에 보관할 수 있다. PC�
 
 ## 4. 공통 계약: Action, Receipt, Snapshot
 
-채널별 구현 전에 최소 계약을 먼저 정한다. Telegram, ChatGPT, 향후 앱은 같은 계약을 사용하고 해석·검증·적용은 TomaDesk 쪽에서 한다.
+채널별 구현 전에 최소 계약을 먼저 정한다. Telegram 및 권한을 확인한 AI 채널(ChatGPT·Dot 등)의 쓰기 요청은 같은 Action 계약을 사용하고, 해석·검증·적용은 TomaDesk 쪽에서 한다. 기존 Android 앱의 개인 메모 동기화는 별도의 PC 직접 연결 프로토콜을 유지한다.
 
 | 계약 | 최소 필드 | 핵심 규칙 |
 | --- | --- | --- |
@@ -77,16 +82,16 @@ Telegram의 원본 전송 시각인 `source_sent_at_utc`와 `base_timezone`을 �
 
 | 단계 | 구현 범위 | 이 단계부터 가능한 사용 | 다음 단계로 넘어가는 조건 |
 | --- | --- | --- | --- |
-| 0. 안전 기반 | 실제 DB 백업·복원 리허설, 마이그레이션 검사, 일정 식별·완료 API 조사 | 안전한 개발 기반 | 복원본에서 메모·일정·첨부·Organizer 데이터가 유지됨 |
+| 0. 안전 기반 | 실제 DB 백업·복원 리허설, 마이그레이션 검사, 일정 식별·완료 API 조사. 별도 비차단 Dot PoC: 계정 제공 여부·Drive 샘플 Snapshot 읽기·Calendar 연결·승인 경계 확인 | 안전한 개발 기반 | 복원본에서 메모·일정·첨부·Organizer 데이터가 유지됨. Dot 사용 불가여도 1–6단계는 진행 |
 | 1. 외부 계약 | Action/Receipt v1, DB 영수증, Drive 수신 대기열, 최소 인증·로그 | 외부 요청을 안전하게 보관 | 동일 Action 재전송·앱 재시작·네트워크 끊김에도 중복 반영 0건 |
 | 2. Telegram 빠른 입력 | 개인 대화 문자 수신, 허용 사용자 검사, 수신 확인, 원문 저장 | 휴대폰에서 짧은 입력 | 실제 휴대폰에서 입력→Drive 도착·중복 차단 확인 |
 | 3. TomaDesk 검토·반영 | Organizer 수집함에 출처 표시, 후보 수정·승인·거부, 일정/할 일 반영, 일반 메모 저장 경로 추가, 처리 결과 회신 | Telegram 입력을 실제 일정·할 일·메모로 반영 | 기준일·모호한 시각·메모 생성·중복·거부·재시도 사례 통과 |
 | 4. 읽기 전용 Snapshot | 오늘 일정·미완료 할 일·D-Day 최소 JSON, 공개 범위, 갱신 시각 | 휴대폰에서 TomaDesk 내용 조회 준비 | 민감 항목 제외, 이전 성공본 유지, 오래된 데이터 표시 확인 |
 | 5. Telegram 조회·완료·알림 | `/today`, `/task`, `/dday`, 완료 버튼, 결과 회신, 제한된 알림 | 양방향 일상 사용 | 완료 버튼 연타·PC 오프라인·오래된 버튼·알림 중복 통과 |
 | 6. Calendar 표시 | 선택 일정의 TomaDesk→Google Calendar 단방향 반영, Samsung Calendar 실기기 확인 | 휴대폰 기본 달력에서 일정 확인 | 생성·수정·삭제가 한 번씩 반영되고 계정/달력 혼동 없음 |
-| 7. ChatGPT 브리핑 | Snapshot의 허용 데이터로 브리핑 생성 | 일정·업무 정리 | 누락·오래된 Snapshot을 명시하고 원본과 대조 가능 |
-| 8. ChatGPT 입력 | AI 제안을 Action Queue로 보내 검토 후 반영 | 자연어 AI 입력 | AI 제안이 승인 없이 DB를 바꾸지 않음 |
-| 9. 모바일앱 개선 | Telegram 사용 기록을 보고 긴 메모·검색·오프라인·첨부 우선순위 결정 | 복잡한 모바일 작업 | 실제 자주 쓰는 시나리오와 기존 앱의 제약을 근거로 개선 |
+| 7. AI 브리핑 계층 | ChatGPT 또는 Dot이 공개 허용 필드만 포함한 Snapshot·선택 Calendar를 읽어 일정·업무·검토 대기를 요약. 정시 브리핑은 예약 작업으로 설정 | 일정·업무 정리 | 출처·마지막 PC 갱신 시각·누락/오래됨을 표시하고 원본과 대조 가능. Dot이 없어도 ChatGPT 경로 사용 |
+| 8. AI Action 계층 | ChatGPT 또는 Dot의 제안을 Action 초안으로 접수. 향후 필요 시 제한된 TomaDesk Plugin/MCP 검토 | 자연어 AI 입력·후속 조치 제안 | 사용자 검토와 revision 확인 전 DB 변경 없음. 중복·오래된 요청·권한 실패 시험 통과 |
+| 9. 모바일앱 개선 | 개인 메모·첨부·미반영 변경을 휴대폰에만 보관하고 PC 직접 연결 시 동기화. Telegram 없이 오프라인 사용, 재시도·충돌 보존·미연결 상태 표시를 검증 | 복잡한 모바일 작업 | PC가 꺼진 동안 모바일 작성 가능, 재연결 후 누락·중복·묵시적 덮어쓰기 없음. 클라우드 중계에 모바일 메모를 올리지 않음 |
 | 10. 선택적 양방향 Calendar | 필요가 확인될 때만 외부 수정·충돌 규칙 설계 | Calendar에서 수정한 내용 역반영 | 동일 이벤트 대응, 삭제·충돌·토큰 만료 복구를 검증 |
 
 ### 3단계 직후의 실사용 시험
@@ -116,6 +121,13 @@ Apps Script의 개인 계정 무료 할당량은 현재 문서상 URL Fetch 20,0
 ### 기존 모바일앱
 
 기존 앱의 메모 편집·오프라인 저장·충돌 사본 로직은 유지한다. Telegram으로 빠른 작업의 수요를 먼저 측정하되, 긴 메모·표·첨부·오프라인이 필요할 때는 기존 앱을 개선한다. 기존 모바일 브리지의 `mobile_receipts`와 새 외부 Action 영수증은 서로 다른 프로토콜이므로 ID·충돌 규칙을 대조한 뒤 연결한다.
+
+### AI 운영 계층: ChatGPT·Dot·예약 작업
+
+- **역할:** ChatGPT는 요청할 때 대화·분석하고, Dot은 허용된 연결 자료를 바탕으로 진행 중인 상태를 살펴 브리핑·후속 조치를 제안한다. 정확한 시각의 반복 실행은 별도로 저장된 예약 작업을 사용한다. Dot의 기억과 자체 메모는 편의를 위한 맥락이지 TomaDesk의 원본 데이터가 아니다. [OpenAI Docs: Dot 개요](https://learn.chatgpt.com/docs/dots), [작업과 예약](https://learn.chatgpt.com/docs/dots/tasks-and-memory)
+- **읽기 경계:** 4단계 Snapshot 중 명시적으로 공개를 허용한 항목만 AI에 제공한다. `generated_at_utc`·`source_revision`을 함께 전달해 오래된 브리핑을 최신 상태로 표현하지 않는다. Google Calendar는 연결·권한이 확인된 경우에만 선택 일정과 대조한다. 휴대폰에만 저장된 메모·첨부·대기 변경은 AI에 제공하지 않는다.
+- **쓰기 경계:** Dot·ChatGPT의 분류·완료·일정 제안은 Action 초안이다. TomaDesk가 중복·revision·충돌을 확인하고 사용자 검토 후 적용한다. AI에 SQLite 직접 수정권이나 모바일 브리지의 동기화 책임을 주지 않는다. 향후 Plugin/MCP는 이 계약을 감싸는 제한된 도구일 뿐 별도 원본이 아니다.
+- **초기 비차단 PoC:** Dot 제공 여부, 연결된 Drive에서 가짜 `briefing.json` 읽기, 선택 Calendar 접근, 마지막 갱신 시각 표기, 제안과 실제 쓰기 권한의 차이를 확인한다. 실제 개인 메모는 시험 자료로 올리지 않는다. 계정 미지원·권한 부족·동작 불일치 시 Dot 연동을 보류하고 기존 ChatGPT/예약 작업 경로로 진행한다. Dot의 연결 앱과 PC 로컬 접근은 별도 권한이 필요하며 PC 로컬 파일 작업은 컴퓨터가 온라인이고 ChatGPT 앱이 열려 있을 때만 가능하다. [OpenAI Docs: 연결 조건](https://learn.chatgpt.com/docs/dots/computers-and-apps)
 
 ## 7. 개인정보·장애·복구 원칙
 
