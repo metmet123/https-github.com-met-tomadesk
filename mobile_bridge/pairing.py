@@ -3,34 +3,27 @@
 from __future__ import annotations
 
 import ipaddress
-import re
-from urllib.parse import urlsplit
+from urllib.parse import urlencode,urlsplit
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QImage, QPainter, QPixmap
 
 
-PAIRING_HEADER = "TOMADESK-PAIR-V1"
-
-
-def pairing_payload(url: str, fingerprint: str) -> str:
-    """Encode only the reachable PC endpoint and TLS pin, never credentials."""
+def pairing_payload(url: str) -> str:
+    """Encode a one-scan app link for the reachable PC endpoint."""
     parsed = urlsplit(url)
     if (
-        parsed.scheme != "https" or parsed.username or parsed.password
+        parsed.scheme != "http" or parsed.username or parsed.password
         or parsed.path or parsed.query or parsed.fragment or parsed.port != 47831
     ):
-        raise ValueError("올바른 Tailscale 연결 주소가 아닙니다.")
+        raise ValueError("올바른 PC 연결 주소가 아닙니다.")
     try:
         host = ipaddress.IPv4Address(parsed.hostname or "")
     except ipaddress.AddressValueError as exc:
-        raise ValueError("PC의 Tailscale IPv4 주소를 사용하세요.") from exc
-    if host not in ipaddress.ip_network("100.64.0.0/10"):
-        raise ValueError("PC의 Tailscale IPv4 주소를 사용하세요.")
-    pin = fingerprint.replace(":", "").replace(" ", "").upper()
-    if not re.fullmatch(r"[0-9A-F]{64}", pin):
-        raise ValueError("인증서 지문은 SHA-256 형식이어야 합니다.")
-    return f"{PAIRING_HEADER}\nhttps://{host}:47831\n{pin}"
+        raise ValueError("PC의 IPv4 주소를 사용하세요.") from exc
+    if host.is_loopback or host.is_unspecified or host.is_multicast or host.is_link_local:
+        raise ValueError("휴대폰에서 접근할 수 있는 PC IPv4 주소를 사용하세요.")
+    return f"tomadesk://pair?{urlencode({'address': f'http://{host}:47831'})}"
 
 
 def pairing_qr(payload: str, size: int = 228) -> QPixmap:

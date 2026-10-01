@@ -5,19 +5,17 @@ import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class PairingTest {
-    private val pin = "A".repeat(64)
-    private fun code(url: String, fingerprint: String = pin) = "TOMADESK-PAIR-V1\n$url\n$fingerprint"
+    private fun code(address: String) = "tomadesk://pair?address=${java.net.URLEncoder.encode(address,"UTF-8")}"
 
-    @Test fun acceptsPcAddressAndPin() {
-        assertEquals(PairingInfo("https://100.84.171.16:47831", pin),
-            Pairing.parse(code("https://100.84.171.16:47831")))
+    @Test fun acceptsPcAddressFromAppLink() {
+        assertEquals(PairingInfo("http://100.84.171.16:47831"),
+            Pairing.parse(code("http://100.84.171.16:47831")))
     }
 
     @Test fun rejectsUntrustedQrAndAddresses() {
-        for (value in listOf("https://100.84.171.16:47831", "TOMADESK-PAIR-V2\nhttps://100.84.171.16:47831\n$pin",
-            code("http://100.84.171.16:47831"), code("https://192.168.1.2:47831"),
-            code("https://100.84.171.16:80"), code("https://100.84.171.16:47831/path"),
-            code("https://100.84.171.16:47831", "test"))) {
+        for (value in listOf("http://100.84.171.16:47831", "tomadesk://other?address=http%3A%2F%2F100.84.171.16%3A47831",
+            code("https://100.84.171.16:47831"), code("http://127.0.0.1:47831"),
+            code("http://100.84.171.16:80"), code("http://100.84.171.16:47831/path"))) {
             assertThrows(IllegalArgumentException::class.java) { Pairing.parse(value) }
         }
     }

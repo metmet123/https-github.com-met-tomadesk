@@ -1,6 +1,5 @@
 import hashlib
 import json
-import ssl
 import threading
 import time
 import urllib.request
@@ -11,7 +10,7 @@ from PyQt6.QtWidgets import QApplication
 from alert_notes.memo_inline_alarm import AlarmSpec, DATETIME_FMT, chip_href
 from alert_notes.sqlite_store import NoteReminderStore
 from mobile_bridge.codec import decode,patch
-from mobile_bridge.security import Auth,certificate
+from mobile_bridge.security import Auth
 from mobile_bridge.service import MobileService
 from mobile_bridge.server import BridgeServer,dispatch,Request
 
@@ -129,36 +128,30 @@ def test_duplicate_op_cannot_change_payload(service):
     c['title']='changed'
     with pytest.raises(ValueError):service.apply(c)
 
-def test_no_auth_no_data_and_wrong_server_no_write(service,tmp_path):
-    auth=Auth(tmp_path/'auth.db'); auth.set_password('owner','password-long-enough')
-    req=Request('/sync',{},'bad','test'); dispatch(req,auth,service); assert req.result[0]==401
-    token=auth.login('owner','password-long-enough','phone','test')
-    req=Request('/sync',dict(server_id='wrong',changes=[change(service.snapshot()['notes'][0])]),token,'test')
-    dispatch(req,auth,service); assert req.result[0]==400
+def test_pair_then_sync_and_wrong_server_no_write(service):
+    pair=Request('/pair',{'device':'phone'},'', 'test'); dispatch(pair,service); assert pair.result[0]==200
+    req=Request('/sync',dict(server_id='wrong',changes=[change(service.snapshot()['notes'][0])]),'', 'test')
+    dispatch(req,service); assert req.result[0]==400
     assert service.store.conn.execute('SELECT revision FROM notes').fetchone()[0]==1
 
-def test_https_end_to_end(service,tmp_path):
-    auth=Auth(tmp_path/'auth.db'); auth.set_password('owner','password-long-enough')
-    cert,key,pin=certificate(tmp_path)
-    assert len(pin)==64
-    server=BridgeServer(('127.0.0.1',0),str(cert),str(key))
+def test_http_end_to_end(service):
+    server=BridgeServer(('127.0.0.1',0))
     thread=threading.Thread(target=server.serve_forever,daemon=True); thread.start()
     results=[]
     def client():
-        context=ssl.create_default_context(cafile=str(cert)); context.check_hostname=False
-        address=f'https://127.0.0.1:{server.server_port}'
-        def post(path,body,token=''):
-            req=urllib.request.Request(address+path,json.dumps(body).encode(),{'Authorization':'Bearer '+token,'Content-Type':'application/json'})
-            with urllib.request.urlopen(req,context=context,timeout=10) as r:return json.load(r)
-        token=post('/login',dict(username='owner',password='password-long-enough'))['token']
-        snapshot=post('/sync',{},token)
-        result=post('/sync',{'changes':[change(snapshot['notes'][0])]},token)
+        address=f'http://127.0.0.1:{server.server_port}'
+        def post(path,body):
+            req=urllib.request.Request(address+path,json.dumps(body).encode(),{'Content-Type':'application/json'})
+            with urllib.request.urlopen(req,timeout=10) as r:return json.load(r)
+        post('/pair',dict(device='phone'))
+        snapshot=post('/sync',{})
+        result=post('/sync',{'changes':[change(snapshot['notes'][0])]})
         results.append(result)
     worker=threading.Thread(target=client); worker.start()
     deadline=time.time()+20
     while worker.is_alive() and time.time()<deadline:
         try: req=server.requests.get(timeout=.1)
         except Exception:continue
-        dispatch(req,auth,service)
+        dispatch(req,service)
     worker.join(timeout=1); server.shutdown(); server.server_close()
     assert results and results[0]['notes'][0]['blocks'][0]['text']=='모바일 수정'

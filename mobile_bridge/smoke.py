@@ -7,7 +7,6 @@ from PyQt6.QtGui import QPixmap
 from alert_notes.sqlite_store import NoteReminderStore
 from alert_notes.toma_pet_assets import asset_directory
 from .service import MobileService
-from .security import Auth,certificate
 from .pairing import pairing_payload,pairing_qr
 
 def run(output):
@@ -24,13 +23,10 @@ def run(output):
             service.apply(dict(op_id=str(uuid4()),sync_id=latest['sync_id'],base_revision=latest['revision'],
                 base_hash=latest['base_hash'],base_content=latest['base_content'],title=latest['title'],markdown=markdown,attachments=[]))
             assert next(n for n in service.snapshot()['notes'] if n['sync_id']==latest['sync_id'])['markdown']==markdown
-            auth=Auth(root/'auth.db'); auth.set_password('test','isolated-test-password')
-            assert auth.verify(auth.login('test','isolated-test-password','test','local'))
-            assert len(certificate(root)[2])==64
-            qr=pairing_qr(pairing_payload('https://100.84.171.16:47831','A'*64))
+            qr=pairing_qr(pairing_payload('http://100.84.171.16:47831'))
             assert not qr.isNull()
             assert not QPixmap(str(asset_directory()/'spritesheet.webp')).isNull()
-            result=dict(ok=True,checks=['sqlite','qt-codec','mobile-save','password-login','tls-certificate','qr-pairing','toma-assets','markdown-roundtrip'])
+            result=dict(ok=True,checks=['sqlite','qt-codec','mobile-save','one-scan-pairing','toma-assets','markdown-roundtrip'])
             from app_config import APP_VERSION
             from alert_notes.panel import AlertNotesPanel
             from PyQt6.QtCore import QEvent
@@ -46,7 +42,7 @@ def run(output):
             QApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete)
             result['version']=APP_VERSION
             result['checks'].append('search-preserves-draft')
-            auth.db.close();store.conn.close()
+            store.conn.close()
     except Exception as e:
         result=dict(ok=False,error=repr(e))
     Path(output).write_text(json.dumps(result,ensure_ascii=False),encoding='utf-8')

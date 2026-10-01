@@ -1,7 +1,6 @@
 from __future__ import annotations
 import json
 import queue
-import ssl
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -17,25 +16,16 @@ class Request:
 
 class BridgeServer(ThreadingHTTPServer):
     daemon_threads=True
-    def __init__(self,address,cert,key):
+    def __init__(self,address):
         self.requests=queue.Queue(maxsize=16)
         super().__init__(address,Handler)
-        context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        context.minimum_version=ssl.TLSVersion.TLSv1_2
-        context.load_cert_chain(cert,key)
-        self.context=context
-    def get_request(self):
-        conn,addr=self.socket.accept(); conn.settimeout(15)
-        try: return self.context.wrap_socket(conn,server_side=True),addr
-        except Exception:
-            conn.close(); raise
 
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self,*args): pass  # Never log passwords, tokens or document bodies.
     def do_POST(self):
         try:
-            if self.path not in ('/login','/sync','/logout'):
+            if self.path not in ('/pair','/sync'):
                 self.reply(404,{'error':'경로를 찾을 수 없습니다.'}); return
             if self.headers.get('Transfer-Encoding'):
                 raise ValueError('지원하지 않는 전송 형식입니다.')
@@ -57,23 +47,19 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers(); self.wfile.write(data)
 
 
-def dispatch(request,auth,service):
+def dispatch(request,service):
     if request.cancelled: return
     try:
         b=request.body
-        if request.path=='/login':
-            if len(str(b.get('password','')))>256: raise PermissionError('로그인 정보가 잘못되었습니다.')
-            result={'token':auth.login(b.get('username',''),b.get('password',''),b.get('device','Android'),request.address)}
+        if request.path=='/pair':
+            result={'ok':True,'server_id':service.store.device_id}
         else:
-            if not auth.verify(request.token): raise PermissionError('로그인이 필요합니다.')
-            if request.path=='/logout': auth.revoke(request.token); result={'ok':True}
-            else:
-                if b.get('server_id') and b['server_id'] != service.store.device_id:
-                    raise ValueError('PC 데이터 저장소가 변경되었습니다. 동기화를 중단했습니다.')
-                changes=b.get('changes',[])
-                if not isinstance(changes,list) or len(changes)>100: raise ValueError('동기화 요청이 너무 큽니다.')
-                results=[service.apply(c) for c in changes]
-                result=service.snapshot(); result['results']=results
+            if b.get('server_id') and b['server_id'] != service.store.device_id:
+                raise ValueError('PC 데이터 저장소가 변경되었습니다. 동기화를 중단했습니다.')
+            changes=b.get('changes',[])
+            if not isinstance(changes,list) or len(changes)>100: raise ValueError('동기화 요청이 너무 큽니다.')
+            results=[service.apply(c) for c in changes]
+            result=service.snapshot(); result['results']=results
         request.result=(200,result)
     except PermissionError as e: request.result=(401,{'error':str(e)})
     except (ValueError,KeyError,TypeError) as e: request.result=(400,{'error':str(e)})

@@ -70,17 +70,15 @@ class Desktop011Test(unittest.TestCase):
   self.panel.list_panel.set_rows(self.store.notes(),self.panel.current_id);self.assertEqual(bar.value(),before)
 
 class Connection011Test(unittest.TestCase):
- def test_pairing_qr_contains_only_pc_address_and_pin(self):
-  pin='A'*64
-  self.assertEqual(pairing_payload('https://100.101.102.103:47831',pin),
-   'TOMADESK-PAIR-V1\nhttps://100.101.102.103:47831\n'+pin)
-  for bad in ['http://100.101.102.103:47831','https://192.168.0.1:47831',
-              'https://100.101.102.103:80','https://100.101.102.103:47831/path']:
-   with self.assertRaises(ValueError):pairing_payload(bad,pin)
-  with self.assertRaises(ValueError):pairing_payload('https://100.101.102.103:47831','test')
+ def test_pairing_qr_contains_only_pc_address(self):
+  self.assertEqual(pairing_payload('http://100.101.102.103:47831'),
+   'tomadesk://pair?address=http%3A%2F%2F100.101.102.103%3A47831')
+  for bad in ['https://100.101.102.103:47831','http://127.0.0.1:47831',
+              'http://100.101.102.103:80','http://100.101.102.103:47831/path']:
+   with self.assertRaises(ValueError):pairing_payload(bad)
  def test_qr_is_shown_only_while_tailscale_server_is_running(self):
   app=QApplication.instance() or QApplication([]);window=QWidget()
-  c=MobileController.__new__(MobileController);QObject.__init__(c,window);c.window=window;c.server=None;c.fingerprint='A'*64;c.auth=Mock();c.auth.configured.return_value=True
+  c=MobileController.__new__(MobileController);QObject.__init__(c,window);c.window=window;c.server=None
   with patch('mobile_bridge.ui.subprocess.run',return_value=Mock(stdout='100.101.102.103')):
    stopped=c.connection_dialog()
   self.assertTrue(stopped.findChild(QLabel,'mobilePairQr').pixmap().isNull())
@@ -91,16 +89,14 @@ class Connection011Test(unittest.TestCase):
   self.assertFalse(running.findChild(QLabel,'mobilePairQr').pixmap().isNull())
   destroy_widget(running,app);destroy_widget(window,app)
  def test_complete_url_and_restricted_hosts(self):
-  self.assertEqual(mobile_url(' 100.101.102.103 '),'https://100.101.102.103:47831')
-  for host in ['0.0.0.0','192.168.0.1','::1','https://100.1.2.3','invalid']:
+  self.assertEqual(mobile_url(' 100.101.102.103 '),'http://100.101.102.103:47831')
+  for host in ['0.0.0.0','127.0.0.1','::1','https://100.1.2.3','invalid']:
    with self.assertRaises(ValueError):mobile_url(host)
  def test_copy_address(self):
   app=QApplication.instance() or QApplication([]);window=QWidget()
-  c=MobileController.__new__(MobileController);QObject.__init__(c,window);c.window=window;c.server=None;c.fingerprint='A'*64;c.auth=Mock();c.auth.configured.return_value=False
+  c=MobileController.__new__(MobileController);QObject.__init__(c,window);c.window=window;c.server=Mock(server_address=('100.101.102.103',47831))
   with patch('mobile_bridge.ui.subprocess.run',return_value=Mock(stdout='100.101.102.103')):
    d=c.connection_dialog()
-  edits=d.findChildren(QLineEdit);edits[0].setText('100.101.102.103')
   next(b for b in d.findChildren(QPushButton) if b.text()=='주소 복사').click()
-  self.assertEqual(app.clipboard().text(),'https://100.101.102.103:47831')
-  edits[0].setText('invalid');self.assertFalse(next(b for b in d.findChildren(QPushButton) if b.text()=='주소 복사').isEnabled())
+  self.assertEqual(app.clipboard().text(),'http://100.101.102.103:47831')
   destroy_widget(d,app);destroy_widget(window,app)

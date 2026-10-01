@@ -48,13 +48,20 @@ class MainActivity: Activity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         window.decorView.systemUiVisibility=View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
         vault=Vault(this)
-        try { state=vault.read() } catch(e:Exception) { message("암호화된 자료를 읽지 못했습니다. 앱 데이터를 지우기 전에 복구 가능 여부를 확인하세요."); return }
-        loginScreen()
+        try { state=vault.read() } catch(e:Exception) { message("보관된 자료를 읽지 못했습니다."); return }
+        if(state.optBoolean("paired")) { unlocked=true; home() } else loginScreen()
+        handlePairIntent(intent)
     }
-    override fun onStop() { flushDraft(); super.onStop(); if(!pickerActive)unlocked=false }
+    override fun onStop() { flushDraft(); super.onStop() }
     override fun onStart() {
         super.onStart()
-        if(::vault.isInitialized && !pickerActive && !unlocked && state.optString("token").isNotEmpty()) loginScreen()
+        if(::vault.isInitialized && !pickerActive && !unlocked) loginScreen()
+    }
+    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); handlePairIntent(intent) }
+    private fun handlePairIntent(pairIntent: Intent?) {
+        val raw=pairIntent?.dataString ?: return
+        pairIntent.data=null
+        unlocked=false; loginScreen(); qrResultHandler?.invoke(raw)
     }
     private fun base(title:String, subtitle:String): LinearLayout {
         flushDraft(); documentInput=null
@@ -100,12 +107,12 @@ class MainActivity: Activity() {
         val content=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
         root.addView(ScrollView(this).apply { addView(content) },LinearLayout.LayoutParams(-1,0,1f))
         content.addView(label("PC 연결",13f).apply { setTextColor(TomaStyle.muted) })
-        content.addView(label(state.optString("username")+" 님의 작업 공간",21f))
+        content.addView(label("연결된 PC 작업 공간",21f))
         content.addView(label(state.optString("address"),13f))
         content.addView(button("동기화") { sync() },LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(16); bottomMargin=dp(12) })
         content.addView(button("MD 가져오기") { importMarkdown() },LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(12) })
-        content.addView(button("잠금") { unlocked=false; loginScreen() },LinearLayout.LayoutParams(-1,-2))
-        content.addView(label("메모는 휴대폰에 암호화하여 저장됩니다. PC와 연결할 때 동기화 버튼을 눌러주세요.",13f).apply { setTextColor(TomaStyle.muted); setPadding(0,dp(24),0,0) })
+        content.addView(button("PC 다시 연결") { unlocked=false; loginScreen() },LinearLayout.LayoutParams(-1,-2))
+        content.addView(label("PC와 연결할 때 동기화 버튼을 누르세요.",13f).apply { setTextColor(TomaStyle.muted); setPadding(0,dp(24),0,0) })
         bottomNav("설정")
     }
     private var activeToast:Toast?=null
@@ -117,38 +124,13 @@ class MainActivity: Activity() {
         val content=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
         root.addView(ScrollView(this).apply { addView(content) },LinearLayout.LayoutParams(-1,0,1f))
         content.addView(label("생각을 담고,\n어디서나 이어가세요.",30f).apply { typeface=android.graphics.Typeface.create("sans-serif-medium",android.graphics.Typeface.NORMAL); setPadding(0,dp(12),0,dp(8)) })
-        content.addView(label("나만의 메모 공간에 오신 것을 환영해요.",14f).apply { setTextColor(TomaStyle.muted); setPadding(0,0,0,dp(24)) })
-        val address=field("https://100.x.x.x:47831",state.optString("address"))
-        val pin=field("PC 인증서 SHA-256 지문",state.optString("pin"))
-        val user=field("아이디",state.optString("username"))
-        val pass=field("비밀번호").apply { inputType=129 }
-        val connection=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; visibility=if(state.optString("address").isEmpty())View.VISIBLE else View.GONE }
-        val connectionToggle=button("PC 연결 설정") { connection.visibility=if(connection.visibility==View.VISIBLE)View.GONE else View.VISIBLE }
-        content.addView(connectionToggle,LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(12) })
-        val acceptQr: (String)->Unit = { raw ->
-            val pairing=try { Pairing.parse(raw) }
-            catch(e:IllegalArgumentException) { message(e.message ?: "토마데스크 연결 QR이 아닙니다."); null }
-            if(pairing!=null) {
-                if(state.optString("address").isNotEmpty() &&
-                    (pairing.address!=state.optString("address") || pairing.fingerprint!=state.optString("pin")) &&
-                    (arr("notes").length()>0 || arr("changes").length()>0)) {
-                    message("다른 PC로 바꾸려면 먼저 현재 메모를 내보내고 앱 데이터를 초기화하세요. 서로 다른 PC의 자료는 자동으로 합치지 않습니다.")
-                } else {
-                    AlertDialog.Builder(this).setTitle("PC 연결정보 확인")
-                        .setMessage("본인 PC에서 만든 QR인지 확인하세요.\n${pairing.address}\n인증서: ${pairing.fingerprint.take(12)}…")
-                        .setPositiveButton("입력") { _,_ ->
-                            address.setText(pairing.address); pin.setText(pairing.fingerprint)
-                            connection.visibility=View.VISIBLE
-                        }.setNegativeButton("취소",null).show()
-                }
-            }
-        }
-        qrResultHandler=acceptQr
+        content.addView(label("PC에서 휴대폰연결을 누른 뒤 QR만 인식하세요.\n아이디·비밀번호·인증서 입력 없이 바로 연결됩니다.",14f).apply { setTextColor(TomaStyle.muted); setPadding(0,0,0,dp(24)) })
+        qrResultHandler={ raw -> pairFromQr(raw) }
         content.addView(button("PC QR 스캔") {
             val options=GmsBarcodeScannerOptions.Builder().setBarcodeFormats(Barcode.FORMAT_QR_CODE).build()
             GmsBarcodeScanning.getClient(this,options).startScan()
-                .addOnSuccessListener { barcode -> acceptQr(barcode.rawValue ?: "") }
-                .addOnFailureListener { message("QR 스캐너를 열지 못했습니다. Google Play 서비스 상태를 확인하거나 주소와 지문을 직접 입력하세요.") }
+                .addOnSuccessListener { barcode -> pairFromQr(barcode.rawValue ?: "") }
+                .addOnFailureListener { message("QR 스캐너를 열지 못했습니다. 갤러리 QR 사진 선택을 사용하세요.") }
         },LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(12) })
         content.addView(button("갤러리 QR 사진 선택") {
             pickerActive=true
@@ -161,26 +143,17 @@ class MainActivity: Activity() {
                 message("사진 선택창을 열지 못했습니다: ${e.message ?: "지원 앱 없음"}")
             }
         },LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(12) })
-        connection.addView(label("처음 한 번, PC의 연결 정보를 입력하세요.",12f).apply { setTextColor(TomaStyle.muted) })
-        connection.addView(address); connection.addView(pin); content.addView(connection)
-        content.addView(user); content.addView(pass)
-        content.addView(primary(button("로그인 · PC 연결") {
-            val endpoint=address.text.toString().trim(); val fp=pin.text.toString().trim(); val username=user.text.toString().trim(); val password=pass.text.toString()
-            if(state.optString("address").isNotEmpty() && (endpoint!=state.optString("address") || fp!=state.optString("pin"))) {
-                if(arr("notes").length()>0 || arr("changes").length()>0) { message("다른 PC로 바꾸려면 먼저 현재 메모를 내보내고 앱 데이터를 초기화하세요. 서로 다른 PC의 자료는 자동으로 합치지 않습니다."); return@button }
-            }
-            background("로그인 중…",{ Api(endpoint,fp).post("/login",JSONObject().put("username",username).put("password",password).put("device",Build.MODEL)) }) { result ->
-                state.put("address",endpoint).put("pin",fp).put("username",username).put("token",result.getString("token")); pass.setText("")
-                save(); unlocked=true; home(); sync()
-            }
-        }),LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(12) })
-        if(state.optString("token").isNotEmpty()) content.addView(button("저장된 메모 열기 · 휴대폰 잠금 인증") {
-            val km=getSystemService(KEYGUARD_SERVICE) as KeyguardManager
-            if(!km.isDeviceSecure) { message("오프라인으로 열려면 휴대폰 설정에서 화면 잠금을 설정하세요."); return@button }
-            pickerActive=true
-            startActivityForResult(km.createConfirmDeviceCredentialIntent("토마 모바일","저장된 메모를 열려면 인증하세요."),101)
-        })
-        content.addView(label("PC 토마데스크 하단의 ‘휴대폰 연결 · 로그인’에서 계정을 설정하고 연결을 켜세요. 두 기기의 Tailscale도 켜져 있어야 합니다.\n\n비밀번호는 휴대폰에 저장하지 않습니다.",12f).apply { setTextColor(TomaStyle.muted); setPadding(0,dp(24),0,dp(16)) })
+        if(state.optBoolean("paired")) content.addView(primary(button("연결된 메모 열기") { unlocked=true; home(); sync() }))
+        content.addView(label("기본 카메라가 토마 앱 열기를 제안하면 선택하세요. 열리지 않으면 위의 QR 스캔 또는 갤러리 사진 선택을 사용하면 됩니다.",12f).apply { setTextColor(TomaStyle.muted); setPadding(0,dp(24),0,dp(16)) })
+    }
+    private fun pairFromQr(raw:String) {
+        val pairing=try { Pairing.parse(raw) }
+        catch(e:IllegalArgumentException) { message(e.message ?: "토마데스크 연결 QR이 아닙니다."); return }
+        background("PC에 연결 중…",{ Api(pairing.address).post("/pair",JSONObject().put("device",Build.MODEL)) }) { result ->
+            state.put("address",pairing.address).put("paired",true).put("server_id",result.optString("server_id"))
+            state.remove("pin"); state.remove("username"); state.remove("token")
+            save(); unlocked=true; home(); sync()
+        }
     }
     private fun background(status:String,job:()->JSONObject,done:(JSONObject)->Unit) {
         if(work)return; work=true; documentInput?.isEnabled=false; toast(status)
@@ -364,7 +337,7 @@ class MainActivity: Activity() {
     private fun sync() {
         flushDraft()
         if((0 until arr("changes").length()).any { arr("changes").getJSONObject(it).has("markdown") }) {
-            val api=Api(state.optString("address"),state.optString("pin"),state.optString("token"))
+            val api=Api(state.optString("address"))
             background("PC 버전 확인 중…",{ api.post("/sync",JSONObject().put("changes",JSONArray()).put("server_id",state.optString("server_id"))) }) { probe ->
                 val caps=probe.optJSONArray("capabilities") ?: JSONArray()
                 if(!(0 until caps.length()).any { caps.optString(it)=="markdown_document_v1" }) {
@@ -377,7 +350,7 @@ class MainActivity: Activity() {
         flushDraft()
         val changes=JSONArray(arr("changes").toString())
         if(changes.length()>0) { state.put("uncertain",true); save() }
-        val api=Api(state.optString("address"),state.optString("pin"),state.optString("token"))
+        val api=Api(state.optString("address"))
         val request=JSONObject().put("changes",changes).put("server_id",state.optString("server_id"))
         background("PC와 동기화 중…",{ api.post("/sync",request) }) { result ->
             if(state.has("server_id") && state.getString("server_id")!=result.getString("server_id")) {
