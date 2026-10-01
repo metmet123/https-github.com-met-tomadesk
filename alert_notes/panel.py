@@ -52,6 +52,9 @@ from .structured_import import (
 class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
     shortcuts_changed = pyqtSignal()
     editor_fullscreen_changed = pyqtSignal(bool)
+    # 메모 목록 창(목록만 보이는 좁은 메인 창)에서 편집기를 펴고 접어 달라는 신호.
+    list_window_expand_requested = pyqtSignal()
+    list_window_collapse_requested = pyqtSignal()
     HORIZONTAL_BREAKPOINT = 1080
     LIST_MINIMUM_WIDTH = 480
     EDITOR_MINIMUM_WIDTH = 560 - TextFormatToolbar.WIDTH_REDUCTION
@@ -164,6 +167,9 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         self.sidebar_shortcut.activated.connect(self.toggle_memo_list)
         self.memo_list_hidden = False
         self._narrow_auto_hidden = False
+        self.list_window_mode = False
+        self.list_window_editor_open = False
+        self._list_window_saved_hidden = False
         self._summary_has_content = True
         self._summary_manually_open = False
         self._summary_manually_closed = False
@@ -220,6 +226,10 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         self._sync_summary_visibility()
 
     def _sync_summary_visibility(self) -> None:
+        if self.list_window_mode:
+            self.editor_remainder.hide()
+            self.editor.summary_button.setVisible(False)
+            return
         narrow = self.splitter.orientation() == Qt.Orientation.Vertical
         show = not narrow and not self.editor_fullscreen and (
             self._summary_has_content or self._summary_manually_open
@@ -244,6 +254,8 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
     def _connect(self) -> None:
         self.list_panel.search.textChanged.connect(self.refresh)
         self.list_panel.note_selected.connect(self.select_note)
+        self.list_panel.note_activated.connect(self._activate_note)
+        self.list_panel.schedule_requested.connect(self.show_schedule)
         self.list_panel.new_requested.connect(self.create_note)
         self.list_panel.export_requested.connect(self.export_memos)
         self.list_panel.delete_requested.connect(self.delete_selected_notes)
@@ -535,6 +547,9 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
     def _save_horizontal_splitter_ratios(self, *_args) -> None:
         if self._restoring_splitter or self.splitter.orientation() != Qt.Orientation.Horizontal:
             return
+        if self.list_window_mode:
+            # 목록 창의 임시 배치를 평소 화면 비율로 저장하지 않는다.
+            return
         sizes = self.splitter.sizes()
         total = sum(sizes)
         if total <= 0:
@@ -603,7 +618,12 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         self.calendar.refresh()
         self.editor.title_edit.setFocus()
         self.editor.title_edit.selectAll()
-        if self.store.setting("memo_new_note_focus_mode", "false").lower() == "true":
+        if self.list_window_mode:
+            # 목록 창에서 새 메모를 만들면 바로 적을 수 있게 편집기를 편다.
+            self.list_window_expand_requested.emit()
+            self.editor.title_edit.setFocus()
+            self.editor.title_edit.selectAll()
+        elif self.store.setting("memo_new_note_focus_mode", "false").lower() == "true":
             self.toggle_editor_fullscreen(True)
 
     def copy_selected_notes(self) -> bool:
@@ -850,6 +870,11 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
 
     def toggle_memo_list(self, on: bool | None = None) -> bool:
         """메모 목록만 접었다 편다.  오늘 요약은 그대로 둔다."""
+        if self.list_window_mode:
+            # 목록 창에서 ◀·Ctrl+\ 는 목록 대신 편집기를 접는다.
+            if self.list_window_editor_open:
+                self.list_window_collapse_requested.emit()
+            return False
         wanted = (not self.memo_list_hidden) if on is None else bool(on)
         if wanted == self.memo_list_hidden:
             return self.memo_list_hidden
@@ -882,6 +907,9 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         """편집 구역만 크게 본다.  다시 부르면 원래대로 돌아온다."""
         wanted = (not self.editor_fullscreen) if on is None else bool(on)
         if wanted == self.editor_fullscreen:
+            return self.editor_fullscreen
+        if wanted and self.list_window_mode:
+            # 목록 창은 그 자체가 작은 창이다.  크게 보려면 메인 창을 연다.
             return self.editor_fullscreen
         self.editor_fullscreen = wanted
         if wanted:
@@ -1498,7 +1526,64 @@ class AlertNotesPanel(PanelReminderActionsMixin, QWidget):
         if self.standalone_window is not None:
             self.standalone_window.editor.format_toolbar.apply_ui_scale(self._ui_scale)
 
+    def set_list_window_mode(self, on: bool, editor_open: bool = False) -> None:
+        """목록만 보이는 메모 목록 창.  편집기는 더블클릭할 때만 옆에 편다."""
+        on = bool(on)
+        editor_open = bool(editor_open) and on
+        if on and not self.list_window_mode:
+            self._list_window_saved_hidden = self.memo_list_hidden
+            if self.editor_fullscreen:
+                self.toggle_editor_fullscreen(False)
+            self.tabs.setCurrentIndex(0)
+        was_on = self.list_window_mode
+        self.list_window_mode = on
+        self.list_window_editor_open = editor_open
+        if on:
+            self.memo_list_hidden = False
+            self._narrow_auto_hidden = False
+            if self.splitter.orientation() != Qt.Orientation.Horizontal:
+                self.splitter.setOrientation(Qt.Orientation.Horizontal)
+            self.list_panel.setMinimumHeight(0)
+            self.editor.setMinimumHeight(0)
+            self.list_panel.show()
+            self.editor.set_wide_body(False)
+            self.editor.set_narrow_layout(False)
+            self.editor_remainder.hide()
+            self.editor_scroll.setVisible(editor_open)
+            self.list_panel.setMinimumWidth(self._list_minimum_width())
+            self.editor_scroll.setMinimumWidth(self.EDITOR_MINIMUM_WIDTH if editor_open else 0)
+            self._sync_summary_visibility()
+            self._sync_status_visibility()
+            return
+        if not was_on:
+            return
+        self.memo_list_hidden = self._list_window_saved_hidden
+        self.list_panel.setVisible(not self.memo_list_hidden)
+        self.editor.set_wide_body(self.memo_list_hidden)
+        self.editor_scroll.show()
+        self.editor_scroll.setMinimumWidth(self.EDITOR_MINIMUM_WIDTH)
+        self._horizontal_splitter_restored = False
+        self.update_responsive_layout(self.width())
+        self._restore_horizontal_splitter_ratios()
+        self._sync_summary_visibility()
+        self._sync_status_visibility()
+
+    def list_window_list_width(self) -> int:
+        """목록 창에서 목록 칸이 차지할 폭."""
+        return max(self._list_minimum_width(), self.list_panel.width() if self.list_panel.isVisible() else 0)
+
+    def _activate_note(self, note_id: int) -> None:
+        if self.current_id != int(note_id):
+            self.select_note(int(note_id))
+        if self.list_window_mode:
+            self.list_window_expand_requested.emit()
+        self.editor.content_edit.setFocus()
+
     def update_responsive_layout(self, width: int) -> None:
+        if self.list_window_mode:
+            # 목록 창은 폭과 상관없이 목록(과 펼친 편집기)을 나란히 둔다.
+            self.calendar.update_responsive_layout(width)
+            return
         self.editor.set_narrow_layout(width < self.HORIZONTAL_BREAKPOINT)
         desired = (
             Qt.Orientation.Vertical

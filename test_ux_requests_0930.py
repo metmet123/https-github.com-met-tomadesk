@@ -186,6 +186,8 @@ class MemoListHotkeyTest(unittest.TestCase):
         self.window.hotkeys = SimpleNamespace(
             unregister_all=lambda: None,
             register=lambda _id, hotkey, callback: registered.append((hotkey, callback)),
+            # 창에 Windows 메시지가 오면 nativeEvent가 부른다.  없으면 PyQt가 프로세스를 끝낸다.
+            handle_native_event=lambda _message: False,
         )
         self.window.register_hotkeys(False)
         callback = dict(registered)[self.window.quick_memo_hotkey]
@@ -463,8 +465,35 @@ class AlertQuickScheduleTest(unittest.TestCase):
         self.store.close()
         self.temp.cleanup()
 
-    def test_enter_saves_parsed_schedule_and_keeps_alert_open(self):
+    def test_quick_input_has_focus_when_alert_opens(self):
+        self.dialog.activateWindow()
+        for _ in range(5):
+            self.app.processEvents()
+        self.assertIs(self.dialog.focusWidget(), self.dialog.quick_input)
+
+    def test_enter_on_empty_quick_input_confirms_alert(self):
+        completed = []
+        self.dialog.completed.connect(completed.append)
+        QTest.keyClick(self.dialog.quick_input, Qt.Key.Key_Return)
+        self.app.processEvents()
+        self.assertEqual(completed, [22])
+        self.assertFalse(self.dialog.isVisible())
+        self.assertEqual(self.store.schedules.items_for_range("200001010000", "209912312359"), [])
+
+    def test_failed_quick_save_keeps_alert_open(self):
+        completed = []
+        self.dialog.completed.connect(completed.append)
+        self.dialog.quick_input.setText("내일 10/5 회의")
+        QTest.keyClick(self.dialog.quick_input, Qt.Key.Key_Return)
+        self.app.processEvents()
+        self.assertEqual(completed, [])
+        self.assertTrue(self.dialog.isVisible())
+        self.assertTrue(self.dialog.quick_status.isVisibleTo(self.dialog))
+
+    def test_enter_saves_parsed_schedule_and_closes_alert(self):
         saved = []
+        completed = []
+        self.dialog.completed.connect(completed.append)
         self.dialog.quick_schedule_saved.connect(saved.append)
         self.dialog.quick_input.setText("내일 3시 팀 회의")
         self.assertIn("15:00", self.dialog.quick_time_button.text())
@@ -477,9 +506,9 @@ class AlertQuickScheduleTest(unittest.TestCase):
         self.assertEqual(start.hour, 15)
         self.assertEqual(start.date(), (datetime.now() + timedelta(days=1)).date())
         self.assertEqual(self.store.schedules.notifications(saved[0]), [0])
-        self.assertEqual(self.dialog.quick_input.text(), "")
-        self.assertTrue(self.dialog.isVisible())
-        self.assertIn("팀 회의", self.dialog.quick_status.text())
+        # 적은 일정을 저장한 뒤 알림은 ‘확인’과 같이 닫힌다.
+        self.assertEqual(completed, [22])
+        self.assertFalse(self.dialog.isVisible())
 
     def test_time_only_saves_untitled_schedule_with_alarm(self):
         saved = []

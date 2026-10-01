@@ -211,15 +211,15 @@ class SettingsWindowTest(MainWindowFixture):
 
     def test_the_search_window_can_be_used_beside_it(self):
         self.window.show_settings()
-        self.window.show_memo_search()
+        self.window.show_memo_list_window()
         self.app.processEvents()
-        search = self.window._memo_search_dialog
+        search = self.window.alert_panel.list_panel.search
         self.assertTrue(search.isVisible())
-        # 막는 창이 없으니 검색칸에 그대로 글자를 넣을 수 있다.
+        # 막는 창이 없으니 메모 목록 창 검색칸에 그대로 글자를 넣을 수 있다.
         self.assertIsNone(QApplication.activeModalWidget())
-        search.search_edit.setText("본")
-        self.assertEqual(search.search_edit.text(), "본")
-        search.close()
+        search.setText("본")
+        self.assertEqual(search.text(), "본")
+        self.window.close_memo_list_window()
 
     def test_opening_it_twice_keeps_one_window(self):
         self.window.show_settings()

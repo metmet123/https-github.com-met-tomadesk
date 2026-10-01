@@ -10,6 +10,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QTextCursor, QTextDocument
 from PyQt6.QtWidgets import QApplication
 
+from alert_notes.block_identity import heading_folded_ids
 from alert_notes.panel import AlertNotesPanel
 from alert_notes.rich_memo_edit import RichMemoTextEdit, HEADING_STYLES, HEADING_FOLDED_PREFIX
 from alert_notes.sqlite_store import NoteReminderStore
@@ -117,6 +118,26 @@ class MemoLatencyOptimizationTest(unittest.TestCase):
         with patch.object(edit, "_refresh_toggle_visibility", side_effect=edit._refresh_structure) as refresh:
             edit._refresh_structure()
         self.assertEqual(refresh.call_count, 1)
+
+    def test_long_memo_load_scans_structure_once_and_keeps_folds(self):
+        edit = self.panel.editor.content_edit
+        body = "".join(f"<h2>제목 {i}</h2><p>본문 {i}</p>" for i in range(60))
+        draft = self.store.create_note("긴 메모", f"<html><body>{body}</body></html>")
+        self.panel.select_note(draft)
+        edit._set_heading_folded(edit.document().begin(), True)
+        target = self.store.create_note("접힌 긴 메모", edit.content())
+        original = RichMemoTextEdit._refresh_toggle_visibility
+        with patch.object(RichMemoTextEdit, "_refresh_toggle_visibility",
+                          autospec=True, side_effect=original) as refresh:
+            self.panel.select_note(target)
+        # 줄마다 문서 전체를 다시 훑으면 긴 메모 열기가 수 초 걸린다.
+        self.assertLessEqual(refresh.call_count, 2)
+        document = edit.document()
+        self.assertEqual(len(heading_folded_ids(document)), 1)
+        self.assertFalse(document.begin().next().isVisible())
+        self.assertTrue(document.begin().next().next().isVisible())
+        self.assertEqual(document.availableUndoSteps(), 0)
+        self.assertFalse(document.isModified())
 
 
 if __name__ == "__main__":

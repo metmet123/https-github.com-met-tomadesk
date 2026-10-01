@@ -4,12 +4,13 @@ from datetime import datetime, timedelta
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QCheckBox, QDialog, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
+    QCheckBox, QDialog, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QTextEdit, QVBoxLayout,
 )
 
 from ui_polish import polish_button
 from .datetime_input import DateTimeInput
+from .memo_inline_alarm import chip_label, find_phrase, plain_text_with_chips
 from .sqlite_store import DATETIME_FMT
 
 
@@ -28,12 +29,20 @@ class QuickMemoDialog(QDialog):
         heading.setObjectName("pageTitle")
         root.addWidget(heading)
         self.title_edit = QLineEdit()
-        self.title_edit.setPlaceholderText("제목")
+        self.title_edit.setPlaceholderText("제목 · 예: 보고서 보내기 @ 내일 오후 3시")
         self.content_edit = QTextEdit()
-        self.content_edit.setPlaceholderText("메모 내용을 입력하세요")
+        self.content_edit.setPlaceholderText("메모 내용을 입력하세요 · 줄 끝에 @ 시간을 적으면 알림이 걸립니다")
         self.content_edit.setMaximumHeight(150)
         root.addWidget(self.title_edit)
         root.addWidget(self.content_edit)
+        # `@ 내일 3시`로 읽은 알림.  저장하면 메모 본문의 알림 칩이 된다.
+        self.alarm_preview = QLabel()
+        self.alarm_preview.setObjectName("mutedLabel")
+        self.alarm_preview.setWordWrap(True)
+        self.alarm_preview.hide()
+        root.addWidget(self.alarm_preview)
+        self.title_edit.textChanged.connect(self._refresh_alarm_preview)
+        self.content_edit.textChanged.connect(self._refresh_alarm_preview)
         self.schedule_check = QCheckBox("날짜와 시간 지정")
         self.datetime_input = DateTimeInput()
         self.schedule_check.toggled.connect(self.datetime_input.setVisible)
@@ -59,7 +68,30 @@ class QuickMemoDialog(QDialog):
         self.content_edit.clear()
         self.schedule_check.setChecked(False)
         self.datetime_input.set_datetime(datetime.now() + timedelta(minutes=10))
+        self._refresh_alarm_preview()
         self.title_edit.setFocus()
+
+    def alarm_phrases(self) -> list:
+        lines = [self.title_edit.text(), *self.content_edit.toPlainText().splitlines()]
+        found = []
+        for line in lines:
+            phrase = find_phrase(line)
+            if phrase is not None and (phrase.spec is not None or phrase.issue):
+                found.append(phrase)
+        return found
+
+    def _refresh_alarm_preview(self, *_args) -> None:
+        phrases = self.alarm_phrases()
+        if not phrases:
+            self.alarm_preview.hide()
+            return
+        lines = [
+            f"@ 알림: {phrase.issue}" if phrase.issue
+            else f"{chip_label(phrase.spec)} 알림을 함께 저장합니다"
+            for phrase in phrases
+        ]
+        self.alarm_preview.setText(chr(10).join(lines))
+        self.alarm_preview.show()
 
     def _save(self) -> None:
         title = self.title_edit.text().strip()
@@ -67,70 +99,19 @@ class QuickMemoDialog(QDialog):
         if not title and not content:
             self.title_edit.setFocus()
             return
-        note_id = self.store.create_note(title or content.splitlines()[0][:60], content)
+        raw_title = self.title_edit.text()
+        raw_content = self.content_edit.toPlainText()
+        title, stored, _chips = plain_text_with_chips(raw_title, raw_content)
+        title = title.strip()
+        if not title:
+            first = next((line for line in raw_content.splitlines() if line.strip()), "")
+            phrase = find_phrase(first)
+            if phrase is not None and phrase.valid:
+                first = (first[:phrase.at_index] + " " + phrase.leftover + " " + first[phrase.end:]).strip()
+            title = first[:60]
+        note_id = self.store.create_note(title, stored)
         if self.schedule_check.isChecked() and self.datetime_input.datetime() > datetime.now():
             due = self.datetime_input.datetime().strftime(DATETIME_FMT)
             self.store.set_reminder(note_id, due, content or title)
         self.note_saved.emit(note_id)
-        self.accept()
-
-
-class MemoSearchDialog(QDialog):
-    note_requested = pyqtSignal(int)
-    schedule_requested = pyqtSignal(int)
-
-    def __init__(self, store, parent=None):
-        super().__init__(parent)
-        self.store = store
-        self.setWindowTitle("메모·일정 검색")
-        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
-        self.setMinimumSize(560, 430)
-        root = QVBoxLayout(self)
-        root.setContentsMargins(18, 16, 18, 16)
-        heading = QLabel("메모·일정 통합 검색")
-        heading.setObjectName("pageTitle")
-        root.addWidget(heading)
-        self.search_edit = QLineEdit()
-        self.search_edit.setPlaceholderText("제목, 내용 또는 일정 검색")
-        self.search_edit.setClearButtonEnabled(True)
-        self.results = QListWidget()
-        self.results.setAccessibleName("메모와 일정 검색 결과")
-        root.addWidget(self.search_edit)
-        root.addWidget(self.results, 1)
-        hint = QLabel("↑↓ 이동 · Enter 열기 · Esc 닫기")
-        hint.setObjectName("mutedLabel")
-        root.addWidget(hint)
-        self.search_edit.textChanged.connect(self.refresh)
-        self.search_edit.returnPressed.connect(self._open_current)
-        self.results.itemDoubleClicked.connect(self._open_item)
-
-    def prepare(self) -> None:
-        self.search_edit.clear()
-        self.refresh("")
-        self.search_edit.setFocus()
-
-    def refresh(self, text: str) -> None:
-        self.results.clear()
-        for note in self.store.notes(text)[:50]:
-            item = QListWidgetItem(f"메모  ·  {note['title']}\n{str(note['content'])[:90]}")
-            item.setData(Qt.ItemDataRole.UserRole, ("note", int(note["id"])))
-            self.results.addItem(item)
-        if text.strip():
-            for schedule in self.store.schedules.search(text, 50):
-                item = QListWidgetItem(f"일정  ·  {schedule['title']}\n{schedule['start_at']}")
-                item.setData(Qt.ItemDataRole.UserRole, ("schedule", int(schedule["id"])))
-                self.results.addItem(item)
-        if self.results.count():
-            self.results.setCurrentRow(0)
-
-    def _open_current(self) -> None:
-        if self.results.currentItem() is not None:
-            self._open_item(self.results.currentItem())
-
-    def _open_item(self, item: QListWidgetItem) -> None:
-        kind, item_id = item.data(Qt.ItemDataRole.UserRole)
-        if kind == "note":
-            self.note_requested.emit(item_id)
-        else:
-            self.schedule_requested.emit(item_id)
         self.accept()

@@ -120,6 +120,7 @@ class ReminderStoreMixin:
             self.conn.execute("UPDATE reminders SET status='snoozed' WHERE id=?", (reminder_id,))
             snoozed_id = self._insert_occurrence(
                 row["note_id"], snoozed_due, row["memo"], row["series_id"], "snoozed",
+                str(row["inline_key"] or ""),
             )
             next_id = self.generate_next_occurrence(row)
         self._remove_synced_reminder(reminder_id)
@@ -144,7 +145,11 @@ class ReminderStoreMixin:
         if row is None:
             return
         with self.conn:
-            self.conn.execute("DELETE FROM reminders WHERE id=?", (reminder_id,))
+            if str(row["inline_key"] or ""):
+                # 본문 칩이 남아 있어도 다시 만들지 않도록 흔적을 남긴다.
+                self.conn.execute("UPDATE reminders SET status='removed' WHERE id=?", (reminder_id,))
+            else:
+                self.conn.execute("DELETE FROM reminders WHERE id=?", (reminder_id,))
             self._disable_deadline_alert(row)
             next_id = self.generate_next_occurrence(row)
         self._remove_synced_reminder(reminder_id)
@@ -156,6 +161,10 @@ class ReminderStoreMixin:
         rows = self.pending_reminders_for_note(note_id)
         series_ids = {int(row["series_id"]) for row in rows if row["series_id"] is not None}
         with self.conn:
+            self.conn.execute(
+                "UPDATE reminders SET status='removed' WHERE note_id=? AND status='pending' AND inline_key<>''",
+                (note_id,),
+            )
             self.conn.execute("DELETE FROM reminders WHERE note_id=? AND status='pending'", (note_id,))
             if any(str(row["occurrence_kind"]) == "deadline" for row in rows):
                 self.conn.execute(
@@ -241,6 +250,31 @@ class ReminderStoreMixin:
             (row["note_id"], row["memo"], self._now_key(), action, row["series_id"],
              row["repeat_summary"] or "", row["occurrence_kind"]),
         )
+
+    def sync_inline_alarms(self, note_id: int, content: str) -> bool:
+        """본문의 `@` 알림 칩과 알림 목록을 맞춘다.  실패해도 메모 저장은 막지 않는다."""
+        from .memo_inline_alarm import ALARM_SCHEME, sync_note_alarms
+
+        # 칩도 없고 칩 알림도 없던 메모는 조회 없이 넘긴다.  저장마다 SELECT가 늘지 않게 한다.
+        if ALARM_SCHEME not in str(content or "") and int(note_id) not in self.inline_alarm_note_ids():
+            return False
+        try:
+            return sync_note_alarms(self, int(note_id), content)
+        except Exception as exc:  # pragma: no cover - 저장을 지키는 안전망
+            print(f"[memo alarm] note {note_id}: {exc}")
+            return False
+
+    def inline_alarm_note_ids(self) -> set[int]:
+        """본문 칩 알림을 가진 적이 있는 메모.  처음 한 번만 읽고 동기화하며 고친다."""
+        cached = getattr(self, "_inline_alarm_notes", None)
+        if cached is None:
+            cached = {
+                int(row[0]) for row in self.conn.execute(
+                    "SELECT DISTINCT note_id FROM reminders WHERE inline_key<>''"
+                )
+            }
+            self._inline_alarm_notes = cached
+        return cached
 
     def _sync_reminder(self, reminder_id: int) -> None:
         if hasattr(self, "schedules"):

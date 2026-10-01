@@ -63,6 +63,9 @@ class NoteReminderStore(ReminderStoreMixin, ReminderRecurrenceStoreMixin):
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.upgrade_backup_path = self._backup_before_upgrade()
         self._init_schema()
+        # 저장 때 칩 알림 조회를 건너뛸 수 있게 미리 한 번 읽어 둔다.
+        self._inline_alarm_notes = None
+        self.inline_alarm_note_ids()
         self.schedules = ScheduleStore(self.conn)
         self.memo_data = MemoDataService(self)
 
@@ -225,6 +228,10 @@ class NoteReminderStore(ReminderStoreMixin, ReminderRecurrenceStoreMixin):
             self._create_reminders_table()
         elif self._reminders_need_rebuild():
             self._rebuild_reminders_table()
+        reminder_columns = {str(row[1]) for row in self.conn.execute("PRAGMA table_info(reminders)")}
+        if "inline_key" not in reminder_columns:
+            # 메모 본문 칩(`@ 내일 3시`)과 알림을 잇는 키.  빈 값이면 일반 알림이다.
+            self.conn.execute("ALTER TABLE reminders ADD COLUMN inline_key TEXT NOT NULL DEFAULT ''")
         self.conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS reminder_history (
@@ -246,6 +253,7 @@ class NoteReminderStore(ReminderStoreMixin, ReminderRecurrenceStoreMixin):
                 id INTEGER PRIMARY KEY AUTOINCREMENT, note_id INTEGER NOT NULL, due_at TEXT NOT NULL,
                 memo TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'pending', created_at TEXT NOT NULL,
                 series_id INTEGER, occurrence_kind TEXT NOT NULL DEFAULT 'regular', scheduled_at TEXT,
+                inline_key TEXT NOT NULL DEFAULT '',
                 FOREIGN KEY(note_id) REFERENCES notes(id) ON DELETE CASCADE,
                 FOREIGN KEY(series_id) REFERENCES reminder_series(id) ON DELETE SET NULL
             )"""
@@ -393,7 +401,9 @@ class NoteReminderStore(ReminderStoreMixin, ReminderRecurrenceStoreMixin):
                 (resolved_title, content, stamp, stamp,
                  new_sync_id(), sync_stamp, self.device_id, due, resolved_title if due else ""),
             )
-        return int(cursor.lastrowid)
+        note_id = int(cursor.lastrowid)
+        self.sync_inline_alarms(note_id, content)
+        return note_id
 
     def note(self, note_id: int):
         return self.conn.execute(_NOTE_SELECT + " WHERE notes.id=? AND notes.deleted_at=''", (note_id,)).fetchone()
@@ -761,6 +771,8 @@ class NoteReminderStore(ReminderStoreMixin, ReminderRecurrenceStoreMixin):
             updates["updated_at"] = self._now_key()
         self._touch_note(note_id, updates)
         self.conn.commit()
+        if "content" in updates:
+            self.sync_inline_alarms(note_id, updates["content"])
 
     def add_attachment(
         self, note_id: int, mime_type: str, data_base64: str, width: int, height: int,

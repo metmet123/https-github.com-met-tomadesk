@@ -47,7 +47,7 @@ HOTKEY_FIELDS = (
     ("quick_memo_hotkey", "메모 목록 열기"),
     ("new_memo_hotkey", "새 메모"),
     ("today_view_hotkey", "오늘 일정 열기"),
-    ("memo_search_hotkey", "메모·일정 검색"),
+    ("memo_search_hotkey", "메모 목록 창"),
     ("quick_schedule_hotkey", "빠른 일정"),
     ("window_pin_hotkey", "창 고정/해제"),
     ("shortcut_overlay_hotkey", "단축키 안내"),

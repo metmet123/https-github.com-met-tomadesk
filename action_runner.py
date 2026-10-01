@@ -68,6 +68,9 @@ class ActionRunner:
         window_activator=None,
     ):
         self.stop_requested = False
+        self.workspace_handler = None
+        self.workspace_hide_handler = None
+        self.workspace_reserved_handles = None
         self.stop_monitor = StopHotkeyMonitor(stop_hotkey)
         if explorer_window_provider is not None:
             self._explorer_snapshot_provider = _ExplorerSnapshotProvider(explorer_window_provider)
@@ -180,6 +183,10 @@ class ActionRunner:
         os.startfile(target)
 
     def _run_layout(self, payload: dict, layout_id=None) -> str:
+        if self.workspace_handler:
+            result = self.workspace_handler(payload, layout_id)
+            if result is not None:
+                return result
         windows = payload.get("windows", [])
         if not isinstance(windows, list):
             windows = []
@@ -197,7 +204,7 @@ class ActionRunner:
 
         restored = 0
         failures: dict[int, str] = {}
-        claimed_hwnds: set[int] = set()
+        claimed_hwnds: set[int] = self._reserved_layout_handles(layout_key)
         prepared: list[dict] = []
         try:
             known_handles = {int(hwnd) for hwnd in self._explorer_handle_provider() if int(hwnd or 0)}
@@ -346,7 +353,7 @@ class ActionRunner:
                 self._save_layout_records(layout_key, updated)
                 return None
         else:
-            candidates = self._matching_layout_records(windows)
+            candidates = self._matching_layout_records(windows, layout_key)
             if not candidates:
                 return None
             complete = len(candidates) == valid_count
@@ -470,14 +477,24 @@ class ActionRunner:
         except Exception:
             return False
 
-    def _matching_layout_records(self, windows: list) -> list[dict]:
+    def _reserved_layout_handles(self, layout_key):
+        reserved = {
+            int(record["hwnd"])
+            for other, records in self._layout_records().items() if other != layout_key
+            for record in self._verified_layout_records(records)
+        }
+        if self.workspace_reserved_handles:
+            reserved.update(self.workspace_reserved_handles(layout_key))
+        return reserved
+
+    def _matching_layout_records(self, windows: list, layout_key=None) -> list[dict]:
         try:
             handles = {int(hwnd) for hwnd in self._explorer_handle_provider() if int(hwnd or 0)}
             open_windows = _windows_for_handles(self._explorer_path_provider(handles), handles)
         except Exception:
             return []
         records: list[dict] = []
-        claimed: set[int] = set()
+        claimed: set[int] = self._reserved_layout_handles(layout_key)
         for entry in windows:
             if not isinstance(entry, dict):
                 continue
@@ -518,6 +535,10 @@ class ActionRunner:
 
     def hide_layout_for_window(self, hwnd: int) -> str | None:
         """Hide the complete verified saved layout that owns ``hwnd``."""
+        if self.workspace_hide_handler:
+            result = self.workspace_hide_handler(int(hwnd))
+            if result is not None:
+                return result
         target = int(hwnd or 0)
         state = self._layout_records()
         match = next(

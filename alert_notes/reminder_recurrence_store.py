@@ -118,6 +118,7 @@ class ReminderRecurrenceStoreMixin:
         )
         return self._insert_occurrence(
             series["note_id"], candidate.strftime(DATETIME_FMT), series["memo"], series["id"], "regular",
+            str(row["inline_key"] or "") if "inline_key" in row.keys() else "",
         )
 
     def next_repeat_due(self, reminder_id: int) -> str | None:
@@ -142,10 +143,12 @@ class ReminderRecurrenceStoreMixin:
             (series_id,),
         ).fetchone() is not None
 
-    def _insert_occurrence(self, note_id, due_at: str, memo: str, series_id, kind: str) -> int:
+    def _insert_occurrence(
+        self, note_id, due_at: str, memo: str, series_id, kind: str, inline_key: str = "",
+    ) -> int:
         cursor = self.conn.execute(
-            "INSERT INTO reminders(note_id,due_at,memo,status,created_at,series_id,occurrence_kind,scheduled_at) "
-            "VALUES(?,?,?,'pending',?,?,?,?)",
-            (note_id, due_at, memo, self._now_key(), series_id, kind, due_at),
+            "INSERT INTO reminders(note_id,due_at,memo,status,created_at,series_id,occurrence_kind,"
+            "scheduled_at,inline_key) VALUES(?,?,?,'pending',?,?,?,?,?)",
+            (note_id, due_at, memo, self._now_key(), series_id, kind, due_at, inline_key),
         )
         return int(cursor.lastrowid)

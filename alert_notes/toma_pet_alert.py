@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from PyQt6.QtCore import QEvent, QPoint, QRectF, Qt, pyqtSignal
+from PyQt6 import sip
+from PyQt6.QtCore import QEvent, QPoint, QRectF, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import (
     QDialog, QFrame, QGraphicsDropShadowEffect, QGridLayout, QHBoxLayout,
@@ -364,6 +365,16 @@ class TomaPetAlertDialog(QDialog):
             point.setY(max(area.top(), min(point.y(), area.bottom() - self.height() + 1)))
         self.move(point)
         self.setProperty("placed", True)
+        if getattr(self, "quick_input", None) is not None:
+            # 알림이 뜨면 바로 빠른 일정을 적을 수 있게 입력칸에 커서를 둔다.
+            QTimer.singleShot(0, self._focus_quick_input)
+
+    def _focus_quick_input(self) -> None:
+        if sip.isdeleted(self) or not self.isVisible() or getattr(self, "quick_input", None) is None:
+            return
+        self.raise_()
+        self.activateWindow()
+        self.quick_input.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def keyPressEvent(self, event) -> None:
         # 알림 창에서 Enter는 ‘확인’이다.  빠른 일정 칸의 Enter는 일정 저장이라 따로 둔다.
@@ -379,7 +390,11 @@ class TomaPetAlertDialog(QDialog):
             and event.type() == QEvent.Type.KeyPress
             and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter)
         ):
-            self.save_quick_schedule()
+            # 비어 있으면 ‘확인’과 같다.  적었으면 저장하고, 저장되면 알림도 닫는다.
+            if not self.quick_input.text().strip():
+                self._complete()
+            elif self.save_quick_schedule() is not None:
+                self._complete()
             return True
         return super().eventFilter(watched, event)
 

@@ -41,14 +41,15 @@ _SPACE = r"[ \t]*"
 _MERIDIEM_GROUP = f"({'|'.join(MERIDIEM)})?"
 
 _RE_CATEGORY = re.compile(r"#([가-힣A-Za-z0-9]+)")
-_RE_REMINDER = re.compile(r"!(\d{1,3})\s*(시간|분)?\s*([전후])?")
+_RE_REMINDER = re.compile(r"!(\d{1,3})\s*(시간|분|일)?\s*([전후])?")
 _RE_NATURAL_REMINDER = re.compile(
     r"(?<![!\d])(?:(\d{1,5})\s*분\s*([전후])\s*알(?:람|림)|"
     r"알(?:람|림)\s*(\d{1,5})\s*분\s*([전후])|"
     r"알(?:람|림)|"
     r"(\d{1,5})\s*분\s*([전후]))(?![가-힣A-Za-z0-9])"
 )
-_RE_REPEAT_WEEKDAY = re.compile(rf"매주{_SPACE}([{WEEKDAY_LETTERS}])요일?")
+# "매주 월요일"과 "매주 월" 둘 다.  "매주 월간회의"의 월은 요일이 아니다.
+_RE_REPEAT_WEEKDAY = re.compile(rf"매주{_SPACE}([{WEEKDAY_LETTERS}])(?:요일?)?(?![가-힣])")
 _RE_REPEAT = re.compile(r"매(일|주|달|월|년)")
 _RE_ABS_YMD = re.compile(r"(\d{4})[-./](\d{1,2})[-./](\d{1,2})")
 _RE_ABS_MD_KO = re.compile(rf"(\d{{1,2}})월{_SPACE}(\d{{1,2}})일")
@@ -64,7 +65,10 @@ _RE_REL_TIME = re.compile(
 )
 _RE_WEEKDAY = re.compile(
     rf"(이번{_SPACE}주|다다음{_SPACE}주|다음{_SPACE}주|담주|차주|낼주|금주|저번{_SPACE}주|지난{_SPACE}주|전주)?"
-    rf"{_SPACE}([{WEEKDAY_LETTERS}])요일"
+    # "금요일"뿐 아니라 "금 5시"·"다음 주 월 오전 10시"처럼 시각이 바로 따라오는 한 글자 요일도.
+    # 낱말 속 글자(매월·화장실)와 붙어 쓴 글자는 요일로 보지 않는다.
+    rf"{_SPACE}(?<![가-힣0-9])([{WEEKDAY_LETTERS}])"
+    rf"(?:요일|(?=[ \t]+(?:\d{{1,2}}(?:시(?!간)|:\d)|{'|'.join(MERIDIEM)})))"
 )
 _RE_DAY_WORD = re.compile(rf"({'|'.join(sorted(DAY_WORDS, key=len, reverse=True))})")
 _RE_TIME_COLON = re.compile(rf"{_MERIDIEM_GROUP}{_SPACE}(\d{{1,2}}):(\d{{2}})")
@@ -270,7 +274,7 @@ def _take_reminders(
         if _is_ignored(match.start(), match.end(), "reminder", ignored):
             continue
         amount = int(match.group(1))
-        minutes = amount * 60 if match.group(2) == "시간" else amount
+        minutes = amount * {"시간": 60, "일": 1440}.get(match.group(2), 1)
         if 0 < minutes <= 60 * 24 * 7 and len(values) < 5:
             if match.group(3) == "후":
                 minutes = -minutes

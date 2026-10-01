@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
-from PyQt6.QtCore import QByteArray, QEvent, QPointF, QRect, QRectF, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QByteArray, QEvent, QPointF, QRect, QRectF, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QGuiApplication, QKeySequence, QPainter, QShortcut
 from PyQt6.QtWidgets import (
     QFileDialog, QAbstractItemView, QAbstractSpinBox, QBoxLayout, QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QGridLayout,
@@ -16,6 +16,9 @@ from PyQt6.QtWidgets import (
 )
 
 from action_runner import ActionRunner
+from layout_favorites_panel import WorkspaceSettings
+from layout_workspace import workspace_payload
+from layout_workspace_controller import WorkspaceController
 from alert_notes.database_bundle import export_database_bundle, import_database_bundle
 from alert_notes.deadline import (
     deadline_chip_text, deadline_days_left, deadline_title, deadline_urgency,
@@ -23,7 +26,7 @@ from alert_notes.deadline import (
 )
 from alert_notes.panel import AlertNotesPanel
 from alert_notes.schedule_popover import StandaloneSchedulePopover
-from alert_notes.quick_capture import MemoSearchDialog, QuickMemoDialog
+from alert_notes.quick_capture import QuickMemoDialog
 from alert_notes.service import AlertService
 from alert_notes.toma_pet_window import TomaPetController
 from alert_notes.schedule_store import (
@@ -428,6 +431,7 @@ class MainWindow(QMainWindow):
         self.screen_ocr = None
         self.startup_mode = self.store.setting(STARTUP_MODE_SETTING, "window")
         self.runner = ActionRunner(self.playback_stop_hotkey, settings_store=self.store)
+        self.layout_workspace_controller = WorkspaceController(self)
         self.explorer_layout_hide_requested.connect(self._hide_explorer_layout_from_title)
         self._hidden_windows_exit_restored = False
         self._hidden_windows_startup_checked = False
@@ -463,7 +467,9 @@ class MainWindow(QMainWindow):
         self._resize_drag = None
         self._quick_memo_dialog = None
         self._quick_schedule_popover = None
-        self._memo_search_dialog = None
+        self._memo_list_mode = False
+        self._memo_list_saved: dict | None = None
+        self._memo_list_collapsed_width = 0
         self._restoring_column_widths = False
         self._restoring_splitter_ratio = False
         self.current_id: int | None = None
@@ -631,6 +637,12 @@ class MainWindow(QMainWindow):
         self.alert_panel.tabs.currentChanged.connect(self._sync_alert_tab_button)
         self._sync_alert_tab_button(self.alert_panel.tabs.currentIndex())
         self._update_workspace_subnav_visibility()
+        # 메모 목록 창(Ctrl+Alt+M): 더블클릭으로 편집기를 펴고 ◀로 접는다.  X는 창만 닫는다.
+        self.alert_panel.list_window_expand_requested.connect(lambda: self._set_memo_list_editor_open(True))
+        self.alert_panel.list_window_collapse_requested.connect(lambda: self._set_memo_list_editor_open(False))
+        self.alert_panel.list_panel.schedule_requested.connect(self._memo_list_schedule_requested)
+        self.title_bar.close_button.clicked.disconnect()
+        self.title_bar.close_button.clicked.connect(self._title_close_requested)
         self._wheel_locked_controls = tuple(self.findChildren((QComboBox, QAbstractSpinBox)))
         QTimer.singleShot(0, self._update_responsive_layout)
 
@@ -975,15 +987,141 @@ class MainWindow(QMainWindow):
         self.alert_panel.refresh()
         self.register_hotkeys(False)
 
-    def show_memo_search(self) -> None:
-        if self._memo_search_dialog is None:
-            self._memo_search_dialog = MemoSearchDialog(self.note_store, self)
-            self._memo_search_dialog.note_requested.connect(self.open_alert_note)
-            self._memo_search_dialog.schedule_requested.connect(self.open_schedule_item)
-        self._memo_search_dialog.prepare()
-        self._memo_search_dialog.show()
-        self._memo_search_dialog.raise_()
-        self._memo_search_dialog.activateWindow()
+    # ------------------------------------------------------------ 메모 목록 창 --
+    # Ctrl+Alt+M.  메인 창을 목록만 보이게 좁힌 상태다.  더블클릭하면 같은 창이
+    # 오른쪽으로 넓어지며 편집기가 열리고, X는 프로그램을 끄지 않고 창만 숨긴다.
+    # 숨기는 순간 평소 메인 창 모양으로 되돌려 두므로, 다른 경로로 메인 창을
+    # 열면 늘 보던 화면이 나온다.
+    MEMO_LIST_WINDOW_SETTING = "memo_list_window_geometry"
+    MEMO_LIST_EDITOR_WIDTH = 640
+
+    def show_memo_list_window(self) -> None:
+        """목록만 보이는 메모 목록 창을 띄운다.  다시 눌러도 목록만 보이는 모양으로 뜬다."""
+        self._cancel_resize_drag()
+        if not self._memo_list_mode:
+            self._enter_memo_list_mode()
+        elif self.alert_panel.list_window_editor_open:
+            self._set_memo_list_editor_open(False)
+        if self.isMinimized() or not self.isVisible():
+            self.showNormal()
+        self.raise_()
+        self.activateWindow()
+        search = self.alert_panel.list_panel.search
+        search.setFocus(Qt.FocusReason.ShortcutFocusReason)
+        search.selectAll()
+
+    def _enter_memo_list_mode(self) -> None:
+        self._memo_list_saved = {
+            "geometry": self.saveGeometry(),
+            "rect": self.normalGeometry() if self.isMaximized() else self.geometry(),
+            "maximized": self.isMaximized(),
+            "workspace": self.main_pages.currentIndex(),
+            "tab": self.alert_panel.tabs.currentIndex(),
+            "minimum": self.minimumSize(),
+        }
+        self._memo_list_mode = True
+        if self.isMaximized() or self.isFullScreen():
+            self.showNormal()
+        self._switch_workspace(1)
+        self.alert_panel.set_list_window_mode(True)
+        self.workspace_mode_bar.hide()
+        self.title_bar.close_button.setToolTip("메모 목록 창 닫기")
+        self.title_bar.close_button.setAccessibleName("메모 목록 창 닫기")
+        self.setMinimumSize(360, 420)
+        self.setGeometry(self._memo_list_geometry())
+        self._keep_window_on_screen()
+
+    def _memo_list_geometry(self) -> QRect:
+        """지난번 목록 창 자리.  처음이면 지금 창 왼쪽에 목록 폭만큼."""
+        raw = str(self.store.setting(self.MEMO_LIST_WINDOW_SETTING, "") or "")
+        parts = [piece for piece in raw.split(",") if piece.strip().lstrip("-").isdigit()]
+        list_width = self.alert_panel.list_window_list_width() + 40
+        if len(parts) == 4:
+            x, y, width, height = (int(piece) for piece in parts)
+            return QRect(x, y, max(list_width, width), max(420, height))
+        current = self.geometry()
+        return QRect(current.x(), current.y(), list_width, max(560, current.height()))
+
+    def _save_memo_list_geometry(self) -> None:
+        geometry = self.geometry()
+        width = geometry.width()
+        if self.alert_panel.list_window_editor_open:
+            width = self._memo_list_collapsed_width or width
+        self.store.set_setting(
+            self.MEMO_LIST_WINDOW_SETTING,
+            f"{geometry.x()},{geometry.y()},{width},{geometry.height()}",
+        )
+
+    def _set_memo_list_editor_open(self, wanted: bool) -> None:
+        if not self._memo_list_mode or wanted == self.alert_panel.list_window_editor_open:
+            return
+        geometry = self.geometry()
+        if wanted:
+            self._memo_list_collapsed_width = geometry.width()
+            list_width = max(self.alert_panel.list_window_list_width(), self.alert_panel.list_panel.width())
+            self.alert_panel.set_list_window_mode(True, editor_open=True)
+            editor_width = max(self.alert_panel.EDITOR_MINIMUM_WIDTH, self.MEMO_LIST_EDITOR_WIDTH)
+            geometry.setWidth(geometry.width() + editor_width)
+            screen = self.screen()
+            if screen is not None:
+                area = screen.availableGeometry()
+                if geometry.right() > area.right():
+                    geometry.moveRight(area.right())
+                if geometry.left() < area.left():
+                    geometry.moveLeft(area.left())
+                    geometry.setRight(min(geometry.right(), area.right()))
+            self.setGeometry(geometry)
+            self.alert_panel.splitter.setSizes([list_width, max(1, geometry.width() - list_width), 0])
+        else:
+            self.alert_panel.set_list_window_mode(True, editor_open=False)
+            width = self._memo_list_collapsed_width or self.alert_panel.list_window_list_width() + 40
+            geometry.setWidth(width)
+            self.setGeometry(geometry)
+            self.alert_panel.list_panel.table.setFocus()
+
+    def _leave_memo_list_mode(self, restore_view: bool) -> None:
+        """평소 메인 창 모양으로 되돌린다.  `restore_view`면 보던 화면까지 되돌린다."""
+        if not self._memo_list_mode:
+            return
+        self._save_memo_list_geometry()
+        saved = self._memo_list_saved or {}
+        self._memo_list_mode = False
+        self.alert_panel.set_list_window_mode(False)
+        self.workspace_mode_bar.setVisible(not self.alert_panel.editor_fullscreen)
+        self.title_bar.close_button.setToolTip("프로그램 종료")
+        self.title_bar.close_button.setAccessibleName("프로그램 종료")
+        self.setMinimumSize(saved.get("minimum") or QSize(820, 560))
+        if saved.get("geometry") is not None:
+            self.restoreGeometry(saved["geometry"])
+        if saved.get("rect") is not None:
+            # restoreGeometry는 숨긴 창에서 크기를 되살리지 못할 때가 있다.  자리를 직접 맞춘다.
+            self.setGeometry(saved["rect"])
+        if restore_view:
+            self._switch_workspace(int(saved.get("workspace", 1)))
+            self.alert_panel.tabs.setCurrentIndex(int(saved.get("tab", 0)))
+        self._memo_list_collapsed_width = 0
+        if saved.get("maximized") and self.isVisible():
+            self.showMaximized()
+        self._memo_list_saved = None
+
+    def close_memo_list_window(self) -> None:
+        """목록 창의 X.  프로그램은 그대로 두고 창만 숨긴다."""
+        self._cancel_resize_drag()
+        self.hide()
+        self._leave_memo_list_mode(restore_view=True)
+
+    def _title_close_requested(self) -> None:
+        if self._memo_list_mode:
+            self.close_memo_list_window()
+        else:
+            self.exit_application()
+
+    def _memo_list_schedule_requested(self, _item_id: int) -> None:
+        # 패널이 이미 캘린더로 넘겼다.  캘린더는 넓은 메인 창에서 본다.
+        if self._memo_list_mode:
+            self._leave_memo_list_mode(restore_view=False)
+            self.alert_panel.tabs.setCurrentIndex(1)
+            self.restore_from_tray()
 
     def _build_tray(self) -> None:
         self.tray_icon = QSystemTrayIcon(self.windowIcon(), self)
@@ -1020,9 +1158,12 @@ class MainWindow(QMainWindow):
         # Let Windows register the icon before the main window disappears.
         QApplication.processEvents()
         self.hide()
+        self._leave_memo_list_mode(restore_view=True)
 
     def restore_from_tray(self) -> None:
         self._cancel_resize_drag()
+        # 메모 목록 창이 아닌 길로 메인 창을 부르면 평소 모양으로 연다.
+        self._leave_memo_list_mode(restore_view=False)
         self.showNormal()
         self.raise_()
         self.activateWindow()
@@ -1074,6 +1215,9 @@ class MainWindow(QMainWindow):
         if self._hidden_windows_exit_restored:
             return (0, 0)
         self._hidden_windows_exit_restored = True
+        controller = getattr(self, "layout_workspace_controller", None)
+        if controller is not None:
+            controller.shutdown()
         return self.runner.restore_all_hidden_windows()
 
     def show_start_guide(self) -> None:
@@ -1664,7 +1808,16 @@ class MainWindow(QMainWindow):
         for column in (2, 3, 4, 5):
             header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
         root.addWidget(self.layout_table, 1)
+        self.layout_workspace_settings = WorkspaceSettings()
+        root.addWidget(self.layout_workspace_settings)
+        self.layout_table.itemChanged.connect(self._sync_layout_workspace_targets)
+        self.layout_workspace_settings.enabled.toggled.connect(self._sync_layout_workspace_targets)
         return page
+
+    def _sync_layout_workspace_targets(self):
+        self.layout_workspace_settings.set_entries([
+            value for value in self._layout_row_states() if value.get("_selected", True)
+        ])
 
     def capture_layout_windows(self) -> None:
         try:
@@ -1700,8 +1853,10 @@ class MainWindow(QMainWindow):
         return payload
 
     def _set_layout_rows(self, windows) -> None:
+        self.layout_table.blockSignals(True)
         self.layout_table.setRowCount(0)
-        for value in windows if isinstance(windows, list) else []:
+        normalized = workspace_payload({"windows": windows})["windows"]
+        for value in normalized:
             if not isinstance(value, dict):
                 continue
             row_value = dict(value)
@@ -1753,6 +1908,8 @@ class MainWindow(QMainWindow):
             remove.clicked.connect(lambda _checked=False, button=remove: self._delete_layout_row(button))
             self.layout_table.setCellWidget(row, 5, actions)
             self.layout_table.setRowHeight(row, 32)
+        self.layout_table.blockSignals(False)
+        self._sync_layout_workspace_targets()
 
     def _layout_row_states(self) -> list[dict]:
         result = []
@@ -1770,6 +1927,8 @@ class MainWindow(QMainWindow):
         for value in self._layout_row_states():
             selected = bool(value.pop("_selected", False))
             if selected or not selected_only:
+                if not self.layout_workspace_settings.enabled.isChecked() and not self.layout_workspace_settings.options:
+                    value.pop("slot_id", None)
                 result.append(value)
         return result
 
@@ -1794,6 +1953,7 @@ class MainWindow(QMainWindow):
         row = self._layout_row_for_button(button)
         if row >= 0:
             self.layout_table.removeRow(row)
+            self._sync_layout_workspace_targets()
 
     def _button(self, layout, text: str, callback, *position) -> QPushButton:
         button = QPushButton(text)
@@ -2490,6 +2650,8 @@ class MainWindow(QMainWindow):
 
     def _apply_ui_scale(self) -> None:
         self.setStyleSheet(theme_scaled_stylesheet(self._ui_scale))
+        if hasattr(self, "layout_workspace_controller"):
+            self.layout_workspace_controller.apply_scale(self._ui_scale)
         if hasattr(self, "alert_panel"):
             self.alert_panel.apply_ui_scale(self._ui_scale)
         if hasattr(self, "table"):
@@ -2880,7 +3042,7 @@ class MainWindow(QMainWindow):
             self.quick_memo_hotkey: "메모 목록 열기",
             self.new_memo_hotkey: "새 메모",
             self.today_view_hotkey: "오늘 일정 열기",
-            self.memo_search_hotkey: "메모·일정 검색",
+            self.memo_search_hotkey: "메모 목록 창",
             self.quick_schedule_hotkey: "빠른 일정",
             self.window_pin_hotkey: "창 고정/해제",
             self.shortcut_overlay_hotkey: "단축키 안내",
@@ -2910,7 +3072,10 @@ class MainWindow(QMainWindow):
             user32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
             user32.GetAncestor.restype = wintypes.HWND
             target = user32.WindowFromPoint(POINT(x, y))
-            return bool(target and user32.GetAncestor(target, 2) == user32.GetAncestor(int(self.winId()), 2))
+            root = user32.GetAncestor(target, 2) if target else 0
+            controller = getattr(self, "layout_workspace_controller", None)
+            panel_handles = getattr(controller, "panel_handles", frozenset())
+            return bool(root and (root == user32.GetAncestor(int(self.winId()), 2) or root in panel_handles))
         except Exception:
             return False
 
@@ -3150,6 +3315,7 @@ class MainWindow(QMainWindow):
         self.url_edit.setText("")
         self.path_edit.setText("")
         self.path_restore_check.setChecked(False)
+        self.layout_workspace_settings.load({}, [])
         self._set_layout_rows([])
         self._updating_macro_document = True
         try:
@@ -3233,6 +3399,7 @@ class MainWindow(QMainWindow):
                 self._updating_macro_document = False
             self._sync_timing_controls()
         elif action_type == "layout":
+            self.layout_workspace_settings.load(payload.get("workspace", {}), workspace_payload(payload)["windows"])
             self._set_layout_rows(payload.get("windows", []))
             self.layout_status_label.setText(
                 f"저장된 탐색기 창 {self.layout_table.rowCount()}개를 불러왔습니다."
@@ -3242,6 +3409,8 @@ class MainWindow(QMainWindow):
         self._commit_macro_history_state()
         try:
             data = self._form_data()
+            if self.layout_workspace_controller.busy_key == f"action:{data.get('id')}":
+                raise ValueError("폴더 이동 완료 후 창배치 설정을 저장해 주세요.")
             self._validate_unique_hotkey(data["hotkey"], data.get("id"))
             action_id = self.store.save_action(data)
         except Exception as exc:
@@ -3249,6 +3418,13 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "저장 실패", str(exc))
             return False
         self.current_id = action_id
+        if data["action_type"] == "layout":
+            self.layout_workspace_settings.options = dict(data["payload"].get("workspace", {}))
+        workspace_error = ""
+        try:
+            self.layout_workspace_controller.sync_saved(action_id, data["action_type"], data["payload"])
+        except Exception as exc:
+            workspace_error = f"작업은 저장됐지만 실행 중 창배치 갱신에 실패했습니다: {exc}"
         if data["action_type"] == "macro":
             self._capture_original_macro_state()
         else:
@@ -3258,7 +3434,9 @@ class MainWindow(QMainWindow):
         self.refresh()
         registered = self.register_hotkeys(show_message=False)
         self._set_action_form_baseline()
-        if registered:
+        if workspace_error:
+            self._set_status(workspace_error, "warning")
+        elif registered:
             self._set_status("저장되었습니다. 단축키 등록도 최신 상태로 갱신했습니다.", "success")
         else:
             self._set_status(
@@ -3327,6 +3505,7 @@ class MainWindow(QMainWindow):
             "speed": self.speed_slider.value(),
             "repeat": self.repeat_count_spin.value(),
             "layout_windows": self._layout_row_states(),
+            "layout_workspace": self.layout_workspace_settings.value(),
             "excluded_apps": persisted_app_list(self.excluded_apps),
         }
 
@@ -3391,6 +3570,11 @@ class MainWindow(QMainWindow):
             payload.update(self._timing_options())
         elif action_type == "layout":
             payload = {"windows": self._layout_windows(selected_only=True)}
+            if self.layout_workspace_settings.enabled.isChecked():
+                payload["workspace"] = self.layout_workspace_settings.value()
+                payload = workspace_payload(payload)
+            elif self.layout_workspace_settings.options:
+                payload["workspace"] = self.layout_workspace_settings.value()
         else:
             payload = {}
         payload["excluded_apps"] = persisted_app_list(self.excluded_apps)
@@ -3543,6 +3727,11 @@ class MainWindow(QMainWindow):
             return
         if QMessageBox.question(self, "삭제", prompt) != QMessageBox.StandardButton.Yes:
             return
+        try:
+            self.layout_workspace_controller.remove_actions(selected_ids)
+        except Exception as exc:
+            self._set_status(f"창배치 작업 삭제 실패: {exc}", "error")
+            return
         self.store.delete_actions(selected_ids)
         self.current_id = None
         self.refresh()
@@ -3665,7 +3854,7 @@ class MainWindow(QMainWindow):
             (QUICK_MEMO_HOTKEY_ID, self.quick_memo_hotkey, self.show_memo_list, "메모 목록 열기"),
             (NEW_MEMO_HOTKEY_ID, self.new_memo_hotkey, self.show_new_memo_editor, "새 메모"),
             (TODAY_VIEW_HOTKEY_ID, self.today_view_hotkey, self.open_today_schedule, "오늘 일정"),
-            (MEMO_SEARCH_HOTKEY_ID, self.memo_search_hotkey, self.show_memo_search, "메모·일정 검색"),
+            (MEMO_SEARCH_HOTKEY_ID, self.memo_search_hotkey, self.show_memo_list_window, "메모 목록 창"),
             (QUICK_SCHEDULE_HOTKEY_ID, self.quick_schedule_hotkey, self.show_quick_schedule, "빠른 일정"),
             (WINDOW_PIN_HOTKEY_ID, self.window_pin_hotkey, self.toggle_foreground_window_pin, "창 고정/해제"),
             (SHORTCUT_OVERLAY_HOTKEY_ID, self.shortcut_overlay_hotkey, self.show_shortcut_overlay, "단축키 안내"),
@@ -4015,6 +4204,7 @@ class MainWindow(QMainWindow):
             event.ignore()
             return
         self._restore_hidden_windows_on_exit()
+        self._leave_memo_list_mode(restore_view=True)
         if self._quick_schedule_popover is not None:
             self._quick_schedule_popover.close()
         self._cancel_resize_drag()
@@ -4188,4 +4378,3 @@ def _registration_status_color(status: str) -> str:
         "비활성": "#64748B",
         "확인 중": "#64748B",
     }.get(status, "#64748B")
-

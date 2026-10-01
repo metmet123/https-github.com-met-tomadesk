@@ -1,12 +1,13 @@
 import json
 import re
+from datetime import datetime
 
 from PyQt6.QtCore import QEvent, QRect, QRectF, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QIcon, QKeySequence, QPainter, QPen, QPixmap, QShortcut
 from PyQt6.QtWidgets import (
     QAbstractItemView, QApplication, QHBoxLayout, QHeaderView, QLabel, QLayout, QLineEdit, QMenu,
     QPushButton, QComboBox, QStyle, QStyledItemDelegate, QStyleOptionButton, QStyleOptionViewItem,
-    QSizePolicy, QToolTip, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QListWidget, QListWidgetItem, QSizePolicy, QToolTip, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from .deadline import deadline_chip_text, is_deadline_done, reminder_display_text
@@ -581,6 +582,10 @@ class MemoTree(QTreeWidget):
 
 class MemoListPanel(TitleFilterControls, QWidget):
     note_selected = pyqtSignal(int)
+    # 더블클릭·Enter.  목록 창에서는 편집기를 펼치는 신호다.
+    note_activated = pyqtSignal(int)
+    # 검색어에 걸린 일정 한 줄을 눌렀다.
+    schedule_requested = pyqtSignal(int)
     recent_chosen = pyqtSignal(int)
     new_requested = pyqtSignal()
     export_requested = pyqtSignal()
@@ -816,6 +821,7 @@ class MemoListPanel(TitleFilterControls, QWidget):
         self.table.viewport().installEventFilter(self)
         self.table.installEventFilter(self)
         self.table.itemClicked.connect(self._activate_row)
+        self.table.itemActivated.connect(self._open_row)
         self.table.itemChanged.connect(self._sync_select_all_state)
         self.table.itemChanged.connect(self._inline_title_changed)
         self.table.itemExpanded.connect(self._sync_fold_button)
@@ -866,6 +872,26 @@ class MemoListPanel(TitleFilterControls, QWidget):
         filtered_empty_layout.addStretch(1)
         self.filtered_empty_host.hide()
         layout.addWidget(self.filtered_empty_host, 1)
+
+        # 검색어에 걸린 일정.  메모 목록 아래에 짧게 붙인다.
+        self.schedule_results_host = QWidget()
+        self.schedule_results_host.setObjectName("memoScheduleResults")
+        schedule_layout = QVBoxLayout(self.schedule_results_host)
+        schedule_layout.setContentsMargins(0, 2, 0, 0)
+        schedule_layout.setSpacing(2)
+        self.schedule_results_label = QLabel()
+        self.schedule_results_label.setObjectName("sectionTitle")
+        schedule_layout.addWidget(self.schedule_results_label)
+        self.schedule_results = QListWidget()
+        self.schedule_results.setObjectName("memoScheduleResultList")
+        self.schedule_results.setAccessibleName("검색어에 맞는 일정")
+        self.schedule_results.setToolTip("누르면 캘린더에서 그 일정을 엽니다.")
+        self.schedule_results.itemClicked.connect(self._open_schedule_result)
+        self.schedule_results.itemActivated.connect(self._open_schedule_result)
+        schedule_layout.addWidget(self.schedule_results)
+        self.schedule_results_host.hide()
+        layout.addWidget(self.schedule_results_host)
+        self.search.textChanged.connect(self.refresh_schedule_results)
 
         self.actions_host = QWidget()
         actions = QHBoxLayout(self.actions_host)
@@ -1912,6 +1938,51 @@ class MemoListPanel(TitleFilterControls, QWidget):
                 blocked = self.table.blockSignals(True)
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 self.table.blockSignals(blocked)
+
+    SCHEDULE_RESULT_ROWS = 4
+
+    def refresh_schedule_results(self, *_args) -> None:
+        """검색어가 있으면 맞는 일정을 목록 아래에 보여 준다.  다가올 일정이 먼저다."""
+        text = self.search.text().strip()
+        schedules = getattr(self.store, "schedules", None) if self.store is not None else None
+        self.schedule_results.clear()
+        if not text or schedules is None:
+            self.schedule_results_host.hide()
+            return
+        try:
+            rows = list(schedules.search(text, 50))
+        except Exception:
+            rows = []
+        if not rows:
+            self.schedule_results_host.hide()
+            return
+        now = datetime.now().strftime("%Y%m%d%H%M")
+        upcoming = [row for row in rows if str(row["start_at"]) >= now]
+        past = sorted((row for row in rows if str(row["start_at"]) < now),
+                      key=lambda row: str(row["start_at"]), reverse=True)
+        for row in upcoming + past:
+            try:
+                start = datetime.strptime(str(row["start_at"]), "%Y%m%d%H%M")
+                when = f"{start:%m/%d}({'월화수목금토일'[start.weekday()]}) {start:%H:%M}"
+            except ValueError:
+                when = str(row["start_at"])
+            item = QListWidgetItem(f"{when}  {row['title']}")
+            item.setData(Qt.ItemDataRole.UserRole, int(row["id"]))
+            item.setToolTip(f"{row['title']} · {when} · 누르면 캘린더에서 엽니다")
+            self.schedule_results.addItem(item)
+        self.schedule_results_label.setText(f"일정 {len(rows)}건")
+        row_height = max(22, self.schedule_results.sizeHintForRow(0))
+        shown = min(self.SCHEDULE_RESULT_ROWS, self.schedule_results.count())
+        self.schedule_results.setFixedHeight(row_height * shown + 6)
+        self.schedule_results_host.show()
+
+    def _open_schedule_result(self, item: QListWidgetItem) -> None:
+        if item is not None and item.data(Qt.ItemDataRole.UserRole) is not None:
+            self.schedule_requested.emit(int(item.data(Qt.ItemDataRole.UserRole)))
+
+    def _open_row(self, item: QTreeWidgetItem, column: int) -> None:
+        if column != 0 and item is not None and item.data(0, NOTE_ID_ROLE) is not None:
+            self.note_activated.emit(int(item.data(0, NOTE_ID_ROLE)))
 
     def _activate_row(self, item: QTreeWidgetItem, column: int) -> None:
         if column != 0 and item is not None and item.data(0, NOTE_ID_ROLE) is not None:

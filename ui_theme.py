@@ -25,6 +25,15 @@ COLOR_TOKENS = {
 
 
 BASE_STYLESHEET = """
+QWidget#layoutFavoritesPanel { background: @surface; }
+QPushButton#layoutFavoritesMenu { min-width: 34px; max-width: 34px; padding: 0; }
+QPushButton#layoutFavoritesMenu::menu-indicator { image: none; width: 0; }
+QListWidget#layoutFavoritesList { background: @surface; border: 0; outline: 0; }
+QListWidget#layoutFavoritesList::item {
+    min-height: 28px; padding: 5px 7px; border: 1px solid transparent; border-radius: 7px;
+}
+QListWidget#layoutFavoritesList::item:hover { background: @surface-muted; border-color: @line; }
+QListWidget#layoutFavoritesList::item:selected { background: @blue-soft; border-color: @blue; color: @blue-dark; }
 QMainWindow { background: @canvas; }
 QWidget { color: @ink; font-family: "Malgun Gothic"; font-size: 13px; }
 QWidget#tablePanel, QWidget#formPanel { background: @panel; }

@@ -252,11 +252,17 @@ def load_heading_folds(document: QTextDocument, content: str) -> None:
     while block.isValid():
         fmt = block.blockFormat()
         block_id = getattr(block.userData(), "block_id", "")
-        if block_id in wanted:
-            fmt.setProperty(HEADING_FOLDED_PROPERTY, True)
-        else:
-            fmt.clearProperty(HEADING_FOLDED_PROPERTY)
-        QTextCursor(block).setBlockFormat(fmt)
+        folded = block_id in wanted
+        # 이미 같은 상태인 줄은 건드리지 않는다.  줄마다 서식을 다시 쓰면
+        # 편집기가 그때마다 문서 전체를 다시 훑어 긴 메모 열기가 수 초 걸렸다.
+        present = fmt.hasProperty(HEADING_FOLDED_PROPERTY)
+        current = present and bool(fmt.property(HEADING_FOLDED_PROPERTY))
+        if (folded and not current) or (not folded and present):
+            if folded:
+                fmt.setProperty(HEADING_FOLDED_PROPERTY, True)
+            else:
+                fmt.clearProperty(HEADING_FOLDED_PROPERTY)
+            QTextCursor(block).setBlockFormat(fmt)
         block = block.next()
 
 

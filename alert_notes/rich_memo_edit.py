@@ -45,6 +45,7 @@ from .table_style import merge_cells
 from .note_shortcuts import structure_shortcut_value
 from .note_link_dialog import NoteLinkDialog
 from .line_gutter import LineGutter
+from .memo_inline_alarm_ui import InlineAlarmController
 from .rich_text import editor_content, load_editor_content, sanitize_rich_html
 from .memo_clipboard import (
     BLOCK_MIME, apply_block_metadata, attachment_ids_from_html, get_json,
@@ -284,6 +285,8 @@ class RichMemoTextEdit(QTextEdit):
         self.selectionChanged.connect(self.table_action_bar.sync)
         # 넣을 수 있는 것들의 단축키.  목록 한곳에 적힌 것을 그대로 건다.
         self.insert_shortcuts = install_insert_shortcuts(self)
+        # 본문의 `@ 내일 3시` 알림.
+        self.inline_alarms = InlineAlarmController(self)
 
     def set_note_context(self, note_id: int | None) -> None:
         self._hide_section_hint()
@@ -328,6 +331,8 @@ class RichMemoTextEdit(QTextEdit):
         self._refit_timer.start(0)
         self._refresh_checklist_display()
         self._reset_typing_format()
+        if hasattr(self, "inline_alarms"):
+            self.inline_alarms.reset()
         # 문서가 바뀌었다.  "직전에 있던 페이지" 기준을 새 문서로 다시 잡지
         # 않으면, 앞 메모의 페이지가 사라진 줄 알고 휴지통으로 보낸다.
         self._refresh_known_pages()
@@ -480,6 +485,37 @@ class RichMemoTextEdit(QTextEdit):
             return
         if source is not None and str(source) == str(content or ""):
             return
+        # 불러오는 동안 줄 서식이 바뀔 때마다 문서 전체를 다시 훑지 않고,
+        # 다 불러온 뒤 한 번만 구조를 맞춘다.
+        suppressed = getattr(self, "_refreshing_structure", False)
+        self._refreshing_structure = True
+        try:
+            self._load_content(content)
+        finally:
+            self._refreshing_structure = suppressed
+        # 접힌 표를 감추는 서식 변경은 불러오기의 일부다.  사용자 Undo 첫 단계가
+        # 되지 않게 기록을 끈 채 적용한다.
+        document = self.document()
+        undo_enabled = document.isUndoRedoEnabled()
+        document.setUndoRedoEnabled(False)
+        try:
+            if suppressed:
+                self._refresh_toggle_visibility()
+            else:
+                self._structure_dirty = True
+                self._refresh_structure()
+        finally:
+            document.setUndoRedoEnabled(undo_enabled)
+        setattr(self.document(), "_toma_block_id_states", {
+            int(self.document().availableUndoSteps()): tuple(block_ids(self.document())),
+        })
+        self.document().setProperty("tomaSourceContent", str(content or ""))
+        self.document().setModified(False)
+        if hasattr(self, "inline_alarms"):
+            self.inline_alarms.reset()
+        self._refit_timer.start(0)
+
+    def _load_content(self, content: str) -> None:
         self.character_selection.clear()
         self._folded_table_formats.clear()
         self._register_content_images(content)
@@ -497,14 +533,7 @@ class RichMemoTextEdit(QTextEdit):
         load_pins(self.document(), content)
         self._load_heading_fold_state(content)
         load_section_breaks(self.document(), content)
-        # 접어 둔 토글과 제목의 상태를 화면에 적용한다.
-        self._refresh_toggle_visibility()
-        setattr(self.document(), "_toma_block_id_states", {
-            int(self.document().availableUndoSteps()): tuple(block_ids(self.document())),
-        })
-        self.document().setProperty("tomaSourceContent", str(content or ""))
-        self.document().setModified(False)
-        self._refit_timer.start(0)
+        # 접어 둔 토글과 제목의 상태는 set_content 가 끝에서 한 번에 화면에 적용한다.
 
     def _repair_legacy_heading_formats(self) -> None:
         """Restore headings saved with block margins but default-size text."""
@@ -513,9 +542,11 @@ class RichMemoTextEdit(QTextEdit):
             standard_level = int(block.blockFormat().headingLevel())
             if standard_level in HEADING_STYLES:
                 fmt = block.blockFormat()
-                fmt.setLeftMargin(max(18.0, fmt.leftMargin()))
-                fmt.setProperty(HEADING_LEVEL_PROPERTY, standard_level)
-                QTextCursor(block).setBlockFormat(fmt)
+                if (fmt.leftMargin() < 18.0
+                        or fmt.property(HEADING_LEVEL_PROPERTY) != standard_level):
+                    fmt.setLeftMargin(max(18.0, fmt.leftMargin()))
+                    fmt.setProperty(HEADING_LEVEL_PROPERTY, standard_level)
+                    QTextCursor(block).setBlockFormat(fmt)
                 continue
             level = self.heading_level(block)
             if level not in HEADING_STYLES:
@@ -916,6 +947,8 @@ class RichMemoTextEdit(QTextEdit):
                     completed.format.setFontStrikeOut(True)
                     completed.format.setForeground(QColor(71, 85, 105, 145))
                     selections.append(completed)
+        if hasattr(self, "inline_alarms"):
+            selections.extend(self.inline_alarms.selections())
         selections.extend(self._find_selections())
         selections.extend(self._annotation_selections())
         selections.extend(self._block_selection_highlights())
@@ -4359,6 +4392,11 @@ class RichMemoTextEdit(QTextEdit):
         )
 
     def event(self, event) -> bool:
+        if (event.type() == QEvent.Type.ShortcutOverride and event.key() == Qt.Key.Key_Escape
+                and hasattr(self, "inline_alarms") and self.inline_alarms.wants_escape()):
+            # 창의 Esc 단축키보다 먼저 `@` 구절 취소를 받는다.
+            event.accept()
+            return True
         if (event.type() == QEvent.Type.ShortcutOverride and self._fold_chord_active
                 and event.key() not in {Qt.Key.Key_Control, Qt.Key.Key_Shift}):
             self._fold_chord_used = True
@@ -4401,6 +4439,9 @@ class RichMemoTextEdit(QTextEdit):
                 self._fold_chord_active = True
                 self._fold_chord_used = False
         if event.key() == Qt.Key.Key_Escape and cancel_formula_edit(self):
+            event.accept()
+            return
+        if hasattr(self, "inline_alarms") and self.inline_alarms.handle_key(event):
             event.accept()
             return
         if event.key() == Qt.Key.Key_Escape and self._table_fill_drag is not None:
@@ -5037,6 +5078,10 @@ class RichMemoTextEdit(QTextEdit):
         return None
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
+        if (event.button() == Qt.MouseButton.LeftButton and hasattr(self, "inline_alarms")
+                and self.inline_alarms.handle_double_click(event.position().toPoint())):
+            event.accept()
+            return
         if event.button() == Qt.MouseButton.LeftButton:
             point_cursor = self.cursorForPosition(event.position().toPoint())
             if point_cursor.currentTable() is not None:
@@ -5047,6 +5092,9 @@ class RichMemoTextEdit(QTextEdit):
         super().mouseDoubleClickEvent(event)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
+        if hasattr(self, "inline_alarms") and self.inline_alarms.handle_press(event):
+            event.accept()
+            return
         if event.button() == Qt.MouseButton.MiddleButton:
             block = self._middle_toggle_block_at(event.position())
             self._middle_toggle_press = block.position() if block is not None else None
