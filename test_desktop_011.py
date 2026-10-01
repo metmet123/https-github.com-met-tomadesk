@@ -5,11 +5,12 @@ from pathlib import Path
 from unittest.mock import patch,Mock
 from PyQt6.QtCore import QObject
 from PyQt6.QtTest import QTest
-from PyQt6.QtWidgets import QApplication,QWidget,QLineEdit,QPushButton
+from PyQt6.QtWidgets import QApplication,QWidget,QLineEdit,QPushButton,QLabel
 from alert_notes.panel import AlertNotesPanel
 from alert_notes.sqlite_store import NoteReminderStore
 from alert_notes.rich_text import plain_text_from_content
 from mobile_bridge.ui import MobileController,mobile_url
+from mobile_bridge.pairing import pairing_payload
 from qt_test_support import close_alert_panel,destroy_widget
 
 class Desktop011Test(unittest.TestCase):
@@ -69,6 +70,26 @@ class Desktop011Test(unittest.TestCase):
   self.panel.list_panel.set_rows(self.store.notes(),self.panel.current_id);self.assertEqual(bar.value(),before)
 
 class Connection011Test(unittest.TestCase):
+ def test_pairing_qr_contains_only_pc_address_and_pin(self):
+  pin='A'*64
+  self.assertEqual(pairing_payload('https://100.101.102.103:47831',pin),
+   'TOMADESK-PAIR-V1\nhttps://100.101.102.103:47831\n'+pin)
+  for bad in ['http://100.101.102.103:47831','https://192.168.0.1:47831',
+              'https://100.101.102.103:80','https://100.101.102.103:47831/path']:
+   with self.assertRaises(ValueError):pairing_payload(bad,pin)
+  with self.assertRaises(ValueError):pairing_payload('https://100.101.102.103:47831','test')
+ def test_qr_is_shown_only_while_tailscale_server_is_running(self):
+  app=QApplication.instance() or QApplication([]);window=QWidget()
+  c=MobileController.__new__(MobileController);QObject.__init__(c,window);c.window=window;c.server=None;c.fingerprint='A'*64;c.auth=Mock();c.auth.configured.return_value=True
+  with patch('mobile_bridge.ui.subprocess.run',return_value=Mock(stdout='100.101.102.103')):
+   stopped=c.connection_dialog()
+  self.assertTrue(stopped.findChild(QLabel,'mobilePairQr').pixmap().isNull())
+  destroy_widget(stopped,app)
+  c.server=Mock(server_address=('100.101.102.103',47831))
+  with patch('mobile_bridge.ui.subprocess.run',return_value=Mock(stdout='100.101.102.103')):
+   running=c.connection_dialog()
+  self.assertFalse(running.findChild(QLabel,'mobilePairQr').pixmap().isNull())
+  destroy_widget(running,app);destroy_widget(window,app)
  def test_complete_url_and_restricted_hosts(self):
   self.assertEqual(mobile_url(' 100.101.102.103 '),'https://100.101.102.103:47831')
   for host in ['0.0.0.0','192.168.0.1','::1','https://100.1.2.3','invalid']:

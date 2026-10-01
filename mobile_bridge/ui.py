@@ -5,8 +5,9 @@ import queue
 import subprocess
 import threading
 from pathlib import Path
-from PyQt6.QtCore import QObject,QTimer
+from PyQt6.QtCore import QObject,QTimer,Qt
 from PyQt6.QtWidgets import QApplication,QDialog,QFormLayout,QLineEdit,QPushButton,QLabel,QMessageBox,QVBoxLayout,QHBoxLayout
+from .pairing import pairing_payload,pairing_qr
 from .security import Auth,certificate
 from .service import MobileService
 from .server import BridgeServer,dispatch
@@ -61,7 +62,7 @@ class MobileController(QObject):
         self.connection_dialog().exec()
 
     def connection_dialog(self):
-        dialog=QDialog(self.window); dialog.setObjectName('mobileConnectionDialog'); dialog.setWindowTitle('토마 모바일 연결 · 0.1.2'); dialog.resize(720,580)
+        dialog=QDialog(self.window); dialog.setObjectName('mobileConnectionDialog'); dialog.setWindowTitle('토마 모바일 연결 · 0.1.2'); dialog.resize(760,700)
         layout=QVBoxLayout(dialog)
         layout.setContentsMargins(24,20,24,20); layout.setSpacing(12)
         title=QLabel('내 메모를 휴대폰에서도'); title.setObjectName('mobileConnectionTitle'); layout.addWidget(title)
@@ -82,12 +83,25 @@ class MobileController(QObject):
         url=QLineEdit(); url.setReadOnly(True); url.setObjectName('mobileConnectionUrl'); url.setPlaceholderText('올바른 PC IP를 입력하면 주소가 표시됩니다.')
         url_copy=QPushButton('주소 복사'); url_copy.setObjectName('primaryButton'); url_copy.clicked.connect(lambda: QApplication.clipboard().setText(url.text()))
         url_row=QHBoxLayout(); url_row.addWidget(url); url_row.addWidget(url_copy); form.addRow('휴대폰에 입력할 주소',url_row)
+        qr_row=QHBoxLayout(); layout.addLayout(qr_row)
+        qr=QLabel('연결을 시작하면 QR이 표시됩니다.'); qr.setObjectName('mobilePairQr'); qr.setFixedSize(228,228)
+        qr.setAlignment(Qt.AlignmentFlag.AlignCenter); qr.setWordWrap(True); qr_row.addWidget(qr)
+        qr_help=QLabel('휴대폰에서 “PC QR 스캔”을 누르세요.\n주소와 인증서 지문만 입력됩니다.\n아이디와 비밀번호는 QR에 포함되지 않습니다.')
+        qr_help.setWordWrap(True); qr_row.addWidget(qr_help,1)
         def update_url():
             try:
                 host=self.server.server_address[0] if self.server else address.text()
                 url.setText(mobile_url(host)); url_copy.setEnabled(True)
             except ValueError:
                 url.clear(); url_copy.setEnabled(False)
+            if self.server:
+                try:
+                    qr.setPixmap(pairing_qr(pairing_payload(url.text(),self.fingerprint)))
+                    qr.setText('')
+                    return
+                except (ImportError, ValueError):
+                    pass
+            qr.clear(); qr.setText('QR을 표시할 수 없습니다. 연결을 시작하고 qrcode 패키지를 확인하세요.' if self.server else 'Tailscale 연결을 시작하면 QR이 표시됩니다.')
         address.textChanged.connect(update_url); update_url()
         help_text=QLabel('위 주소를 https://부터 포트 번호까지 그대로 입력하세요.\n127.0.0.1은 PC 내부 시험 전용이며, 휴대폰에는 PC의 100.x.x.x 주소를 사용합니다.'); help_text.setWordWrap(True); help_text.setObjectName('mobileConnectionHint'); layout.addWidget(help_text)
         status=QLabel('연결 중' if self.server else '연결 꺼짐 · 계정 설정됨' if self.auth.configured() else '계정 설정 필요'); status.setWordWrap(True); layout.addWidget(status)

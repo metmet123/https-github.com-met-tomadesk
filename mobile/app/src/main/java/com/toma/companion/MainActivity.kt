@@ -9,6 +9,9 @@ import android.text.*
 import android.view.*
 import android.widget.*
 import org.json.*
+import com.google.mlkit.vision.barcode.common.Barcode
+import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import java.util.UUID
 import java.util.concurrent.Executors
 
@@ -118,6 +121,27 @@ class MainActivity: Activity() {
         val connection=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; visibility=if(state.optString("address").isEmpty())View.VISIBLE else View.GONE }
         val connectionToggle=button("PC 연결 설정") { connection.visibility=if(connection.visibility==View.VISIBLE)View.GONE else View.VISIBLE }
         content.addView(connectionToggle,LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(12) })
+        content.addView(button("PC QR 스캔") {
+            val options=GmsBarcodeScannerOptions.Builder().setBarcodeFormats(Barcode.FORMAT_QR_CODE).build()
+            GmsBarcodeScanning.getClient(this,options).startScan()
+                .addOnSuccessListener { barcode ->
+                    val pairing=try { Pairing.parse(barcode.rawValue ?: "") }
+                    catch(e:IllegalArgumentException) { message(e.message ?: "토마데스크 연결 QR이 아닙니다."); return@addOnSuccessListener }
+                    if(state.optString("address").isNotEmpty() &&
+                        (pairing.address!=state.optString("address") || pairing.fingerprint!=state.optString("pin")) &&
+                        (arr("notes").length()>0 || arr("changes").length()>0)) {
+                        message("다른 PC로 바꾸려면 먼저 현재 메모를 내보내고 앱 데이터를 초기화하세요. 서로 다른 PC의 자료는 자동으로 합치지 않습니다.")
+                        return@addOnSuccessListener
+                    }
+                    AlertDialog.Builder(this).setTitle("PC 연결정보 확인")
+                        .setMessage("본인 PC 화면에서 스캔했는지 확인하세요.\n${pairing.address}\n인증서: ${pairing.fingerprint.take(12)}…")
+                        .setPositiveButton("입력") { _,_ ->
+                            address.setText(pairing.address); pin.setText(pairing.fingerprint)
+                            connection.visibility=View.VISIBLE
+                        }.setNegativeButton("취소",null).show()
+                }
+                .addOnFailureListener { message("QR 스캐너를 열지 못했습니다. Google Play 서비스 상태를 확인하거나 주소와 지문을 직접 입력하세요.") }
+        },LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(12) })
         connection.addView(label("처음 한 번, PC의 연결 정보를 입력하세요.",12f).apply { setTextColor(TomaStyle.muted) })
         connection.addView(address); connection.addView(pin); content.addView(connection)
         content.addView(user); content.addView(pass)
