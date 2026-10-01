@@ -2,9 +2,7 @@ from __future__ import annotations
 import ipaddress
 import queue
 import socket
-import subprocess
 import threading
-from pathlib import Path
 from PyQt6.QtCore import QObject,QTimer,Qt
 from PyQt6.QtWidgets import QApplication,QDialog,QFormLayout,QLineEdit,QPushButton,QLabel,QMessageBox,QVBoxLayout,QHBoxLayout,QSizePolicy
 from .pairing import pairing_payload,pairing_qr
@@ -20,25 +18,38 @@ def mobile_url(host: str) -> str:
 
 
 def pairing_host() -> str:
-    """Prefer Tailscale, then use the first ordinary local IPv4 address."""
+    """Prefer the PC's active local network; use Tailscale only as a fallback."""
+    local_networks = tuple(ipaddress.IPv4Network(cidr) for cidr in
+                           ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'))
+    candidates = []
     try:
-        binary=Path('C:/Program Files/Tailscale/tailscale.exe')
-        if binary.exists():
-            out=subprocess.run([str(binary),'ip','-4'],capture_output=True,text=True,timeout=3,creationflags=0x08000000)
-            for candidate in out.stdout.splitlines():
-                try:
-                    return str(ipaddress.IPv4Address(candidate.strip()))
-                except ipaddress.AddressValueError:
-                    pass
-    except (OSError,subprocess.SubprocessError):
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as connection:
+            connection.connect(('1.1.1.1', 53))
+            active = connection.getsockname()[0]
+            if any(ipaddress.IPv4Address(active) in network for network in local_networks):
+                mobile_url(active)
+                return active
+            candidates.append(active)
+    except (OSError, ValueError):
         pass
-    for _family,_type,_protocol,_name,address in socket.getaddrinfo(socket.gethostname(),None,socket.AF_INET):
-        candidate=address[0]
+    try:
+        candidates.extend(address[0] for _family,_type,_protocol,_name,address in
+                          socket.getaddrinfo(socket.gethostname(),None,socket.AF_INET))
+    except OSError:
+        pass
+    for candidate in candidates:
+        try:
+            if any(ipaddress.IPv4Address(candidate) in network for network in local_networks):
+                mobile_url(candidate)
+                return candidate
+        except ValueError:
+            continue
+    for candidate in candidates:
         try:
             mobile_url(candidate)
             return candidate
         except ValueError:
-            pass
+            continue
     raise ValueError('PC IPv4 주소를 찾지 못했습니다. PC와 휴대폰을 같은 Wi-Fi 또는 Tailscale에 연결하세요.')
 
 

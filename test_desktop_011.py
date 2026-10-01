@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import QApplication,QWidget,QLineEdit,QPushButton,QLabel
 from alert_notes.panel import AlertNotesPanel
 from alert_notes.sqlite_store import NoteReminderStore
 from alert_notes.rich_text import plain_text_from_content
-from mobile_bridge.ui import MobileController,mobile_url
+from mobile_bridge.ui import MobileController,mobile_url,pairing_host
 from mobile_bridge.pairing import pairing_payload
 from qt_test_support import close_alert_panel,destroy_widget
 
@@ -76,18 +76,20 @@ class Connection011Test(unittest.TestCase):
   for bad in ['https://100.101.102.103:47831','http://127.0.0.1:47831',
               'http://100.101.102.103:80','http://100.101.102.103:47831/path']:
    with self.assertRaises(ValueError):pairing_payload(bad)
- def test_qr_is_shown_only_while_tailscale_server_is_running(self):
+ def test_qr_is_shown_only_while_server_is_running(self):
   app=QApplication.instance() or QApplication([]);window=QWidget()
   c=MobileController.__new__(MobileController);QObject.__init__(c,window);c.window=window;c.server=None
-  with patch('mobile_bridge.ui.subprocess.run',return_value=Mock(stdout='100.101.102.103')):
-   stopped=c.connection_dialog()
+  stopped=c.connection_dialog()
   self.assertTrue(stopped.findChild(QLabel,'mobilePairQr').pixmap().isNull())
   destroy_widget(stopped,app)
   c.server=Mock(server_address=('100.101.102.103',47831))
-  with patch('mobile_bridge.ui.subprocess.run',return_value=Mock(stdout='100.101.102.103')):
-   running=c.connection_dialog()
+  running=c.connection_dialog()
   self.assertFalse(running.findChild(QLabel,'mobilePairQr').pixmap().isNull())
   destroy_widget(running,app);destroy_widget(window,app)
+ def test_pairing_prefers_active_lan_address(self):
+  with patch('mobile_bridge.ui.socket.socket') as socket_mock:
+   socket_mock.return_value.__enter__.return_value.getsockname.return_value=('192.168.35.67',34567)
+   self.assertEqual(pairing_host(),'192.168.35.67')
  def test_complete_url_and_restricted_hosts(self):
   self.assertEqual(mobile_url(' 100.101.102.103 '),'http://100.101.102.103:47831')
   for host in ['0.0.0.0','127.0.0.1','::1','https://100.1.2.3','invalid']:
@@ -95,8 +97,7 @@ class Connection011Test(unittest.TestCase):
  def test_copy_address(self):
   app=QApplication.instance() or QApplication([]);window=QWidget()
   c=MobileController.__new__(MobileController);QObject.__init__(c,window);c.window=window;c.server=Mock(server_address=('100.101.102.103',47831))
-  with patch('mobile_bridge.ui.subprocess.run',return_value=Mock(stdout='100.101.102.103')):
-   d=c.connection_dialog()
+  d=c.connection_dialog()
   next(b for b in d.findChildren(QPushButton) if b.text()=='주소 복사').click()
   self.assertEqual(app.clipboard().text(),'http://100.101.102.103:47831')
   destroy_widget(d,app);destroy_widget(window,app)

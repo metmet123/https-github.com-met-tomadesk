@@ -45,7 +45,6 @@ class MainActivity: Activity() {
     private fun save() { try { vault.write(state) } catch(e:Exception) { toast("저장 실패: ${e.message}") } }
     override fun onCreate(savedInstanceState:Bundle?) {
         super.onCreate(savedInstanceState)
-        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         window.decorView.systemUiVisibility=View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
         vault=Vault(this)
         try { state=vault.read() } catch(e:Exception) { message("보관된 자료를 읽지 못했습니다."); return }
@@ -159,7 +158,13 @@ class MainActivity: Activity() {
         if(work)return; work=true; documentInput?.isEnabled=false; toast(status)
         executor.execute {
             try { val result=job(); runOnUiThread { work=false; documentInput?.isEnabled=!state.optBoolean("uncertain"); done(result) } }
-            catch(e:Exception) { runOnUiThread { work=false; documentInput?.isEnabled=!state.optBoolean("uncertain"); message("${e.message ?: "연결 실패"}\n모바일에 저장한 변경 내용은 유지됩니다.") } }
+            catch(e:Exception) { runOnUiThread {
+                work=false; documentInput?.isEnabled=!state.optBoolean("uncertain")
+                val reason=if(e is java.net.ConnectException || e is java.net.NoRouteToHostException || e is java.net.SocketTimeoutException)
+                    "PC에 연결할 수 없습니다. PC에서 토마데스크를 실행하고 ‘휴대폰연결’을 누르세요. 휴대폰과 PC를 같은 공유기 네트워크에 연결하고, Windows 방화벽에서 토마데스크 연결을 허용한 뒤 QR을 다시 스캔하세요."
+                else e.message ?: "연결 실패"
+                message("$reason\n모바일에 저장한 변경 내용은 유지됩니다.")
+            } }
         }
     }
     private fun home() {
