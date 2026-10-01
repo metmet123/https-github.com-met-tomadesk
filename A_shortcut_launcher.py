@@ -1,4 +1,5 @@
 import errno
+import json
 import sqlite3
 import sys
 import traceback
@@ -21,6 +22,14 @@ from store import Store
 
 def main() -> int:
     app = QApplication(sys.argv)
+    if len(sys.argv) == 3 and sys.argv[1] == "--pairing-qr-self-test":
+        from mobile_bridge.pairing import pairing_payload, pairing_qr
+
+        qr = pairing_qr(pairing_payload("http://100.84.171.16:47831"))
+        Path(sys.argv[2]).write_text(
+            json.dumps({"ok": not qr.isNull()}, ensure_ascii=False), encoding="utf-8"
+        )
+        return 0 if not qr.isNull() else 1
     if len(sys.argv)==3 and sys.argv[1]=='--mobile-self-test':
         from mobile_bridge.smoke import run
         return run(sys.argv[2])

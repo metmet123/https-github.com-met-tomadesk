@@ -5,6 +5,8 @@ from __future__ import annotations
 import ipaddress
 from urllib.parse import urlencode,urlsplit
 
+import qrcode
+
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QImage, QPainter, QPixmap
 
@@ -27,8 +29,6 @@ def pairing_payload(url: str) -> str:
 
 
 def pairing_qr(payload: str, size: int = 228) -> QPixmap:
-    import qrcode
-
     code = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_M, border=4)
     code.add_data(payload)
     code.make(fit=True)

@@ -45,7 +45,7 @@ for filename in ("pet.json", "spritesheet.webp"):
     if not path.is_file():
         raise FileNotFoundError(f"Required TomaPet asset is missing: {path}")
     datas.append((str(path), "alert_notes/toma_pet_assets"))
-hiddenimports = ["pythoncom", "pywintypes", "win32com.client"]
+hiddenimports = ["pythoncom", "pywintypes", "win32com.client", "qrcode"]
 hiddenimports += [
     "winrt.runtime", "winrt.windows.foundation", "winrt.windows.foundation.collections",
     "winrt.windows.globalization", "winrt.windows.graphics.imaging", "winrt.windows.media.ocr",
