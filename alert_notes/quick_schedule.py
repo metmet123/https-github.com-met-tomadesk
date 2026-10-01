@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
     QDialog, QHBoxLayout, QLabel, QLineEdit, QVBoxLayout,
 )
 
-from .categories import CATEGORIES, category_name
+from .categories import schedule_categories, schedule_category_name, recommend_schedule_category
 from . import ko_schedule_parser
 from .schedule_recurrence import DATETIME_FMT, normalize_rule
 from .schedule_token_edit import ScheduleTokenLineEdit
@@ -37,6 +37,7 @@ class QuickScheduleDialog(QDialog):
     def __init__(self, store, parent=None, hotkey: str = "Ctrl+Alt+A"):
         super().__init__(parent)
         self.store = store
+        self._category_specs = schedule_categories(store)
         self._parsed = None
         self._ignored_tokens: set[tuple[int, int, str]] = set()
         self._parse_source = ""
@@ -93,6 +94,7 @@ class QuickScheduleDialog(QDialog):
 
     # ------------------------------------------------------------------ 열기 --
     def prepare(self, hotkey: str | None = None) -> None:
+        self._category_specs = schedule_categories(self.store)
         if hotkey:
             self.hotkey_label.setText(hotkey.upper())
         self._ignored_tokens.clear()
@@ -121,6 +123,7 @@ class QuickScheduleDialog(QDialog):
         self._parsed = ko_schedule_parser.parse(
             raw, base=base, base_end=base + timedelta(hours=1),
             ignored_spans=tuple(sorted(self._ignored_tokens)),
+            category_keys={row["name"]: row["id"] for row in self._category_specs},
         )
         parsed = self._parsed
         self.input_edit.set_token_spans(parsed.spans)
@@ -133,7 +136,8 @@ class QuickScheduleDialog(QDialog):
         start, end = self.range_values()
         pieces = [f"{start:%Y-%m-%d} ({'월화수목금토일'[start.weekday()]})"]
         pieces.append("종일" if parsed.all_day else f"{start:%H:%M} – {end:%H:%M}")
-        pieces.append(category_name(parsed.category) if parsed.category else "분류 없음")
+        suggested = self._suggested_category()
+        pieces.append(schedule_category_name(self._category_specs, suggested) if suggested else "분류 없음")
         pieces.append(
             reminder_label(parsed.reminders[0])
             if parsed.reminders else "알림 없음"
@@ -210,7 +214,7 @@ class QuickScheduleDialog(QDialog):
             "start_at": start.strftime(DATETIME_FMT),
             "end_at": end.strftime(DATETIME_FMT),
             "all_day": bool(parsed.all_day) if parsed else False,
-            "category": (parsed.category if parsed and parsed.category else CATEGORIES[0][1]),
+            "category": self._suggested_category() or self._category_specs[0]["id"],
             "priority": 0,
             "note_id": None,
             "status": "pending",
@@ -219,6 +223,13 @@ class QuickScheduleDialog(QDialog):
             "hotkey": "",
             "hotkey_action": "open",
         }
+
+    def _suggested_category(self) -> str | None:
+        if self._parsed is None:
+            return None
+        return self._parsed.category or recommend_schedule_category(
+            self._parsed.title, self._category_specs
+        )
 
     def _has_text(self) -> bool:
         if self._parsed is not None and self._parsed.issues:

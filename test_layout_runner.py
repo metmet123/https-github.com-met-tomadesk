@@ -2,9 +2,11 @@
 
 import json
 import unittest
-from unittest.mock import Mock
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import Mock, patch
 
-from action_runner import ActionRunner
+from action_runner import ActionRunner, _open_explorer
 from window_layout import target_window_rect
 
 
@@ -172,7 +174,7 @@ class LayoutRunnerTest(unittest.TestCase):
 
         self.assertEqual(
             result,
-            r"0개 창 복원 · 실패 1개: C:\없음 (새 탐색기 창 매칭 시간 초과)",
+            r"0개 창 복원 · 실패 1개: C:\없음 (새 탐색기 창 경로 확인 실패)",
         )
         opener.assert_called_once_with(r"C:\없음")
         mover.assert_not_called()
@@ -206,7 +208,7 @@ class LayoutRunnerTest(unittest.TestCase):
 
         self.assertEqual(
             result,
-            r"2개 창 복원 · 실패 1개: C:\실패 (새 탐색기 창 매칭 시간 초과)",
+            r"2개 창 복원 · 실패 1개: C:\실패 (새 탐색기 창 경로 확인 실패)",
         )
         self.assertEqual(opened_paths, [r"C:\신규", r"C:\실패"])
         self.assertEqual([call.args[0] for call in mover.call_args_list], [301, 302])
@@ -273,10 +275,10 @@ class LayoutRunnerTest(unittest.TestCase):
             ("open", r"C:\첫째"),
             ("open", r"C:\둘째"),
         ])
-        self.assertEqual(events[2:4], [("move", 601), ("move", 602)])
-        self.assertEqual(events[4], ("match", frozenset({601, 602})))
+        self.assertEqual(events[2], ("match", frozenset({601, 602})))
+        self.assertEqual(events[3:5], [("move", 601), ("move", 602)])
 
-    def test_path_lookup_for_new_handle_happens_only_after_it_is_moved(self):
+    def test_new_handle_is_moved_only_after_its_path_is_verified(self):
         clock = FakeClock()
         handle_responses = [{701}, {701}, {701, 702}]
         events = []
@@ -314,8 +316,9 @@ class LayoutRunnerTest(unittest.TestCase):
         self.assertEqual(result, "1개 창 복원")
         self.assertEqual(events, [
             ("path", {701}),
-            ("move", 702),
             ("path", {702}),
+            ("move", 702),
+            ("path", {701}),
         ])
 
     def test_waiting_for_a_handle_does_not_call_path_provider(self):
@@ -352,8 +355,8 @@ class LayoutRunnerTest(unittest.TestCase):
             ("handles", None),
             ("handles", None),
             ("handles", None),
-            ("move", 703),
             ("path", {703}),
+            ("move", 703),
         ])
 
     def test_reuses_existing_window_when_explorer_opens_a_tab(self):
@@ -387,7 +390,7 @@ class LayoutRunnerTest(unittest.TestCase):
         self.assertEqual(mover.call_args.args[0], 704)
         self.assertAlmostEqual(clock.value, 0.1)
 
-    def test_reassigns_moved_windows_when_verified_paths_are_swapped(self):
+    def test_new_windows_are_mapped_by_verified_path_not_handle_order(self):
         events = []
         handle_responses = [set(), {801, 802}]
 
@@ -420,12 +423,73 @@ class LayoutRunnerTest(unittest.TestCase):
 
         self.assertEqual(result, "2개 창 복원")
         self.assertEqual(events, [
-            ("move", 801),
-            ("move", 802),
             ("path", frozenset({801, 802})),
             ("move", 802),
             ("move", 801),
         ])
+
+    def test_wrong_folder_windows_are_neither_moved_nor_owned(self):
+        from test_window_hide_restore import FakeStore
+
+        store = FakeStore()
+        mover = Mock(return_value=True)
+        windows = []
+
+        def open_wrong_folder(_path):
+            windows.append({"hwnd": 810 + len(windows), "path": r"C:\Documents"})
+
+        runner = self.runner(
+            explorer_window_provider=lambda: list(windows),
+            explorer_opener=open_wrong_folder,
+            window_mover=mover,
+            settings_store=store,
+            window_visibility_provider=lambda _hwnd: True,
+            layout_timeout=0.03,
+        )
+
+        result = runner._run_layout({"windows": [
+            layout_entry(r"C:\Downloads"), layout_entry(r"C:\Submit"),
+        ]}, layout_id=7)
+
+        self.assertIn("0개 창 복원 · 실패 2개", result)
+        mover.assert_not_called()
+        self.assertEqual(json.loads(store.setting("layout_hidden_windows")), {})
+
+    def test_partial_verified_new_window_retries_the_missing_folder(self):
+        from test_window_hide_restore import FakeStore
+
+        windows = []
+        attempts = []
+
+        def open_explorer(path):
+            attempts.append(path)
+            actual = path if path == r"C:\Downloads" or attempts.count(path) > 1 else r"C:\Documents"
+            windows.append({"hwnd": 820 + len(windows), "path": actual})
+
+        store = FakeStore()
+        mover = Mock(return_value=True)
+        runner = self.runner(
+            explorer_window_provider=lambda: list(windows),
+            explorer_opener=open_explorer,
+            window_mover=mover,
+            settings_store=store,
+            window_visibility_provider=lambda _hwnd: True,
+            window_layout_matcher=lambda *_args, **_kwargs: False,
+            layout_timeout=0.03,
+        )
+        payload = {"windows": [
+            layout_entry(r"C:\Downloads"), layout_entry(r"C:\Submit"),
+        ]}
+
+        first = runner._run_layout(payload, layout_id=7)
+        self.assertIn("1개 창 복원 · 실패 1개", first)
+        self.assertEqual([call.args[0] for call in mover.call_args_list], [820])
+        self.assertEqual(len(json.loads(store.setting("layout_hidden_windows"))["action:7"]), 1)
+
+        second = runner._run_layout(payload, layout_id=7)
+        self.assertEqual(second, "2개 창 복원")
+        self.assertEqual([call.args[0] for call in mover.call_args_list], [820, 820, 822])
+        self.assertEqual(attempts, [r"C:\Downloads", r"C:\Submit", r"C:\Submit"])
 
     def test_default_layout_poll_interval_is_point_zero_three_seconds(self):
         runner = ActionRunner(
@@ -436,6 +500,20 @@ class LayoutRunnerTest(unittest.TestCase):
         )
 
         self.assertEqual(runner._layout_poll_interval, 0.03)
+
+    def test_default_explorer_opener_requests_a_new_top_level_window(self):
+        with TemporaryDirectory() as temporary:
+            target = Path(temporary) / "한글 제출 폴더"
+            target.mkdir()
+            with patch("action_runner.subprocess.Popen") as popen:
+                _open_explorer(str(target))
+            popen.assert_called_once_with(
+                ["explorer.exe", "/n,", str(target.resolve())], close_fds=True,
+            )
+            popen.reset_mock()
+            with self.assertRaisesRegex(ValueError, "폴더 경로"):
+                _open_explorer(str(target / "없는 폴더"))
+            popen.assert_not_called()
 
     def test_run_routes_layout_and_returns_the_layout_result_format(self):
         runner = self.runner(

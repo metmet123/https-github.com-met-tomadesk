@@ -102,6 +102,17 @@ class LayoutActionUiTest(unittest.TestCase):
             self.assertEqual(self.window.type_combo.currentData(), action_type)
             self.assertEqual(self.window.stack.currentIndex(), index)
 
+    def test_every_action_type_exposes_one_excluded_apps_button(self):
+        for action_type in main_window.ACTION_LABELS:
+            self.window.type_combo.setCurrentIndex(self.window.type_combo.findData(action_type))
+            self.app.processEvents()
+            if action_type == "macro":
+                self.assertTrue(self.window.macro_excluded_apps_button.isVisible())
+                self.assertFalse(self.window.form_excluded_apps_button.isVisible())
+            else:
+                self.assertTrue(self.window.form_excluded_apps_button.isVisible())
+                self.assertFalse(self.window.macro_excluded_apps_button.isVisible())
+
     def test_capture_selection_new_window_order_and_delete_shape_payload(self):
         self._select_layout_type()
         with patch.object(main_window, "collect_open_windows", return_value=self._captured_windows()):
@@ -118,7 +129,7 @@ class LayoutActionUiTest(unittest.TestCase):
             "state": "normal", "always_new": True,
             "monitor_device": r"\\.\DISPLAY2", "work_area": [1920, 1032],
             "dpi": 96,
-        }]})
+        }], "excluded_apps": []})
 
         actions = self.window.layout_table.cellWidget(0, 5).findChildren(QPushButton)
         down = next(button for button in actions if button.text() == "↓")
@@ -198,6 +209,8 @@ class LayoutExcelRoundTripTest(unittest.TestCase):
                 "kind": "explorer", "path": r"C:\자료", "monitor": 1,
                 "rect": [0, 0, 800, 600], "state": "maximized", "always_new": True,
             },
+        ], "excluded_apps": [
+            {"name": "notepad.exe", "path": r"C:\Windows\notepad.exe", "title": ""},
         ]}
         action = {
             "id": 7, "active": 1, "name": "창 배치", "hotkey": "Ctrl+Alt+L",
@@ -207,8 +220,14 @@ class LayoutExcelRoundTripTest(unittest.TestCase):
             path = Path(temp) / "layout.xlsx"
             excel_io.export_actions_xlsx([action], path)
             imported = excel_io.import_actions_xlsx(path)
+            legacy_path = Path(temp) / "layout_without_exclusions.xlsx"
+            legacy_action = dict(action)
+            legacy_action["payload"] = {"windows": payload["windows"]}
+            excel_io.export_actions_xlsx([legacy_action], legacy_path)
+            legacy = excel_io.import_actions_xlsx(legacy_path)
         self.assertEqual(imported[0]["payload"], payload)
         self.assertEqual(imported[0]["action_type"], "layout")
+        self.assertEqual(legacy[0]["payload"]["excluded_apps"], [])
 
 
 if __name__ == "__main__":

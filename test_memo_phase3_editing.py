@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import QApplication
 
 from alert_notes.editor import MemoEditor
 from alert_notes.editor_shortcut_settings import EditorShortcutSettingsDialog
-from alert_notes.note_shortcuts import STRUCTURE_SHORTCUTS
+from alert_notes.note_shortcuts import STRUCTURE_SHORTCUTS, structure_shortcut_value
 from alert_notes.block_identity import is_section_break
 from alert_notes.rich_memo_edit import HEADING_FOLDED_PREFIX, RichMemoTextEdit
 from alert_notes.sqlite_store import NoteReminderStore
@@ -257,17 +257,33 @@ class MemoPhaseThreeTest(unittest.TestCase):
         self.widgets.append(dialog)
         self.assertEqual(dialog.structure_builders["open_link"].text(), "Ctrl+Alt+Enter")
 
-    def test_ctrl_enter_folds_heading_and_toggle_without_editing_plain_text(self):
+    def test_ctrl_shift_alone_folds_heading_and_toggle_without_hijacking_combinations(self):
         editor = self.editor("제목\n본문")
         self.heading(editor, 0, 1)
-        editor.keyPressEvent(QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Return,
+        editor.keyPressEvent(QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Control,
                                        Qt.KeyboardModifier.ControlModifier))
+        editor.keyPressEvent(QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Shift,
+                                       Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier))
+        editor.keyReleaseEvent(QKeyEvent(QKeyEvent.Type.KeyRelease, Qt.Key.Key_Shift,
+                                         Qt.KeyboardModifier.ControlModifier))
+        editor.keyReleaseEvent(QKeyEvent(QKeyEvent.Type.KeyRelease, Qt.Key.Key_Control,
+                                         Qt.KeyboardModifier.NoModifier))
         self.assertFalse(self.block(editor, 1).isVisible())
-        editor.keyPressEvent(QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Return,
-                                       Qt.KeyboardModifier.ControlModifier, "", True))
-        self.assertFalse(self.block(editor, 1).isVisible())
-        editor.keyPressEvent(QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Return,
+        editor.keyPressEvent(QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Control,
                                        Qt.KeyboardModifier.ControlModifier))
+        editor.keyPressEvent(QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Shift,
+                                       Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier))
+        editor.keyPressEvent(QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_X,
+                                       Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier))
+        editor.keyReleaseEvent(QKeyEvent(QKeyEvent.Type.KeyRelease, Qt.Key.Key_Shift,
+                                         Qt.KeyboardModifier.ControlModifier))
+        self.assertFalse(self.block(editor, 1).isVisible())
+        editor.keyPressEvent(QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Control,
+                                       Qt.KeyboardModifier.ControlModifier))
+        editor.keyPressEvent(QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Shift,
+                                       Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier))
+        editor.keyReleaseEvent(QKeyEvent(QKeyEvent.Type.KeyRelease, Qt.Key.Key_Control,
+                                         Qt.KeyboardModifier.ShiftModifier))
         self.assertTrue(self.block(editor, 1).isVisible())
         editor.setTextCursor(QTextCursor(self.block(editor, 1)))
         before = editor.toPlainText()
@@ -276,25 +292,39 @@ class MemoPhaseThreeTest(unittest.TestCase):
         self.assertEqual(editor.toPlainText(), before)
         toggle = self.editor("할 일")
         toggle.make_toggle()
-        toggle.keyPressEvent(QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Return,
+        toggle.keyPressEvent(QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Control,
                                        Qt.KeyboardModifier.ControlModifier))
+        toggle.keyPressEvent(QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Shift,
+                                       Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier))
+        toggle.keyReleaseEvent(QKeyEvent(QKeyEvent.Type.KeyRelease, Qt.Key.Key_Shift,
+                                         Qt.KeyboardModifier.ControlModifier))
         self.assertFalse(toggle._toggle_is_open(toggle.document().begin()))
 
-    def test_legacy_fold_default_resolves_to_ctrl_enter_without_rewriting_setting(self):
+    def test_legacy_fold_default_resolves_to_ctrl_shift_without_rewriting_setting(self):
         setting = STRUCTURE_SHORTCUTS["toggle_fold"][1]
+        self.store.set_setting(setting, "Ctrl+Enter")
+        self.assertEqual(structure_shortcut_value(self.store, "toggle_fold"), "Ctrl+Shift")
         self.store.set_setting(setting, "Ctrl+Alt+Space")
         wrapper = MemoEditor(self.store)
         self.widgets.append(wrapper)
-        self.assertEqual(wrapper.structure_shortcuts[1].key(), QKeySequence("Ctrl+Enter"))
+        self.assertTrue(wrapper.structure_shortcuts[1].key().isEmpty())
         dialog = EditorShortcutSettingsDialog(self.store)
         self.widgets.append(dialog)
-        self.assertEqual(dialog.structure_builders["toggle_fold"].text(), "Ctrl+Enter")
+        self.assertEqual(dialog.structure_builders["toggle_fold"].text(), "Ctrl+Shift")
         self.assertEqual(self.store.setting(setting, ""), "Ctrl+Alt+Space")
         with patch("alert_notes.editor_shortcut_settings.QMessageBox.information"):
             dialog._save()
-        self.assertEqual(self.store.setting(setting, ""), "Ctrl+Enter")
+        self.assertEqual(self.store.setting(setting, ""), "Ctrl+Shift")
 
-    def test_ctrl_enter_qt_shortcut_folds_once_in_memo_editor(self):
+    def test_custom_fold_shortcut_remains_bound(self):
+        setting = STRUCTURE_SHORTCUTS["toggle_fold"][1]
+        self.store.set_setting(setting, "Alt+F10")
+        wrapper = MemoEditor(self.store)
+        self.widgets.append(wrapper)
+        self.assertEqual(wrapper.structure_shortcuts[1].key(), QKeySequence("Alt+F10"))
+        self.assertEqual(structure_shortcut_value(self.store, "toggle_fold"), "Alt+F10")
+
+    def test_ctrl_shift_qt_key_events_fold_once_in_memo_editor(self):
         wrapper = MemoEditor(self.store)
         self.widgets.append(wrapper)
         wrapper.show()
@@ -304,9 +334,22 @@ class MemoPhaseThreeTest(unittest.TestCase):
         body.apply_heading1()
         body.setFocus()
         self.app.processEvents()
-        QTest.keyClick(body, Qt.Key.Key_Return, Qt.KeyboardModifier.ControlModifier)
+        QTest.keyPress(body, Qt.Key.Key_Control)
+        QTest.keyPress(body, Qt.Key.Key_Shift, Qt.KeyboardModifier.ControlModifier)
+        QTest.keyRelease(body, Qt.Key.Key_Shift, Qt.KeyboardModifier.ControlModifier)
+        QTest.keyRelease(body, Qt.Key.Key_Control)
         self.assertFalse(self.block(body, 1).isVisible())
-        QTest.keyClick(body, Qt.Key.Key_Return, Qt.KeyboardModifier.ControlModifier)
+        QTest.keyPress(body, Qt.Key.Key_Control)
+        QTest.keyPress(body, Qt.Key.Key_Shift, Qt.KeyboardModifier.ControlModifier)
+        QTest.keyClick(body, Qt.Key.Key_X,
+                       Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier)
+        QTest.keyRelease(body, Qt.Key.Key_Shift, Qt.KeyboardModifier.ControlModifier)
+        QTest.keyRelease(body, Qt.Key.Key_Control)
+        self.assertFalse(self.block(body, 1).isVisible())
+        QTest.keyPress(body, Qt.Key.Key_Shift)
+        QTest.keyPress(body, Qt.Key.Key_Control, Qt.KeyboardModifier.ShiftModifier)
+        QTest.keyRelease(body, Qt.Key.Key_Control, Qt.KeyboardModifier.ShiftModifier)
+        QTest.keyRelease(body, Qt.Key.Key_Shift)
         self.assertTrue(self.block(body, 1).isVisible())
 
     def test_section_break_hint_is_transient_but_boundary_is_saved(self):

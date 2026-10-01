@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QTableWidgetItem, QTabWidget, QTextBrowser, QVBoxLayout, QWidget,
 )
 
-from .categories import CATEGORIES
+from .categories import CATEGORIES, schedule_categories
 from .external_ai_policy import ExternalAIPolicy
 from .memo_organizer import KINDS, validate
 from .memo_organizer_store import DRAFT_KEY, OrganizerStore, DuplicateMemoError
@@ -190,7 +190,10 @@ class OrganizerPanel(QWidget):
         self.raw.setPlainText(capture["raw"])
         self._items = capture["items"]
         self.review.setRowCount(len(self._items))
-        categories = list(dict.fromkeys(["미분류"] + [name for name, _ in CATEGORIES] + [str(c["name"]) for c in self.store.categories()]))
+        categories = list(dict.fromkeys(
+            ["미분류"] + [row["name"] for row in schedule_categories(self.store)]
+            + [name for name, _ in CATEGORIES] + [str(c["name"]) for c in self.store.categories()]
+        ))
         for row, item in enumerate(self._items):
             locked = bool(item.get("schedule_id"))
             duplicate = bool(self.repo.duplicate_titles([item])) if not locked else False

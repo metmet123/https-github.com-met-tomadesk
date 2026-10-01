@@ -60,6 +60,8 @@ class ScheduleBlock(QGraphicsRectItem):
         self.occurrence_at = str(event["occurrence_at"])
         self.title = str(event["title"])
         self.category = str(event["category"])
+        self.category_name = str(event.get("category_name") or category_name(self.category))
+        self.category_colors = event.get("category_colors") or CATEGORY_COLORS.get(self.category, ("#E7F0FF", "#234F9A"))
         self.status = str(event["status"])
         self.item_type = str(event["item_type"])
         self.time_mode = str(event.get("time_mode") or "range")
@@ -101,10 +103,10 @@ class ScheduleBlock(QGraphicsRectItem):
     def _tooltip(self) -> str:
         span = f"{self.start:%H:%M} · 종료 없음" if self.time_mode == "point" else \
             f"{self.start:%m/%d %H:%M} – {self.end:%m/%d %H:%M}"
-        return f"{self.title}\n{self.start:%m월 %d일} {span} · {category_name(self.category)}"
+        return f"{self.title}\n{self.start:%m월 %d일} {span} · {self.category_name}"
 
     def paint(self, painter, option, widget=None) -> None:
-        background, foreground = CATEGORY_COLORS.get(self.category, ("#E7F0FF", "#234F9A"))
+        background, foreground = self.category_colors
         if self.status == "completed":
             foreground = GUTTER_INK
         rect = self.rect()
@@ -602,7 +604,7 @@ class CalendarCanvas(QWidget):
             button.setFixedHeight(26)
             button.setToolTip(f"{event['title']}\n종일 · {begin:%m/%d}–{(finish - timedelta(microseconds=1)):%m/%d}")
             button.setAccessibleName(f"종일 일정 {event['title']}")
-            background, foreground = CATEGORY_COLORS.get(event["category"], ("#E7F0FF", "#234F9A"))
+            background, foreground = event.get("category_colors") or CATEGORY_COLORS.get(event["category"], ("#E7F0FF", "#234F9A"))
             button.setStyleSheet(f"QPushButton {{min-height:0; text-align:left; padding:2px 6px; border:1px solid {background}; border-radius:4px; background:{background}; color:{foreground};}} QPushButton:focus {{border:1px solid #4263EB;}}")
             button.clicked.connect(lambda _checked=False, item_id=int(event["id"]), occurrence=str(event["occurrence_at"]): self.scheduleClicked.emit(item_id, occurrence))
             grid.addWidget(button, lane, first, 1, last - first)

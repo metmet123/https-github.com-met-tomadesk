@@ -131,6 +131,10 @@ class ResponsiveUiTest(unittest.TestCase):
         self.assertFalse(self.window.alert_panel.tabs.tabBar().isVisible())
         self.assertLessEqual(self.window.workspace_mode_bar.height(), 50)
         self.assertTrue(all(button.isVisible() for button in self.window.alert_tab_buttons))
+        self.assertEqual(
+            [button.text() for button in self.window.alert_tab_buttons],
+            ["메모 편집", "캘린더", "알림내역", "메모 정리"],
+        )
         self.assertLessEqual(abs(
             self.window.alert_tab_buttons[0].mapTo(self.window, QPoint()).y()
             - self.window.alert_mode_button.mapTo(self.window, QPoint()).y()
@@ -142,6 +146,12 @@ class ResponsiveUiTest(unittest.TestCase):
         self.window.alert_panel.tabs.setCurrentIndex(2)
         self.app.processEvents()
         self.assertTrue(self.window.alert_tab_buttons[2].isChecked())
+        self.window.alert_tab_buttons[3].click()
+        self.app.processEvents()
+        self.assertEqual(self.window.alert_panel.tabs.currentWidget(), self.window.alert_panel.organizer)
+        self.assertTrue(self.window.alert_tab_buttons[3].isChecked())
+        self.window._cycle_alert_tab()
+        self.assertEqual(self.window.alert_panel.tabs.currentIndex(), 0)
         QTest.keyClick(self.window, Qt.Key.Key_Tab, Qt.KeyboardModifier.ControlModifier)
         self.app.processEvents()
         self.assertEqual(self.window.main_pages.currentIndex(), 0)

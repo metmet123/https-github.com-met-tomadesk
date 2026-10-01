@@ -18,8 +18,11 @@ WH_MOUSE_LL = 14
 WM_LBUTTONDBLCLK = 0x0203
 WM_MBUTTONDOWN = 0x0207
 WM_MBUTTONUP = 0x0208
+WM_NCHITTEST = 0x0084
 WM_QUIT = 0x0012
 GA_ROOT = 2
+HTCAPTION = 2
+SMTO_ABORTIFHUNG = 0x0002
 
 EXPLORER_WINDOW_CLASSES = frozenset({"CabinetWClass", "ExploreWClass"})
 FILE_LIST_ROOT_CLASS = "SHELLDLL_DefView"
@@ -53,6 +56,7 @@ class WindowHit:
     top_hwnd: int
     top_class: str
     class_chain: tuple[str, ...]
+    non_client_hit: int = 0
 
 
 class _Point(ctypes.Structure):
@@ -164,6 +168,8 @@ class ExplorerDoubleClickNavigator:
         selection_count_provider: Callable[[int], int | None] | None = None,
         foreground_window_provider: Callable[[], int] | None = None,
         hotkey_sender: Callable[[str], None] | None = None,
+        layout_window_provider: Callable[[int], bool] | None = None,
+        layout_hide_requester: Callable[[int], None] | None = None,
         recording_provider: Callable[[], bool] | None = None,
         com_initializer: Callable[[], None] | None = None,
         com_uninitializer: Callable[[], None] | None = None,
@@ -175,12 +181,14 @@ class ExplorerDoubleClickNavigator:
         self._selection_count_provider = selection_count_provider or selected_item_count
         self._foreground_window_provider = foreground_window_provider or foreground_window
         self._hotkey_sender = hotkey_sender or input_controller.send_hotkey
+        self._layout_window_provider = layout_window_provider or (lambda _hwnd: False)
+        self._layout_hide_requester = layout_hide_requester or (lambda _hwnd: None)
         self._recording_provider = recording_provider or (lambda: False)
         self._com_initializer = com_initializer or _co_initialize
         self._com_uninitializer = com_uninitializer or _co_uninitialize
         self._double_click_enabled = bool(double_click_enabled)
         self._middle_click_enabled = bool(middle_click_enabled)
-        self._middle_button_captured = False
+        self._middle_button_captured: tuple[str, int] | None = None
         self._events: queue.Queue = queue.Queue()
         self._hook_ready = threading.Event()
         self._hook_error: Exception | None = None
@@ -251,6 +259,15 @@ class ExplorerDoubleClickNavigator:
         self._hotkey_sender("Alt+Up")
         return True
 
+    def handle_layout_title_middle_click(self, hwnd: int) -> bool:
+        """Queue-safe bridge for hiding the saved layout owning ``hwnd``."""
+        if not self._middle_click_enabled or self._recording_provider():
+            return False
+        if not self._layout_window_provider(int(hwnd)):
+            return False
+        self._layout_hide_requester(int(hwnd))
+        return True
+
     def _handle_hook_event(
         self, message_id: int, x: int, y: int, timestamp: int
     ) -> bool:
@@ -260,19 +277,29 @@ class ExplorerDoubleClickNavigator:
                 self._events.put(("double", int(x), int(y), int(timestamp)))
             return False
         if message_id == WM_MBUTTONDOWN:
-            self._middle_button_captured = False
+            self._middle_button_captured = None
             if not self._middle_click_enabled or self._recording_provider():
                 return False
             hit = self._window_hit_provider(int(x), int(y))
-            if not is_explorer_file_list(hit):
-                return False
-            self._middle_button_captured = True
-            return True
+            if is_explorer_file_list(hit):
+                self._middle_button_captured = ("navigate", int(hit.top_hwnd))
+                return True
+            if (
+                is_explorer_title_bar_blank(hit)
+                and self._layout_window_provider(int(hit.top_hwnd))
+            ):
+                self._middle_button_captured = ("layout-hide", int(hit.top_hwnd))
+                return True
+            return False
         if message_id == WM_MBUTTONUP:
-            if not self._middle_button_captured:
+            captured = self._middle_button_captured
+            if captured is None:
                 return False
-            self._middle_button_captured = False
-            self._events.put(("middle", int(timestamp)))
+            self._middle_button_captured = None
+            if captured[0] == "layout-hide":
+                self._events.put(("layout-hide", captured[1], int(timestamp)))
+            else:
+                self._events.put(("middle", int(timestamp)))
             return True
         return False
 
@@ -292,6 +319,8 @@ class ExplorerDoubleClickNavigator:
                 try:
                     if event[0] == "middle":
                         self.handle_middle_click()
+                    elif event[0] == "layout-hide":
+                        self.handle_layout_title_middle_click(event[1])
                     else:
                         if not initialized:
                             self._com_initializer()
@@ -317,6 +346,15 @@ def is_explorer_file_list(hit: WindowHit | None) -> bool:
     return _EXCLUDED_CONTROL_CLASSES_CASEFOLD.isdisjoint(inner_classes)
 
 
+def is_explorer_title_bar_blank(hit: WindowHit | None) -> bool:
+    """Accept only Windows' own draggable-caption result, not tab/button clients."""
+    return bool(
+        hit is not None
+        and hit.top_class in EXPLORER_WINDOW_CLASSES
+        and int(hit.non_client_hit) == HTCAPTION
+    )
+
+
 def window_hit_at_point(x: int, y: int) -> WindowHit | None:
     user32 = ctypes.WinDLL("user32", use_last_error=True)
     user32.WindowFromPoint.argtypes = [_Point]
@@ -325,6 +363,11 @@ def window_hit_at_point(x: int, y: int) -> WindowHit | None:
     user32.GetAncestor.restype = wintypes.HWND
     user32.GetParent.argtypes = [wintypes.HWND]
     user32.GetParent.restype = wintypes.HWND
+    user32.SendMessageTimeoutW.argtypes = [
+        wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM,
+        wintypes.UINT, wintypes.UINT, ctypes.POINTER(ctypes.c_size_t),
+    ]
+    user32.SendMessageTimeoutW.restype = wintypes.BOOL
 
     child = int(user32.WindowFromPoint(_Point(int(x), int(y))) or 0)
     if not child:
@@ -341,7 +384,25 @@ def window_hit_at_point(x: int, y: int) -> WindowHit | None:
         if current == top:
             break
         current = int(user32.GetParent(current) or 0)
-    return WindowHit(child, top, _window_class(user32, top), tuple(chain))
+    top_class = _window_class(user32, top)
+    non_client_hit = 0
+    if top_class in EXPLORER_WINDOW_CLASSES:
+        packed_point = ((int(y) & 0xFFFF) << 16) | (int(x) & 0xFFFF)
+        # Windows 11 tabbed Explorer answers HTCLIENT on the top-level window;
+        # the blank caption belongs to a TITLE_BAR_SCAFFOLDING child that
+        # reports HTCAPTION there (and button codes over min/max/close).
+        for target in dict.fromkeys((child, top)):
+            hit_result = ctypes.c_size_t()
+            sent = user32.SendMessageTimeoutW(
+                target, WM_NCHITTEST, 0, packed_point,
+                SMTO_ABORTIFHUNG, 50, ctypes.byref(hit_result),
+            )
+            non_client_hit = int(hit_result.value) if sent else 0
+            if non_client_hit == HTCAPTION:
+                break
+    return WindowHit(
+        child, top, top_class, tuple(chain), non_client_hit,
+    )
 
 
 def selected_item_count(hwnd: int) -> int | None:

@@ -13,6 +13,7 @@ from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication, QLayout, QMessageBox, QVBoxLayout, QWidget
 
 from alert_notes.calendar import CalendarPanel
+from alert_notes.calendar_canvas import CalendarCanvas
 from alert_notes.schedule_recurrence import DATETIME_FMT
 from alert_notes.sqlite_store import NoteReminderStore
 from qt_test_support import destroy_widget
@@ -26,6 +27,19 @@ class ScheduleStoreTest(unittest.TestCase):
     def tearDown(self):
         self.store.close()
         self.temp.cleanup()
+
+    def test_point_event_keeps_mode_and_existing_event_defaults_to_range(self):
+        point_id = self.store.schedules.save_item({
+            "title": "시점 일정", "start_at": "202608031600", "end_at": "202608031601",
+            "time_mode": "point",
+        })
+        range_id = self.store.schedules.save_item({
+            "title": "기존 일정", "start_at": "202608031700", "end_at": "202608031800",
+        })
+        self.assertEqual(self.store.schedules.item(point_id)["time_mode"], "point")
+        self.assertEqual(self.store.schedules.item(range_id)["time_mode"], "range")
+        visible = self.store.schedules.items_for_range("202608030000", "202608040000")
+        self.assertEqual([item["time_mode"] for item in visible], ["point", "range"])
 
     def test_legacy_reminder_is_projected_without_removing_original(self):
         note_id = self.store.create_note("기존 알림", "보존")
@@ -125,6 +139,40 @@ class ScheduleUiTest(unittest.TestCase):
     def tearDown(self):
         self.store.close()
         self.temp.cleanup()
+
+    def test_point_event_canvas_shows_only_start_and_has_no_resize_handle(self):
+        item_id = self.store.schedules.save_item({
+            "title": "한 시각", "start_at": "202608031600", "end_at": "202608031601",
+            "time_mode": "point",
+        })
+        canvas = CalendarCanvas()
+        try:
+            items = self.store.schedules.items_for_range("202608030000", "202608040000")
+            canvas.render_range(datetime(2026, 8, 3).date(), datetime(2026, 8, 4).date(), items)
+            block = next(block for block in canvas._blocks if block.item_id == item_id)
+            self.assertIn("16:00 · 종료 없음", block.toolTip())
+            self.assertNotIn("16:00 –", block.toolTip())
+            self.assertFalse(block._on_edge(block.rect().bottomRight()))
+        finally:
+            destroy_widget(canvas, self.app)
+
+    def test_full_editor_preserves_point_until_end_is_selected(self):
+        item_id = self.store.schedules.save_item({
+            "title": "한 시각", "start_at": "202608031600", "end_at": "202608031601",
+            "time_mode": "point",
+        })
+        panel = CalendarPanel(self.store)
+        try:
+            panel.schedule_editor.load_item(item_id)
+            editor = panel.schedule_editor
+            self.assertTrue(editor.end_none_check.isChecked())
+            self.assertFalse(editor.form.isRowVisible(editor.end_edit))
+            self.assertEqual(editor.values()["time_mode"], "point")
+            editor.end_none_check.setChecked(False)
+            self.assertTrue(editor.form.isRowVisible(editor.end_edit))
+            self.assertEqual(editor.values()["time_mode"], "range")
+        finally:
+            destroy_widget(panel, self.app)
 
     def test_calendar_exposes_day_week_month_and_list(self):
         panel = CalendarPanel(self.store)
@@ -227,7 +275,70 @@ class ScheduleUiTest(unittest.TestCase):
         self.assertEqual(values["reminders"], [30])
         tomorrow = datetime.now().date() + timedelta(days=1)
         self.assertEqual(values["start_at"], tomorrow.strftime("%Y%m%d") + "1500")
-        self.assertFalse(popover.parse_label.isHidden())
+        self.assertTrue(popover.parse_label.isHidden())
+        self.assertIn("15:00", popover.title_edit.toolTip())
+        panel.close()
+
+    def test_popover_reads_trailing_time_and_labels_on_time_alarm(self):
+        panel = CalendarPanel(self.store)
+        panel.show()
+        panel._new_schedule(datetime(2026, 8, 3, 9, 0))
+        popover = panel.schedule_popover
+        popover.title_edit.setText("테스트 3시 알림")
+        self.app.processEvents()
+        self.assertEqual(popover.values()["title"], "테스트")
+        self.assertEqual(popover.values()["start_at"][-4:], "1500")
+        self.assertEqual(popover.values()["reminders"], [0])
+        self.assertEqual(popover.parse_label.text(), "15:00\n15:00의 정각 알람 · 15:00")
+        self.assertIn("정각 알람", popover.parse_label.toolTip())
+        self.assertEqual(
+            {span.kind for span in popover.title_edit.token_spans()},
+            {"time", "reminder"},
+        )
+        panel.close()
+
+    def test_colored_tokens_can_be_cancelled_with_double_click(self):
+        panel = CalendarPanel(self.store)
+        panel.show()
+        panel._new_schedule(datetime(2026, 8, 3, 9, 0))
+        popover = panel.schedule_popover
+        raw = "10.2. 10~18시 공직자안보 견학 5분전 알람"
+        popover.title_edit.setText(raw)
+        self.app.processEvents()
+        self.assertEqual(
+            {span.kind for span in popover.title_edit.token_spans()},
+            {"date", "time", "reminder"},
+        )
+        self.assertEqual(popover.values()["title"], "공직자안보 견학")
+        self.assertEqual(popover.values()["reminders"], [5])
+
+        date_span = next(span for span in popover.title_edit.token_spans() if span.kind == "date")
+        QTest.mouseDClick(
+            popover.title_edit, Qt.MouseButton.LeftButton,
+            pos=popover.title_edit.token_rect(date_span).center(),
+        )
+        self.app.processEvents()
+        self.assertIn("10.2.", popover.values()["title"])
+        self.assertNotIn("date", {span.kind for span in popover.title_edit.token_spans()})
+
+        time_span = next(span for span in popover.title_edit.token_spans() if span.kind == "time")
+        QTest.mouseDClick(
+            popover.title_edit, Qt.MouseButton.LeftButton,
+            pos=popover.title_edit.token_rect(time_span).center(),
+        )
+        self.app.processEvents()
+        self.assertIn("10~18시", popover.values()["title"])
+        self.assertNotIn("time", {span.kind for span in popover.title_edit.token_spans()})
+
+        alarm_span = next(span for span in popover.title_edit.token_spans() if span.kind == "reminder")
+        QTest.mouseDClick(
+            popover.title_edit, Qt.MouseButton.LeftButton,
+            pos=popover.title_edit.token_rect(alarm_span).center(),
+        )
+        self.app.processEvents()
+        # 읽은 알림을 취소하면 시각이 있는 새 일정의 기본값인 정각 알림으로 돌아간다.
+        self.assertEqual(popover.values()["reminders"], [0])
+        self.assertIn("5분전 알람", popover.values()["title"])
         panel.close()
 
     def test_hand_edited_time_survives_further_typing(self):
@@ -284,13 +395,16 @@ class ScheduleUiTest(unittest.TestCase):
 
     def test_popover_contents_stay_inside_its_frame(self):
         """날짜·시각 칸이 팝오버 폭을 넘겨 오른쪽이 잘리던 문제의 회귀 시험."""
+        from ui_theme import scaled_stylesheet
         panel = CalendarPanel(self.store)
+        # 실제 앱의 테마를 적용한다. 네이티브 버튼의 기본 최소 폭 80px와 구분.
+        panel.setStyleSheet(scaled_stylesheet(1.0))
         panel.show()
         panel._new_schedule(datetime(2026, 8, 3, 9, 0))
         popover = panel.schedule_popover
-        popover.time_chip.setChecked(True)
+        popover.time_chip.click()
         for chip in (popover.reminder_chip, popover.repeat_chip, popover.memo_chip, popover.dday_chip):
-            chip.setChecked(True)
+            chip.click()
         self.app.processEvents()
         self.assertLessEqual(popover.sizeHint().width(), popover.maximumWidth())
         inner = popover.width() - 32
@@ -427,6 +541,8 @@ class ScheduleUiTest(unittest.TestCase):
     def test_calendar_three_responsive_ranges(self):
         panel = CalendarPanel(self.store)
         panel.update_responsive_layout(1440)
+        self.assertTrue(panel.navigation.isHidden())
+        panel.navigation_toggle.setChecked(True)
         self.assertFalse(panel.navigation.isHidden())
         panel.update_responsive_layout(1100)
         self.assertFalse(panel.navigation.isVisible())
@@ -496,30 +612,38 @@ class ScheduleUiTest(unittest.TestCase):
         self.assertNotEqual(left.x(), right.x())
         self.assertLessEqual(left.right(), right.left() + 1)
         # 14:30에서 시작하는 일정은 14시 줄이 아니라 제자리에 놓인다.
-        self.assertEqual(int(right.y()), 14 * 60 + 30)
+        self.assertEqual(int(right.y()), panel.canvas.minute_to_y(14 * 60 + 30))
         panel.canvas.block_clicked(blocks[second])
         self.assertEqual(panel.schedule_popover.item_id, second)
         panel.close()
 
     # ------------------------------------------------------- 팝오버 레이아웃 --
-    def test_popover_grows_instead_of_overlapping_when_every_extra_opens(self):
+    def test_popover_keeps_size_and_shows_one_detail_page(self):
         panel = CalendarPanel(self.store)
         panel.resize(1100, 800)
         panel.show()
         panel._new_schedule(datetime(2026, 8, 3, 9, 0))
         popover = panel.schedule_popover
         closed = popover.height()
-        for chip in (popover.time_chip, popover.reminder_chip, popover.repeat_chip,
-                     popover.memo_chip, popover.dday_chip):
-            chip.setChecked(True)
-        self.assertGreater(popover.height(), closed, "항목을 펼쳤는데 팝오버가 커지지 않았습니다")
+        popover.time_chip.click()
+        for chip in (popover.repeat_chip, popover.memo_chip, popover.dday_chip):
+            chip.click()
+        self.assertGreater(popover.height(), closed)
+        self.assertEqual(popover.body_scroll.verticalScrollBar().maximum(), 0)
 
-        stacked = [popover.reminder_edit, popover.repeat_combo, popover.memo_edit, popover.dday_hint]
-        for upper, lower in zip(stacked, stacked[1:]):
-            self.assertLessEqual(
-                upper.geometry().bottom(), lower.geometry().top(),
-                f"{upper.accessibleName() or upper.objectName()} 가 아래 항목과 겹칩니다",
-            )
+        self.assertTrue(popover.dday_hint.isVisible())
+        for hidden in (popover.time_row, popover.repeat_combo, popover.memo_edit):
+            self.assertFalse(hidden.isVisible())
+        popover.reminder_chip.setChecked(True)
+        self.app.processEvents()
+        self.assertTrue(popover.reminder_edit.isVisible())
+        self.assertTrue(popover.reminder_details.isVisible())
+        for button in popover.reminder_preset_buttons.values():
+            self.assertLessEqual(button.geometry().right(), popover.reminder_details.width())
+        popover.reminder_chip.setChecked(False)
+        self.assertTrue(popover.reminder_edit.isVisible())
+        self.assertFalse(popover.memo_edit.isVisible())
+        self.assertTrue(popover.memo_chip.isChecked())
         self.assertLessEqual(popover.save_button.geometry().bottom(), popover.height())
         self.assertGreaterEqual(popover.y(), 0)
         panel.close()
@@ -536,7 +660,7 @@ class ScheduleUiTest(unittest.TestCase):
         canvas = panel.canvas
         bar = canvas.view.verticalScrollBar()
         now = datetime.now()
-        centre = now.hour * 60 + now.minute
+        centre = canvas.minute_to_y(now.hour * 60 + now.minute)
         expected = max(bar.minimum(), min(int(centre - canvas.view.viewport().height() / 2), bar.maximum()))
         self.assertEqual(bar.value(), expected)
 

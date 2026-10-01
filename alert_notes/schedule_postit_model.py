@@ -12,7 +12,7 @@ from .schedule_postit_settings import (
     VIEW_PRIORITY,
     VIEW_WEEK,
 )
-from .schedule_recurrence import DATETIME_FMT, normalize_rule
+from .schedule_recurrence import DATETIME_FMT, is_daily_repeat, normalize_rule
 
 
 @dataclass(frozen=True)
@@ -52,6 +52,8 @@ class SchedulePostitModel:
         for row in self.store.schedules.items_for_range(
             start.strftime(DATETIME_FMT), end.strftime(DATETIME_FMT), include_completed=True
         ):
+            if is_daily_repeat(row):
+                continue
             kind = str(row.get("item_type") or "event")
             if kind == "event" and not prefs.show_events:
                 continue

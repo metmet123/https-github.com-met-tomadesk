@@ -18,7 +18,12 @@ SW_SHOWNORMAL = 1
 SW_SHOWMINIMIZED = 2
 SW_SHOWMAXIMIZED = 3
 SW_RESTORE = 9
+SWP_NOSIZE = 0x0001
+SWP_NOMOVE = 0x0002
 SWP_NOZORDER = 0x0004
+SWP_SHOWWINDOW = 0x0040
+HWND_TOPMOST = -1
+HWND_NOTOPMOST = -2
 SWP_NOACTIVATE = 0x0010
 SWP_ASYNCWINDOWPOS = 0x4000
 DWMWA_EXTENDED_FRAME_BOUNDS = 9
@@ -69,6 +74,19 @@ _USER32.SetWindowPos.argtypes = [
 _USER32.SetWindowPos.restype = wintypes.BOOL
 _USER32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
 _USER32.ShowWindow.restype = wintypes.BOOL
+_USER32.GetForegroundWindow.argtypes = []
+_USER32.GetForegroundWindow.restype = wintypes.HWND
+_USER32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+_USER32.GetWindowThreadProcessId.restype = wintypes.DWORD
+_USER32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
+_USER32.AttachThreadInput.restype = wintypes.BOOL
+_USER32.BringWindowToTop.argtypes = [wintypes.HWND]
+_USER32.BringWindowToTop.restype = wintypes.BOOL
+_USER32.SetForegroundWindow.argtypes = [wintypes.HWND]
+_USER32.SetForegroundWindow.restype = wintypes.BOOL
+_KERNEL32 = ctypes.WinDLL("kernel32", use_last_error=True)
+_KERNEL32.GetCurrentThreadId.argtypes = []
+_KERNEL32.GetCurrentThreadId.restype = wintypes.DWORD
 _DWMAPI = ctypes.WinDLL("dwmapi", use_last_error=True)
 _DWMAPI.DwmGetWindowAttribute.argtypes = [
     wintypes.HWND, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD,
@@ -224,6 +242,54 @@ def target_window_rect(
         width + border_left + border_right,
         height + border_top + border_bottom,
     ]
+
+
+def window_matches_layout(
+    hwnd: int,
+    rect,
+    monitor: dict,
+    state: str = "normal",
+    source_dpi: int = 96,
+    rect_basis: str | None = None,
+    source_work_area=None,
+    api_provider=None,
+    minimized: bool | None = None,
+    maximized: bool | None = None,
+    tolerance: int = 8,
+) -> bool:
+    """Return whether a live window still matches its saved state and rectangle."""
+    if not hwnd or not monitor:
+        return False
+    if minimized is None:
+        minimized = bool(_USER32.IsIconic(int(hwnd)))
+    if maximized is None:
+        maximized = bool(_USER32.IsZoomed(int(hwnd)))
+    saved_state = str(state or "normal")
+    if saved_state == "minimized":
+        return bool(minimized)
+    if saved_state == "maximized":
+        return bool(maximized) and not bool(minimized)
+    if minimized or maximized:
+        return False
+
+    provider = api_provider or _WINDOW_BOUNDS
+    current = provider.get_window_rect(int(hwnd))
+    if current is None:
+        return False
+    borders = window_border_thickness(hwnd, api_provider=provider)
+    expected = target_window_rect(
+        rect,
+        monitor["work_rect"],
+        borders,
+        rect_basis=rect_basis,
+        source_dpi=source_dpi,
+        target_dpi=int(monitor.get("dpi", 96) or 96),
+        source_work_area=source_work_area,
+    )
+    left, top, right, bottom = (int(value) for value in current)
+    actual = [left, top, max(1, right - left), max(1, bottom - top)]
+    allowed = max(0, int(tolerance))
+    return all(abs(actual_value - expected_value) <= allowed for actual_value, expected_value in zip(actual, expected))
 
 
 def _monitor_dpi(handle) -> int:
@@ -384,6 +450,38 @@ def show_explorer_window(
         return False
     _USER32.ShowWindow(int(hwnd), SW_SHOW)
     return is_window_visible(int(hwnd))
+
+
+def bring_window_to_front(hwnd: int) -> bool:
+    """Raise a restored window above whichever app currently has focus.
+
+    Windows' foreground lock can refuse SetForegroundWindow from a background
+    process, so the Z-order is raised with a TOPMOST/NOTOPMOST pair first and
+    the input queues are attached briefly to hand over activation.
+    """
+    hwnd = int(hwnd or 0)
+    if not hwnd or not is_window_visible(hwnd) or _USER32.IsIconic(hwnd):
+        return False
+    flags = SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW | SWP_ASYNCWINDOWPOS
+    _USER32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, flags)
+    _USER32.SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, flags)
+    current_thread = _KERNEL32.GetCurrentThreadId()
+    foreground = _USER32.GetForegroundWindow()
+    foreground_thread = (
+        _USER32.GetWindowThreadProcessId(foreground, None) if foreground else 0
+    )
+    attached = bool(
+        foreground_thread
+        and foreground_thread != current_thread
+        and _USER32.AttachThreadInput(current_thread, foreground_thread, True)
+    )
+    try:
+        _USER32.BringWindowToTop(hwnd)
+        activated = bool(_USER32.SetForegroundWindow(hwnd))
+    finally:
+        if attached:
+            _USER32.AttachThreadInput(current_thread, foreground_thread, False)
+    return activated
 
 
 def collect_open_windows(

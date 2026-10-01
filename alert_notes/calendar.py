@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
+from html import escape
 
 from PyQt6.QtCore import QDate, QEvent, QPoint, QRect, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QColor
@@ -12,11 +13,12 @@ from PyQt6.QtWidgets import (
 
 from ui_polish import apply_numeric_font, polish_button
 from .calendar_canvas import CalendarCanvas
-from .categories import CATEGORIES, CATEGORY_COLORS
+from .categories import schedule_categories, schedule_category_colors, schedule_category_name
 from .deadline import deadline_chip_text, deadline_title, deadline_urgency, parse_deadline
 from .calendar_month_view import CalendarMonthView
 from .calendar_quick_editor import CalendarQuickEditor
 from .schedule_editor import ScheduleEditor
+from .schedule_recurrence import is_daily_repeat
 from .schedule_popover import SchedulePopover
 from .sqlite_store import DATETIME_FMT
 
@@ -42,6 +44,7 @@ class CalendarPanel(QWidget):
     def __init__(self, store, parent=None):
         super().__init__(parent)
         self.store = store
+        self._category_specs = schedule_categories(store)
         self._popover_slot = (None, None)
         self._last_move = None
         self._responsive_width = 1440
@@ -115,9 +118,12 @@ class CalendarPanel(QWidget):
         # The legend used to draw five identical dark dots, so the colour coded
         # nothing.  Paint each one with the category's real colour instead.
         self.category_labels = {}
-        for name, key in CATEGORIES:
-            _background, foreground = CATEGORY_COLORS.get(key, ("#e2e8f0", "#475569"))
-            label = QLabel(f'<span style="color:{foreground}">●</span>&nbsp;&nbsp;{name}')
+        self.category_nav_layout = nav
+        for row in self._category_specs:
+            name, key = row["name"], row["id"]
+            _background, foreground = schedule_category_colors(self._category_specs, key)
+            safe_name = escape(name)
+            label = QLabel(f'<span style="color:{foreground}">●</span>&nbsp;&nbsp;{safe_name}')
             label.setObjectName("calendarCategoryLabel")
             label.setAccessibleName(f"{name} 카테고리")
             label.setToolTip(f"{name} 일정에 사용하는 색입니다.")
@@ -212,7 +218,8 @@ class CalendarPanel(QWidget):
         self.search_edit.textChanged.connect(lambda: self.search_timer.start(180))
         category_row.addWidget(self.search_edit)
         self.category_buttons = {}
-        for label, key in [("전체", "")] + list(CATEGORIES):
+        self.category_row = category_row
+        for label, key in [("전체", "")] + [(row["name"], row["id"]) for row in self._category_specs[:4]]:
             button = QPushButton(label)
             button.setCheckable(True)
             button.setChecked(not key)
@@ -222,11 +229,18 @@ class CalendarPanel(QWidget):
             self.category_buttons[key] = button
         self.category_picker = QPushButton("분류: 전체")
         category_menu = QMenu(self.category_picker)
-        for label, key in [("전체", "")] + list(CATEGORIES):
+        for label, key in [("전체", "")] + [(row["name"], row["id"]) for row in self._category_specs]:
             category_menu.addAction(label, lambda value=key: self._select_category(value))
         self.category_picker.setMenu(category_menu)
         self.category_picker.hide()
         category_row.addWidget(self.category_picker)
+        self.category_more = QPushButton("더보기 ▾")
+        self.category_more.setObjectName("calendarCategoryChip")
+        self.category_more.setMenu(QMenu(self.category_more))
+        for row in self._category_specs:
+            self.category_more.menu().addAction(row["name"], lambda value=row["id"]: self._select_category(value))
+        self.category_more.setVisible(len(self._category_specs) > 4)
+        category_row.addWidget(self.category_more)
         category_row.addStretch()
         self.filter_toggle = QPushButton("표시 설정 ▾")
         self.filter_toggle.setCheckable(True)
@@ -392,6 +406,7 @@ class CalendarPanel(QWidget):
         # 창을 좁혔을 때 본문 폭이 팝오버보다 작아지면서 오른쪽이 잘렸다.
         self.schedule_popover = SchedulePopover(self.store, self)
         self.schedule_popover.saved.connect(self._popover_saved)
+        self.schedule_popover.categories_changed.connect(self.refresh_categories)
         self.schedule_popover.deleted.connect(self._popover_deleted)
         self.schedule_popover.full_edit_requested.connect(self._open_full_editor)
         self.schedule_popover.closed.connect(self._hide_popover)
@@ -405,6 +420,7 @@ class CalendarPanel(QWidget):
         self.undo_move_button.clicked.connect(self._undo_last_move)
         self.quick_card.note_saved.connect(self._quick_saved)
         self.schedule_editor.saved.connect(self._schedule_saved)
+        self.schedule_editor.categories_changed.connect(self.refresh_categories)
         self.schedule_editor.deleted.connect(self._schedule_deleted)
         self.schedule_editor.close_requested.connect(self._close_drawer)
         self.quick_close_button.clicked.connect(self._close_drawer)
@@ -492,10 +508,65 @@ class CalendarPanel(QWidget):
         self.update_responsive_layout(self._responsive_width)
 
     def _select_category(self, key):
-        self._category_filter = key
+        self._category_filter = key if not key or any(row["id"] == key for row in self._category_specs) else ""
+        self._render_category_buttons()
         for value, button in self.category_buttons.items():
-            button.setChecked(key == value)
-        self.category_picker.setText("분류: " + self.category_buttons[key].text())
+            button.setChecked(self._category_filter == value)
+        self.category_picker.setText("분류: " + schedule_category_name(self._category_specs, self._category_filter) if self._category_filter else "분류: 전체")
+        self.refresh()
+
+    def _render_category_buttons(self) -> None:
+        for button in self.category_buttons.values():
+            self.category_row.removeWidget(button)
+            button.deleteLater()
+        self.category_buttons = {}
+        rows = self._category_specs
+        visible = rows[:4]
+        selected = next((row for row in rows if row["id"] == self._category_filter), None)
+        if selected is not None and selected not in visible:
+            visible = [*rows[:3], selected]
+        for label, key in [("전체", "")] + [(row["name"], row["id"]) for row in visible]:
+            button = QPushButton(label)
+            button.setObjectName("calendarCategoryChip")
+            button.setCheckable(True)
+            button.setChecked(self._category_filter == key)
+            button.setVisible(self._responsive_width >= 900)
+            button.clicked.connect(lambda _checked=False, value=key: self._select_category(value))
+            self.category_row.insertWidget(len(self.category_buttons) + 1, button)
+            self.category_buttons[key] = button
+
+    def refresh_categories(self) -> None:
+        rows = schedule_categories(self.store)
+        if rows == self._category_specs:
+            return
+        for label in self.category_labels.values():
+            self.category_nav_layout.removeWidget(label)
+            label.deleteLater()
+        self.category_labels = {}
+        self._category_specs = rows
+        for row in rows:
+            name, key = row["name"], row["id"]
+            _background, foreground = schedule_category_colors(rows, key)
+            label = QLabel(f'<span style="color:{foreground}">●</span>&nbsp;&nbsp;{escape(name)}')
+            label.setObjectName("calendarCategoryLabel")
+            label.setAccessibleName(f"{name} 카테고리")
+            self.category_nav_layout.insertWidget(self.category_nav_layout.count() - 1, label)
+            self.category_labels[key] = label
+        selected = next((row for row in rows if row["id"] == self._category_filter), None)
+        if self._category_filter and selected is None:
+            self._category_filter = ""
+        self._render_category_buttons()
+        self.category_picker.menu().clear()
+        for label, key in [("전체", "")] + [(row["name"], row["id"]) for row in rows]:
+            self.category_picker.menu().addAction(label, lambda value=key: self._select_category(value))
+        self.category_more.menu().clear()
+        for row in rows:
+            self.category_more.menu().addAction(row["name"], lambda value=row["id"]: self._select_category(value))
+        self.category_more.setVisible(len(rows) > 4)
+        self.category_picker.setText("분류: " + schedule_category_name(rows, self._category_filter) if self._category_filter else "분류: 전체")
+        self.schedule_editor.reload_categories()
+        self.schedule_popover.reload_categories()
+        self.update_responsive_layout(self._responsive_width)
         self.refresh()
 
     def _toggle_day_list(self, checked):
@@ -634,7 +705,7 @@ class CalendarPanel(QWidget):
         )
 
     def _set_stacked_period(self, year: int, month: int) -> None:
-        self.period_label.setText(f"{year}.{month}" if self._responsive_width < 900 else f"{year}년 {month}월")
+        self.period_label.setText(f"{year % 100:02d}/{month}" if self._responsive_width < 900 else f"{year}년 {month}월")
         self.period_label.setToolTip(f"{year}년 {month}월")
 
     def _stacked_year_size(self, year: int, month: int) -> int:
@@ -659,6 +730,9 @@ class CalendarPanel(QWidget):
         return chosen
 
     def refresh(self) -> None:
+        if schedule_categories(self.store) != self._category_specs:
+            self.refresh_categories()
+            return
         self._sync_nav_range()
         self.month_calendar.set_dim_past(
             str(self.store.setting("calendar_dim_past", "true")).lower() == "true"
@@ -666,13 +740,18 @@ class CalendarPanel(QWidget):
         start, end = self._range()
         if self.mode == "week":
             last = end - timedelta(days=1)
-            self.period_label.setText(f"{start.month}/{start.day}–{last.day}" if self._responsive_width < 900 and start.month == last.month else f"{start.month}/{start.day}–{last.month}/{last.day}")
+            full = f"{start.month}/{start.day}–{last.month}/{last.day}"
+            self.period_label.setText(f"{start.month}/{start.day}" if self._responsive_width < 900 else full)
+            self.period_label.setToolTip(full)
         elif self.mode == "month":
             self._set_stacked_period(start.year, start.month)
         elif self.mode == "list":
             self.period_label.setText(f"{start:%m/%d}–{(end - timedelta(days=1)):%m/%d}")
         else:
-            self.period_label.setText(f"{start.month}월 {start.day}일")
+            self.period_label.setText(
+                f"{start.month}/{start.day}"
+                if self._responsive_width < 900 else f"{start.month}월 {start.day}일"
+            )
         self._refresh_deadline_strip(start, end)
         if self.mode in {"day", "week"}:
             self._refresh_timeline(start, end)
@@ -779,11 +858,15 @@ class CalendarPanel(QWidget):
         show_dday = self.calendar_filter_checks["dday"].isChecked()
         result = []
         for item in self.store.schedules.items_for_range(_day_key(start), _day_key(end)):
+            if is_daily_repeat(item):
+                continue
             if self._category_filter and item["category"] != self._category_filter:
                 continue
             query = self.search_edit.text().strip().casefold()
             if query and query not in str(item["title"]).casefold():
                 continue
+            item["category_name"] = schedule_category_name(self._category_specs, item["category"])
+            item["category_colors"] = schedule_category_colors(self._category_specs, item["category"])
             item_type = str(item.get("item_type") or "event")
             if item_type == "event" and show_events:
                 result.append(item)
@@ -1192,6 +1275,7 @@ class CalendarPanel(QWidget):
         self.mode_group.setVisible(not narrow)
         self.mode_picker.setVisible(narrow)
         self.category_picker.setVisible(narrow)
+        self.category_more.setVisible(not narrow and len(self._category_specs) > 4)
         for button in self.category_buttons.values():
             button.setVisible(not narrow)
         self.root_layout.setDirection(QBoxLayout.Direction.TopToBottom if narrow else QBoxLayout.Direction.LeftToRight)

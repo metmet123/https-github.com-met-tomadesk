@@ -11,7 +11,7 @@ from html import escape
 import json
 from uuid import uuid4
 
-from .categories import CATEGORIES, category_name
+from .categories import CATEGORIES, schedule_categories, schedule_category_name
 from .memo_organizer import KINDS, analyze, dday, validate, normalized_title
 from .sqlite_store import DATETIME_FMT
 
@@ -140,7 +140,9 @@ class OrganizerStore:
                     item["schedule_id"] = self.store.schedules.save_item({
                         "title": item["title"], "details": details, "item_type": item["kind"],
                         "start_at": start.strftime(DATETIME_FMT), "end_at": end.strftime(DATETIME_FMT),
-                        "all_day": not bool(item["clock"]), "category": dict(CATEGORIES).get(item["category"], "lavender"),
+                        "all_day": not bool(item["clock"]), "category": {
+                            row["name"]: row["id"] for row in schedule_categories(self.store)
+                        }.get(item["category"], dict(CATEGORIES).get(item["category"], "lavender")),
                         "count_as_dday": item["kind"] == "task", "reminders": [0] if item["notify"] else [],
                     }, manage_transaction=False)
                 item["applied"] = True
@@ -165,7 +167,7 @@ class OrganizerStore:
                     item["clock"] = "" if schedule["all_day"] else dt.strftime("%H:%M")
                     if item['kind'] == 'event':
                         item['end_clock'] = datetime.strptime(schedule['end_at'], DATETIME_FMT).strftime('%H:%M')
-                    native_category = category_name(schedule["category"])
+                    native_category = schedule_category_name(schedule_categories(self.store), schedule["category"])
                     if native_category != "기타" or item["category"] in dict(CATEGORIES):
                         item["category"] = native_category
                 rows.append(item)

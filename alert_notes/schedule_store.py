@@ -6,6 +6,7 @@ import sqlite3
 from contextlib import nullcontext
 
 from .schedule_recurrence import DATETIME_FMT, Occurrence, expand_occurrences, normalize_rule
+from .categories import SCHEDULE_CATEGORY_SETTING
 
 
 ITEM_COLUMNS = (
@@ -108,7 +109,7 @@ class ScheduleStore:
                     "INSERT OR IGNORE INTO schedule_items(title,details,item_type,note_id,start_at,end_at,"
                     "category,source_reminder_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
                     (row["title"], row["memo"], "event", row["note_id"], row["due_at"], end_at,
-                     "sky", row["id"], stamp, stamp),
+                     self._default_category(), row["id"], stamp, stamp),
                 )
 
     def sync_legacy_reminder(self, reminder_id: int) -> None:
@@ -132,7 +133,7 @@ class ScheduleStore:
                     "INSERT INTO schedule_items(title,details,item_type,note_id,start_at,end_at,"
                     "category,source_reminder_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
                     (row["title"], row["memo"], "event", row["note_id"], row["due_at"], end_at,
-                     "sky", row["id"], stamp, stamp),
+                     self._default_category(), row["id"], stamp, stamp),
                 )
             else:
                 self.conn.execute(
@@ -154,7 +155,7 @@ class ScheduleStore:
             ).fetchone()
             if source is not None and source["source_reminder_id"] is not None:
                 raise ValueError("메모 알림에서 만들어진 일정은 메모의 알림 설정에서 변경해 주세요.")
-        data = _normalized_item(values)
+        data = _normalized_item(dict(values, category=values.get("category") or self._default_category()))
         stamp = _now_key()
         rule = json.dumps(normalize_rule(data["recurrence_rule"]), ensure_ascii=False)
         columns = (
@@ -184,6 +185,22 @@ class ScheduleStore:
                     (item_id, minutes),
                 )
         return int(item_id)
+
+    def _default_category(self) -> str:
+        try:
+            row = self.conn.execute(
+                "SELECT value FROM settings WHERE key=?", (SCHEDULE_CATEGORY_SETTING,)
+            ).fetchone()
+        except sqlite3.OperationalError:
+            return "sky"
+        if row is not None:
+            try:
+                first = json.loads(row[0])[0]
+                if isinstance(first.get("id"), str) and first["id"]:
+                    return first["id"]
+            except (IndexError, TypeError, ValueError, KeyError):
+                pass
+        return "sky"
 
     def item(self, item_id: int):
         return self.conn.execute("SELECT * FROM schedule_items WHERE id=? AND deleted_at=''", (item_id,)).fetchone()

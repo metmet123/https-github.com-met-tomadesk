@@ -2,7 +2,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtCore import QEvent, QRect, Qt
+from PyQt6.QtCore import QEvent, QPoint, QRect, Qt
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication
 
@@ -102,6 +102,29 @@ def test_focus_loss_closes_overlay():
         QApplication.sendEvent(overlay, QEvent(QEvent.Type.WindowDeactivate))
         app.processEvents()
         assert not overlay.isVisible()
+    finally:
+        _close(overlay)
+
+
+def test_header_drag_moves_overlay_and_reopen_keeps_position():
+    app = _app()
+    overlay = ShortcutOverlay()
+    try:
+        bounds = app.primaryScreen().availableGeometry()
+        assert overlay.open_overlay(_fixture_entries(), available_geometry=bounds)
+        app.processEvents()
+        title = overlay._drag_widgets[1]
+        before = overlay.pos()
+        QTest.mousePress(title, Qt.MouseButton.LeftButton, pos=QPoint(12, 8))
+        QTest.mouseMove(title, QPoint(42, 28))
+        QTest.mouseRelease(title, Qt.MouseButton.LeftButton, pos=QPoint(42, 28))
+        app.processEvents()
+        assert overlay.pos() != before
+        moved = overlay.pos()
+        overlay.hide()
+        assert overlay.open_overlay(_fixture_entries(), available_geometry=bounds)
+        app.processEvents()
+        assert overlay.pos() == moved
     finally:
         _close(overlay)
 

@@ -4,10 +4,10 @@
 오늘 날짜에 따라 흔들리면 테스트가 아니라 점괘가 된다.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 import unittest
 
-from alert_notes.ko_schedule_parser import parse
+from alert_notes.ko_schedule_parser import parse, remap_ignored_spans
 
 
 NOW = datetime(2026, 9, 2, 13, 30)
@@ -18,6 +18,38 @@ def read(text, base=None, base_end=None):
 
 
 class ParseDateTest(unittest.TestCase):
+    def test_next_week_words_and_weekdays(self):
+        now = datetime(2026, 12, 30, 9)
+        for phrase, days in (("다음주", 7), ("다음 주", 7), ("다다음주", 14), ("다다음 주", 14)):
+            for text in (f"{phrase} 회의", f"회의 {phrase} 9시"):
+                result = parse(text, now=now)
+                self.assertEqual(result.start.date(), (now + timedelta(days=days)).date())
+                self.assertEqual(result.title, "회의")
+                span = next(s for s in result.spans if s.kind == "date")
+                cancelled = parse(text, now=now, ignored_spans=((span.start, span.end, span.kind),))
+                self.assertIn(phrase, cancelled.title)
+            result = parse(f"회의 {phrase} 월요일", now=now)
+            self.assertEqual(result.start.date(), (now + timedelta(days=days - 2)).date())
+            self.assertEqual(result.title, "회의")
+
+    def test_relative_korean_days_anywhere_and_year_boundary(self):
+        for word, days in (("내일", 1), ("모레", 2), ("이틀 후", 2), ("이틀후", 2)):
+            for text in (f"{word} 회의", f"회의 {word}", f"회의 {word} 9~10시"):
+                with self.subTest(text=text):
+                    result = parse(text, now=datetime(2026, 12, 31, 10))
+                    self.assertEqual(result.start.date(), (datetime(2026, 12, 31) + timedelta(days=days)).date())
+                    self.assertEqual(result.title, "회의")
+
+    def test_weekdays_anywhere_today_and_year_boundary(self):
+        for text, day in (("회의 금요일 18시", 4), ("회의 화요일", 8),
+                          ("회의 수요일", 2), ("회의 다음 주 수요일", 9)):
+            with self.subTest(text=text):
+                parsed = read(text)
+                self.assertEqual(parsed.start.day, day)
+                self.assertEqual(parsed.title, "회의")
+        parsed = parse("회의 월요일", now=datetime(2026, 12, 31, 12))
+        self.assertEqual(parsed.start.date().isoformat(), "2027-01-04")
+
     def assert_range(self, text, start, end, title=None):
         parsed = read(text)
         self.assertEqual(parsed.start, start, text)
@@ -49,6 +81,19 @@ class ParseDateTest(unittest.TestCase):
         self.assert_range("9월 10일 14시 월간보고", datetime(2026, 9, 10, 14), datetime(2026, 9, 10, 15), "월간보고")
         self.assert_range("2026-09-25 9시 반 건강검진", datetime(2026, 9, 25, 9, 30), datetime(2026, 9, 25, 10, 30), "건강검진")
         self.assert_range("10/15 14시 출장", datetime(2026, 10, 15, 14), datetime(2026, 10, 15, 15), "출장")
+
+    def test_compact_month_day_with_dot_and_title_first(self):
+        for text in ("10.2.", "10/2", "공직자안보 견학 10.2.", "공직자안보 견학 10/2"):
+            with self.subTest(text=text):
+                parsed = read(text)
+                self.assertEqual(parsed.start.date(), datetime(2026, 10, 2).date())
+        self.assertEqual(read("공직자안보 견학 10.2.").title, "공직자안보 견학")
+
+    def test_incomplete_dot_date_stays_in_title(self):
+        parsed = read("테스트 10.2")
+        self.assertIsNone(parsed.start)
+        self.assertEqual(parsed.title, "테스트 10.2")
+        self.assertNotIn("date", {span.kind for span in parsed.spans})
 
     def test_past_month_day_rolls_to_next_year(self):
         parsed = read("1월 5일 10시 신년회")
@@ -94,6 +139,38 @@ class ParseTimeTest(unittest.TestCase):
         parsed = read("오늘 16시 30분간 스탠드업")
         self.assertEqual(parsed.end, datetime(2026, 9, 2, 16, 30))
 
+    def test_hour_range_without_si(self):
+        for value in ("4~6", "4~6시", "4시~6"):
+            with self.subTest(value=value):
+                parsed = read(f"오늘 {value} 회의")
+                self.assertEqual(parsed.start, datetime(2026, 9, 2, 16))
+                self.assertEqual(parsed.end, datetime(2026, 9, 2, 18))
+                self.assertEqual(parsed.title, "회의")
+
+    def test_time_can_appear_after_the_title(self):
+        point = read("테스트 3시")
+        self.assertEqual(point.start, datetime(2026, 9, 2, 15))
+        self.assertEqual(point.title, "테스트")
+        ranged = read("테스트 10~18시")
+        self.assertEqual(ranged.start, datetime(2026, 9, 2, 10))
+        self.assertEqual(ranged.end, datetime(2026, 9, 2, 18))
+        self.assertEqual(ranged.title, "테스트")
+
+    def test_relative_time_uses_current_or_selected_reference(self):
+        current = datetime(2026, 9, 2, 13, 30)
+        selected = datetime(2026, 9, 5, 10, 0)
+        for value, delta in (("1시간 후", 60), ("30분 뒤", 30), ("1시간 30분 후", 90)):
+            with self.subTest(value=value):
+                parsed = read(f"{value} 회의", base=selected)
+                self.assertEqual(parsed.start, current + timedelta(minutes=delta))
+                self.assertEqual(parsed.title, "회의")
+        parsed = parse(
+            "1시간 후 회의", now=NOW, base=selected,
+            base_end=datetime(2026, 9, 5, 11, 30), relative_base=selected,
+        )
+        self.assertEqual(parsed.start, datetime(2026, 9, 5, 11))
+        self.assertEqual(parsed.end, datetime(2026, 9, 5, 12, 30))
+
     def test_all_day(self):
         parsed = read("모레 종일 워크숍")
         self.assertTrue(parsed.all_day)
@@ -128,6 +205,30 @@ class ParseMarkerTest(unittest.TestCase):
         self.assertEqual(read("내일 9시 발표 !1시간전").reminders, (60,))
         self.assertEqual(read("내일 9시 발표 !10 !30").reminders, (10, 30))
 
+    def test_natural_language_alarm(self):
+        at_start = read("10~18시 공직자안보 견학 알람")
+        self.assertEqual(at_start.reminders, (0,))
+        self.assertEqual(at_start.title, "공직자안보 견학")
+        self.assertEqual(at_start.start.hour, 10)
+        self.assertEqual(at_start.end.hour, 18)
+        for text in (
+            "10~18시 공직자안보 견학 5분전 알람",
+            "10~18시 공직자안보 견학 알람 5분전",
+        ):
+            self.assertEqual(read(text).reminders, (5,), text)
+        before = read("18시 공직자안보 견학 10분전")
+        self.assertEqual(before.reminders, (10,))
+        self.assertEqual(before.start - timedelta(minutes=10), datetime(2026, 9, 2, 17, 50))
+        for text, expected in (
+            ("테스트 알림", (0,)), ("테스트 5분전", (5,)),
+            ("테스트 5분전 알람", (5,)), ("테스트 알림 5분전", (5,)),
+        ):
+            with self.subTest(text=text):
+                parsed = read(text)
+                reminder = [span.text for span in parsed.spans if span.kind == "reminder"]
+                self.assertEqual(parsed.reminders, expected)
+                self.assertEqual(reminder, [text.removeprefix("테스트 ")])
+
     def test_recurrence(self):
         parsed = read("매주 월요일 9시 주간회의 #업무")
         self.assertEqual(parsed.recurrence["frequency"], "weekly")
@@ -148,10 +249,10 @@ class SafeSideTest(unittest.TestCase):
         self.assertTrue(parsed.is_empty)
         self.assertEqual(parsed.title, "9월 매출 정리")
 
-    def test_numbers_after_the_first_words_are_left_alone(self):
-        parsed = read("보고서 3시 버전 정리")
+    def test_numbers_without_time_units_after_the_first_words_are_left_alone(self):
+        parsed = read("보고서 3차 버전 정리")
         self.assertIsNone(parsed.start)
-        self.assertEqual(parsed.title, "보고서 3시 버전 정리")
+        self.assertEqual(parsed.title, "보고서 3차 버전 정리")
 
     def test_plain_title_is_untouched(self):
         parsed = read("사무실 정리")
@@ -165,8 +266,21 @@ class SafeSideTest(unittest.TestCase):
         self.assertIsNone(parsed.start)
         self.assertEqual(parsed.title, "3분기 계획 정리")
 
+    def test_standalone_number_is_not_a_time(self):
+        parsed = read("오늘 4 회의")
+        self.assertEqual(parsed.start, datetime(2026, 9, 2, 13, 30))
+        self.assertEqual(parsed.title, "4 회의")
+
 
 class SpanTest(unittest.TestCase):
+    def test_cancelled_span_survives_surrounding_edits(self):
+        old = "회의 금요일"
+        spans = {(3, 6, "date")}
+        self.assertEqual(remap_ignored_spans(old, "긴 회의 금요일", spans), {(5, 8, "date")})
+        self.assertEqual(remap_ignored_spans(old, old + " 준비", spans), spans)
+        self.assertEqual(remap_ignored_spans(old, "회의 토요일", spans), set())
+        self.assertEqual(remap_ignored_spans(old, "금요일", spans), {(0, 3, "date")})
+
     def test_spans_point_at_the_original_text(self):
         text = "다음주 화요일 10시 치과 #개인"
         parsed = read(text)
@@ -180,6 +294,32 @@ class SpanTest(unittest.TestCase):
         edges = [(span.start, span.end) for span in parsed.spans]
         for (_, first_end), (second_start, _) in zip(edges, edges[1:]):
             self.assertLessEqual(first_end, second_start)
+
+    def test_ignored_date_time_and_alarm_stay_in_title(self):
+        text = "10.2. 10~18시 공직자안보 견학 5분전 알람"
+        initial = read(text)
+        date_span = next(span for span in initial.spans if span.kind == "date")
+        ignored_date = parse(
+            text, now=NOW,
+            ignored_spans=((date_span.start, date_span.end, date_span.kind),),
+        )
+        self.assertIn("10.2.", ignored_date.title)
+        self.assertEqual(ignored_date.start.hour, 10)
+
+        time_spans = tuple(
+            (span.start, span.end, span.kind) for span in initial.spans if span.kind == "time"
+        )
+        ignored_time = parse(text, now=NOW, ignored_spans=time_spans)
+        self.assertIn("10~18시", ignored_time.title)
+        self.assertEqual(ignored_time.start.date(), datetime(2026, 10, 2).date())
+
+        alarm_span = next(span for span in initial.spans if span.kind == "reminder")
+        ignored_alarm = parse(
+            text, now=NOW,
+            ignored_spans=((alarm_span.start, alarm_span.end, alarm_span.kind),),
+        )
+        self.assertEqual(ignored_alarm.reminders, ())
+        self.assertIn("5분전 알람", ignored_alarm.title)
 
 
 if __name__ == "__main__":

@@ -204,6 +204,7 @@ class RichMemoTextEdit(QTextEdit):
         self._block_action_bar_height = 0
         self._left_press_point: QPoint | None = None
         self._left_press_target: tuple[str, int] | None = None
+        self._middle_toggle_press: int | None = None
         self._left_press_dragged = False
         self._character_press_point: QPoint | None = None
         self._character_press_position: int | None = None
@@ -3576,6 +3577,23 @@ class RichMemoTextEdit(QTextEdit):
             block = block.next()
         return None
 
+    def _middle_toggle_block_at(self, point):
+        """Match the toggle marker or its title, but not the empty row space."""
+        block = self._toggle_block_at(point)
+        if block is not None:
+            return block
+        cursor = self.cursorForPosition(point.toPoint())
+        block = cursor.block()
+        if not self._is_toggle_block(block) or not block.isVisible():
+            return None
+        start = self.cursorRect(QTextCursor(block))
+        end_cursor = QTextCursor(block)
+        end_cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+        end = self.cursorRect(end_cursor)
+        if start.top() <= point.y() <= start.bottom() and start.left() <= point.x() <= end.right():
+            return block
+        return None
+
     def _heading_marker_rect(self, block) -> QRectF:
         glyph = self.cursorRect(QTextCursor(block))
         left = max(0.0, glyph.left() - 18)
@@ -3996,6 +4014,66 @@ class RichMemoTextEdit(QTextEdit):
         augment_range_mime(self, mime)
         return mime
 
+    def _selected_image_mime(self) -> QMimeData | None:
+        if self._selected_image_at is None:
+            return None
+        fragment = next(
+            (
+                value for value in self._image_fragments()
+                if value.position() == self._selected_image_at
+            ),
+            None,
+        )
+        if fragment is None:
+            return None
+        image_format = fragment.charFormat().toImageFormat()
+        image_name = str(image_format.name() or "")
+        match = _IMAGE_ID_RE.fullmatch(image_name)
+        if match is None or self.store is None:
+            return None
+        attachment = self.store.attachment(int(match.group(1)))
+        if attachment is None:
+            return None
+
+        image = self.document().resource(
+            QTextDocument.ResourceType.ImageResource, QUrl(image_name),
+        )
+        if not isinstance(image, QImage) or image.isNull():
+            try:
+                image = QImage.fromData(base64.b64decode(str(attachment["data_base64"])))
+            except (TypeError, ValueError):
+                return None
+        if image.isNull():
+            return None
+
+        selection = QTextCursor(self.document())
+        selection.setPosition(fragment.position())
+        selection.setPosition(
+            fragment.position() + fragment.length(),
+            QTextCursor.MoveMode.KeepAnchor,
+        )
+        html = QTextDocumentFragment(selection).toHtml()
+        mime = QMimeData()
+        mime.setHtml(html)
+        mime.setImageData(image)
+        set_json(mime, BLOCK_MIME, {
+            "version": 1,
+            "kind": "image",
+            "html": html,
+            "text": "",
+            "blocks": selected_block_metadata(selection, self.heading_level),
+            "pages": {"version": 1, "roots": [], "notes": [], "attachments": []},
+            "attachments": [dict(attachment)],
+        })
+        return mime
+
+    def copy_selected_image(self) -> bool:
+        mime = self._selected_image_mime()
+        if mime is None:
+            return False
+        QApplication.clipboard().setMimeData(mime)
+        return True
+
     def _page_ids_for_html(self, html: str) -> list[int]:
         if self.store is None:
             return []
@@ -4045,6 +4123,7 @@ class RichMemoTextEdit(QTextEdit):
                     payload.get("attachments") or [], int(self.note_id),
                 )
             html = rewrite_cloned_content(html, page_batch.get("id_map") or {}, loose_map)
+            self._register_content_images(html)
             start = self.textCursor().selectionStart()
             paste_toggle = None if self.textCursor().hasSelection() else self._parent_toggle(
                 self.textCursor().block()
@@ -4437,6 +4516,12 @@ class RichMemoTextEdit(QTextEdit):
         if event.key() == Qt.Key.Key_Escape and self.block_selection.count():
             self.block_selection.clear()
             return
+        if (event.key() == Qt.Key.Key_C
+                and event.modifiers() == Qt.KeyboardModifier.ControlModifier
+                and self._selected_image_at is not None):
+            self.copy_selected_image()
+            event.accept()
+            return
         if event.key() == Qt.Key.Key_C and event.modifiers() == Qt.KeyboardModifier.ControlModifier and self.block_selection.count():
             self.block_commands.execute("copy")
             return
@@ -4668,6 +4753,15 @@ class RichMemoTextEdit(QTextEdit):
             self.setCurrentCharFormat(continuation_format)
 
     def contextMenuEvent(self, event) -> None:
+        image = self.image_at(event.pos())
+        if image is not None:
+            self._selected_image_at = image.position()
+            self.viewport().update()
+            menu = QMenu(self)
+            copy_image = menu.addAction("이미지 복사\tCtrl+C")
+            copy_image.triggered.connect(self.copy_selected_image)
+            menu.exec(self._context_menu_position(menu, event.globalPos()))
+            return
         point_cursor = self.cursorForPosition(event.pos())
         point_block = point_cursor.block()
         if self.character_selection.count():
@@ -4953,6 +5047,12 @@ class RichMemoTextEdit(QTextEdit):
         super().mouseDoubleClickEvent(event)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.MiddleButton:
+            block = self._middle_toggle_block_at(event.position())
+            self._middle_toggle_press = block.position() if block is not None else None
+            if block is not None:
+                event.accept()
+                return
         if self._fold_chord_active:
             self._fold_chord_used = True
         if event.button() == Qt.MouseButton.LeftButton:
@@ -5080,6 +5180,15 @@ class RichMemoTextEdit(QTextEdit):
         return float(self.cursorRect(spot).left())
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.MiddleButton:
+            pressed = self._middle_toggle_press
+            self._middle_toggle_press = None
+            if pressed is not None:
+                block = self._middle_toggle_block_at(event.position())
+                if block is not None and block.position() == pressed:
+                    self.fold_toggle(block)
+                event.accept()
+                return
         if (event.button() == Qt.MouseButton.LeftButton
                 and (self._image_move_press is not None or self._table_width_drag is not None
                      or self._claimed_press)):

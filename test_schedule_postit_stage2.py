@@ -160,16 +160,17 @@ class SchedulePostitModelTest(unittest.TestCase):
         self.assertEqual([(item.item_id, item.title) for item in shown], [(today_note, "예산 집행 마감")])
 
     def test_recurring_completion_marks_only_one_occurrence(self):
+        # 매일 반복은 포스트잇에 그리지 않으므로(2026-10-01) 매주 반복으로 검사한다.
         item_id = self._schedule(
-            "매일 점검", "task", "202609080900", "202609080930",
-            recurrence_rule={"frequency": "daily", "count": 2},
+            "주간 점검", "task", "202609080900", "202609080930",
+            recurrence_rule={"frequency": "weekly", "count": 2},
         )
         prefs = SchedulePostitPreferences()
         first = self.model.items(date(2026, 9, 8), prefs, today=date(2026, 9, 8))[0]
         self.model.set_completed(first, True, COMPLETE_STRIKE)
 
         first_after = self.model.items(date(2026, 9, 8), prefs, today=date(2026, 9, 8))[0]
-        second = self.model.items(date(2026, 9, 9), prefs, today=date(2026, 9, 8))[0]
+        second = self.model.items(date(2026, 9, 15), prefs, today=date(2026, 9, 8))[0]
         self.assertTrue(first_after.completed)
         self.assertFalse(second.completed)
         self.assertEqual(self.store.schedules.item(item_id)["status"], "pending")

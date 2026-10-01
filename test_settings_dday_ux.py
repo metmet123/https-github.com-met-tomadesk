@@ -368,6 +368,11 @@ class SettingsRoomTest(unittest.TestCase):
         self.assertIs(self.dialog.deadline_card.parentWidget(), self.dialog.schedule_page)
         self.assertEqual(self.dialog._deadline_columns, 3)
 
+    def test_quick_schedule_hotkey_is_on_schedule_page(self):
+        builder = self.dialog.hotkey_builders["quick_schedule_hotkey"]
+        self.assertIs(builder.parentWidget().parentWidget(), self.dialog.deadline_card)
+        self.assertNotIn(builder.parentWidget(), self.dialog.hotkey_field_widgets)
+
     def test_the_settings_categories_include_external_ai(self):
         self.assertEqual(self.dialog.settings_tabs.count(), 5)
         self.assertEqual(

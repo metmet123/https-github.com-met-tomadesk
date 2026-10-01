@@ -40,6 +40,15 @@ def normalize_rule(value) -> dict:
     }
 
 
+def is_daily_repeat(item) -> bool:
+    """매일 반복 일정.  할 일 목록·캘린더에는 그리지 않고 알림과 검색으로만 다룬다."""
+    try:
+        rule = item["recurrence_rule"]
+    except (KeyError, IndexError, TypeError):
+        return False
+    return normalize_rule(rule)["frequency"] == "daily"
+
+
 def expand_occurrences(item, range_start: datetime, range_end: datetime) -> list[Occurrence]:
     start = datetime.strptime(str(item["start_at"]), DATETIME_FMT)
     end = datetime.strptime(str(item["end_at"]), DATETIME_FMT)

@@ -5,7 +5,7 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QMimeData, Qt, QUrl
 from PyQt6.QtGui import QColor, QKeyEvent, QTextCharFormat, QTextCursor
 from PyQt6.QtWidgets import QApplication
 
@@ -45,6 +45,38 @@ class PhaseOneClipboardTest(unittest.TestCase):
         editor.set_note_context(note_id)
         self.widgets.append(editor)
         return editor
+
+    def test_single_web_link_pastes_visible_url_without_changing_mixed_html(self):
+        address = "https://platform.openai.com/settings/organization/tunnels"
+        source = QMimeData()
+        source.setText("Tunnels - OpenAI API")
+        source.setHtml(f'<p><a href="{address}">Tunnels - OpenAI API</a></p>')
+        editor = self.editor()
+        editor.insertFromMimeData(source)
+        self.assertEqual(editor.toPlainText(), address)
+        self.assertIn(f'href="{address}"', editor.toHtml())
+        self.assertEqual(editor.textCursor().position(), len(address))
+
+        address_text = QMimeData()
+        address_text.setText(address)
+        address_text.setHtml(f'<a href="{address}">Tunnels - OpenAI API</a>')
+        address_editor = self.editor()
+        address_editor.insertFromMimeData(address_text)
+        self.assertEqual(address_editor.toPlainText(), address)
+
+        uri_source = QMimeData()
+        uri_source.setText("Tunnels - OpenAI API")
+        uri_source.setUrls([QUrl(address)])
+        uri_editor = self.editor()
+        uri_editor.insertFromMimeData(uri_source)
+        self.assertEqual(uri_editor.toPlainText(), address)
+
+        mixed = QMimeData()
+        mixed.setText("참고: Tunnels - OpenAI API")
+        mixed.setHtml(f'<p>참고: <a href="{address}">Tunnels - OpenAI API</a></p>')
+        mixed_editor = self.editor()
+        mixed_editor.insertFromMimeData(mixed)
+        self.assertEqual(mixed_editor.toPlainText(), "참고: Tunnels - OpenAI API")
 
     def test_orphan_internal_anchor_is_removed_but_marked_links_remain(self):
         target = self.store.create_note("대상", "")

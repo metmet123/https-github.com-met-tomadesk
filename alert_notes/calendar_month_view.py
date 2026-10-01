@@ -166,7 +166,7 @@ class CalendarMonthView(QTableWidget):
             elif column >= 5:
                 item.setBackground(QColor("#FBFCFF"))
             if events:
-                background, foreground = CATEGORY_COLORS.get(str(events[0]["category"]), ("#E7F0FF", "#234F9A"))
+                background, foreground = events[0].get("category_colors") or CATEGORY_COLORS.get(str(events[0]["category"]), ("#E7F0FF", "#234F9A"))
                 item.setBackground(QColor(background))
                 item.setForeground(QColor("#64748B" if events[0]["status"] == "completed" else foreground))
             if day == today:

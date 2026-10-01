@@ -10,14 +10,18 @@ from __future__ import annotations
 
 from datetime import datetime, time, timedelta
 
-from PyQt6.QtCore import QDate, QEvent, QPoint, QRect, QSize, QTime, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QCursor, QGuiApplication, QIcon, QKeySequence, QPainter, QPixmap, QShortcut
+from PyQt6.QtCore import QDate, QEvent, QPoint, QRect, QSize, QTime, QTimer, Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QCursor, QGuiApplication, QIcon, QKeySequence, QPainter, QPainterPath, QPen, QPixmap, QShortcut
 from PyQt6.QtWidgets import (
-    QAbstractSpinBox, QApplication, QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu, QMessageBox,
-    QPushButton, QScrollArea, QSizePolicy, QTextEdit, QVBoxLayout, QWidget, QBoxLayout,
+    QAbstractSpinBox, QApplication, QComboBox, QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu, QMessageBox,
+    QPushButton, QScrollArea, QSizePolicy, QTextEdit, QVBoxLayout, QWidget, QBoxLayout, QWidgetAction, QLayout,
 )
 
-from .categories import CATEGORIES, CATEGORY_COLORS, category_name
+from .categories import (
+    category_spec, schedule_categories,
+    schedule_category_colors, schedule_category_name, recommend_schedule_category,
+)
+from .schedule_category_dialog import ScheduleCategoryDialog
 from .datetime_input import CompactDateEdit, CompactTimeEdit
 from . import ko_schedule_parser
 from .note_shortcuts import TIME_SHORTCUTS, bind_time_shortcuts, modifier_setting, shortcut_text
@@ -36,6 +40,9 @@ POPOVER_WIDTH = 336
 # 최소 폭이다.  자리가 이보다 좁으면 폭을 줄이는 대신 왼쪽으로 붙여 세운다.
 POPOVER_MIN_WIDTH = 300
 POPOVER_MAX_WIDTH = POPOVER_WIDTH + 72
+
+
+UNTITLED_SCHEDULE = "제목없음"
 
 
 class _ParseSummaryLabel(QLabel):
@@ -58,6 +65,7 @@ class SchedulePopover(QFrame):
     deleted = pyqtSignal(int)
     full_edit_requested = pyqtSignal(dict)
     closed = pyqtSignal()
+    categories_changed = pyqtSignal()
 
     def __init__(self, store, parent=None):
         super().__init__(parent)
@@ -69,12 +77,14 @@ class SchedulePopover(QFrame):
         self.setMinimumWidth(POPOVER_WIDTH)
         self.setMaximumWidth(POPOVER_MAX_WIDTH)
         self.store = store
+        self._category_specs = schedule_categories(store)
         self.item_id: int | None = None
         self.occurrence_at: str | None = None
         self._base: dict = {}
-        self._category = CATEGORIES[0][1]
+        self._category = self._category_specs[0]["id"]
         self._all_day = False
         self._time_mode = "range"
+        self._end_mode = "end"
         self._weekday_repeat = False
         self._detail_alarm_invalid = False
         self._start = datetime.now().replace(second=0, microsecond=0)
@@ -95,6 +105,8 @@ class SchedulePopover(QFrame):
         self._parsed_time_signature = None
         self._parsed_date_signature = None
         self._auto_reminders: set[int] = set()
+        self._time_fixed_on_open = True
+        self._auto_category = False
         self._manual_day = None
         self._manual_time = None
         self._origin: tuple[datetime, datetime] | None = None
@@ -111,8 +123,8 @@ class SchedulePopover(QFrame):
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
         self.shell_layout = root
-        root.setContentsMargins(16, 11, 16, 11)
-        root.setSpacing(7)
+        root.setContentsMargins(16, 12, 16, 12)
+        root.setSpacing(8)
 
         header = QHBoxLayout()
         header.setSpacing(8)
@@ -125,8 +137,22 @@ class SchedulePopover(QFrame):
         self.heading = QLabel("새 일정")
         self.heading.setObjectName("popoverHeading")
         header.addWidget(self.heading)
-        self.range_label = QLabel()
-        self.range_label.setObjectName("popoverRange")
+        self.range_label = QPushButton()
+        self.range_label.setObjectName("popoverHeaderDate")
+        self.range_label.setAccessibleName("일정 날짜 변경")
+        self.range_label.setToolTip("날짜 변경")
+        self.date_menu = QMenu(self.range_label)
+        date_action = QWidgetAction(self.date_menu)
+        date_host = QWidget()
+        date_host_layout = QHBoxLayout(date_host)
+        date_host_layout.setContentsMargins(8, 8, 8, 8)
+        self.date_edit = _flat_field(CompactDateEdit(), "popoverDateField", 156)
+        self.date_edit.setCalendarPopup(True)
+        self.date_edit.setAccessibleName("일정 날짜")
+        date_host_layout.addWidget(self.date_edit)
+        date_action.setDefaultWidget(date_host)
+        self.date_menu.addAction(date_action)
+        self.range_label.setMenu(self.date_menu)
         header.addWidget(self.range_label)
         header.addStretch()
         self.clear_detail_button = QPushButton("설정 해제")
@@ -135,9 +161,11 @@ class SchedulePopover(QFrame):
         self.clear_detail_button.hide()
         header.addWidget(self.clear_detail_button)
         # 조작법을 문장으로 설명하는 대신, 닫는 키를 그 자리에 눌러 볼 수 있게 둔다.
-        self.escape_button = QPushButton("Esc")
+        self.escape_button = QPushButton("×")
         self.escape_button.setObjectName("popoverEscButton")
         self.escape_button.setAccessibleName("일정 입력 닫기")
+        self.escape_button.setToolTip("Esc")
+        self.escape_button.setFixedSize(28, 28)
         header.addWidget(self.escape_button)
         root.addLayout(header)
 
@@ -145,10 +173,13 @@ class SchedulePopover(QFrame):
         # 저장 버튼은 늘 제자리에 남는다.
         self.body = QWidget()
         self.body.setAutoFillBackground(False)
+        self.body.setMinimumWidth(0)
+        self.body.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         body_root = QVBoxLayout(self.body)
         self.body_layout = body_root
+        body_root.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
         body_root.setContentsMargins(0, 0, 0, 0)
-        body_root.setSpacing(4)
+        body_root.setSpacing(8)
         self.body_scroll = QScrollArea()
         self.body_scroll.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.body_scroll.setWidget(self.body)
@@ -172,71 +203,69 @@ class SchedulePopover(QFrame):
         self.title_edit.setObjectName("popoverTitleEdit")
         self.title_edit.setPlaceholderText("제목 추가")
         self.title_edit.setAccessibleName("일정 제목")
+        self.title_edit.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.title_edit.setMinimumWidth(0)
         root.addWidget(self.title_edit)
 
-        # 무엇을 날짜로 읽었는지 적는 줄.  파서가 틀렸을 때 저장 전에 보인다.
+        # 해석 설명은 제목 입력의 툴팁에만 둔다. 기존 참조용 위젯은 행을 차지하지 않는다.
         self.parse_label = _ParseSummaryLabel()
         self.parse_label.setObjectName("popoverParse")
         self.parse_label.setWordWrap(False)
         self.parse_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.parse_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
-        self.parse_label.setFixedHeight(36)
-        root.addWidget(self.parse_label)
+        self.parse_label.hide()
+
+        time_summary_row = QHBoxLayout()
+        time_summary_row.setSpacing(6)
+        self.time_icon = QLabel()
+        self.time_icon.setPixmap(_schedule_icon("clock").pixmap(18, 18))
+        self.time_icon.setAccessibleName("시간")
+        time_summary_row.addWidget(self.time_icon)
+        self.time_summary_button = QPushButton()
+        self.time_summary_button.setObjectName("popoverTimeSummary")
+        self.time_summary_button.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.time_summary_button.setAccessibleName("일정 시간 수정")
+        self.time_summary_button.clicked.connect(self._toggle_time_summary)
+        time_summary_row.addWidget(self.time_summary_button, 1)
+        self.duration_label = QLabel()
+        self.duration_label.setObjectName("popoverDurationText")
+        time_summary_row.addWidget(self.duration_label)
+        root.addLayout(time_summary_row)
 
         chips = QHBoxLayout()
-        chips.setSpacing(6)
-        self.point_chip = QPushButton()
-        self.point_chip.setObjectName("popoverTimeChip")
-        self.point_chip.setCheckable(True)
-        self.point_chip.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
-        self.point_chip.setAccessibleName("종료 없는 시각")
-        chips.addWidget(self.point_chip, 5)
-        self.time_chip = QPushButton()
-        self.time_chip.setObjectName("popoverTimeChip")
-        self.time_chip.setCheckable(True)
-        self.time_chip.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
-        self.time_chip.setAccessibleName("시작과 종료 시각")
-        chips.addWidget(self.time_chip, 8)
-        self.duration_chip = QPushButton("1시간")
-        self.duration_chip.setObjectName("popoverDurationChip")
-        self.duration_chip.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
-        self.duration_chip.setAccessibleName("길이 선택")
-        chips.addWidget(self.duration_chip, 6)
+        chips.setContentsMargins(24, 0, 0, 0)
+        chips.setSpacing(0)
+        self.time_chip = QPushButton("종료 시각")
+        self.duration_chip = QPushButton("소요")
+        self.point_chip = QPushButton("종료 없음")
+        for index, button in enumerate((self.time_chip, self.duration_chip, self.point_chip)):
+            button.setObjectName("popoverEndModeSegment")
+            button.setProperty("segment", ("first", "middle", "last")[index])
+            button.setCheckable(True)
+            button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+            chips.addWidget(button)
         chips.addStretch()
         root.addLayout(chips)
 
-        # 날짜·시작·종료를 한 줄에 세우면 팝오버 폭(336px)을 훌쩍 넘겨 오른쪽이
-        # 잘렸다.  날짜를 위로 올리고 시작–종료만 나란히 둔다.
         self.time_row = QWidget()
-        time_layout = QVBoxLayout(self.time_row)
-        time_layout.setContentsMargins(0, 0, 0, 0)
-        time_layout.setSpacing(6)
-        self.date_edit = _flat_field(CompactDateEdit(), "popoverDateField", 156)
-        self.date_edit.setCalendarPopup(True)
-        self.date_edit.setAccessibleName("일정 날짜")
-        date_row = QHBoxLayout()
-        date_row.setSpacing(6)
-        date_row.addWidget(self.date_edit)
-        date_row.addStretch()
-        time_layout.addLayout(date_row)
-        span_row = QHBoxLayout()
+        span_row = QHBoxLayout(self.time_row)
+        span_row.setContentsMargins(24, 0, 0, 0)
         span_row.setSpacing(6)
         self.start_time_edit = _flat_field(CompactTimeEdit(), "popoverTimeField", 104)
         self.start_time_edit.setAccessibleName("시작 시각")
         self.end_time_edit = _flat_field(CompactTimeEdit(), "popoverTimeField", 104)
         self.end_time_edit.setAccessibleName("종료 시각")
-        self.time_dash = QLabel("–")
+        self.time_dash = QLabel("-")
         self.time_dash.setObjectName("popoverFieldLabel")
         span_row.addWidget(self.start_time_edit)
         span_row.addWidget(self.time_dash)
         span_row.addWidget(self.end_time_edit)
         span_row.addStretch()
-        time_layout.addLayout(span_row)
         self.time_row.hide()
         root.addWidget(self.time_row)
         self.duration_row = QWidget()
         duration_layout = QVBoxLayout(self.duration_row)
-        duration_layout.setContentsMargins(0, 2, 0, 2)
+        duration_layout.setContentsMargins(24, 0, 0, 0)
         for presets in (DURATION_PRESETS[:3], DURATION_PRESETS[3:]):
             row = QHBoxLayout()
             for label, minutes in presets:
@@ -248,24 +277,34 @@ class SchedulePopover(QFrame):
         self.duration_row.hide()
         root.addWidget(self.duration_row)
 
-        self.alarm_label = QLabel("알림")
-        self.alarm_label.setObjectName("popoverFieldLabel")
-        root.addWidget(self.alarm_label)
         alarm_row = QHBoxLayout()
         alarm_row.setSpacing(5)
+        self.alarm_icon = QLabel()
+        self.alarm_icon.setPixmap(_schedule_icon("bell").pixmap(16, 16))
+        self.alarm_icon.setAccessibleName("알림")
+        alarm_row.addWidget(self.alarm_icon)
+        self.none_reminder_button = QPushButton("없음")
+        self.none_reminder_button.setObjectName("popoverAlarmChip")
+        self.none_reminder_button.setCheckable(True)
         self.at_time_button = QPushButton("정각")
-        self.at_time_button.setObjectName("popoverAlarmNow")
+        self.at_time_button.setObjectName("popoverAlarmChip")
         self.at_time_button.setCheckable(True)
         self.at_time_button.setToolTip("일정 시작 시각에 알림")
-        self.five_before_button = QPushButton("5분 전")
-        self.five_before_button.setObjectName("popoverAlarmFive")
+        self.five_before_button = QPushButton("5분")
+        self.five_before_button.setObjectName("popoverAlarmChip")
         self.five_before_button.setCheckable(True)
+        self.ten_before_button = QPushButton("10분")
+        self.ten_before_button.setObjectName("popoverAlarmChip")
+        self.ten_before_button.setCheckable(True)
         self.reminder_edit = QLineEdit()
         self.reminder_edit.setObjectName("popoverAlarmInput")
-        self.reminder_edit.setPlaceholderText("분 전 입력")
+        self.reminder_edit.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.reminder_edit.setMinimumWidth(50)
+        self.reminder_edit.setPlaceholderText("예: 10, 5, 3분 전")
         self.reminder_edit.setToolTip("예: 10, 5, 3 → 각각 10분·5분·3분 전 알림 (최대 5개)")
         self.reminder_edit.setAccessibleName("알림 시간 직접 입력")
-        for button in (self.at_time_button, self.five_before_button):
+        for button in (self.none_reminder_button, self.at_time_button, self.five_before_button,
+                       self.ten_before_button):
             alarm_row.addWidget(button)
         alarm_row.addWidget(self.reminder_edit, 1)
         self.reminder_chip = QPushButton("상세")
@@ -276,35 +315,21 @@ class SchedulePopover(QFrame):
         alarm_row.addWidget(self.reminder_chip)
         root.addLayout(alarm_row)
 
-        self.category_label = QLabel("분류")
-        self.category_label.setObjectName("popoverFieldLabel")
-        root.addWidget(self.category_label)
         category_row = QHBoxLayout()
-        category_row.setSpacing(3)
+        category_row.setSpacing(4)
+        self.category_row = category_row
+        self.category_icon = QLabel()
+        self.category_icon.setPixmap(_schedule_icon("tag").pixmap(16, 16))
+        self.category_icon.setAccessibleName("분류")
+        category_row.addWidget(self.category_icon)
         self.category_chips = {}
-        for name, key in CATEGORIES:
-            chip = QPushButton(name)
-            chip.setObjectName("popoverCategoryChip")
-            chip.setCheckable(True)
-            chip.setAccessibleName(f"{name} 분류")
-            dot = QPixmap(10, 10)
-            dot.fill(Qt.GlobalColor.transparent)
-            painter = QPainter(dot)
-            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(CATEGORY_COLORS[key][1]))
-            painter.drawEllipse(1, 1, 8, 8)
-            painter.end()
-            chip.setIcon(QIcon(dot))
-            chip.setProperty("categoryDot", QIcon(dot))
-            chip.setIconSize(QSize(10, 10))
-            chip.clicked.connect(lambda _checked=False, value=key: self._pick_category(value, manual=True))
-            self.category_chips[key] = chip
-            category_row.addWidget(chip)
+        self.category_label = self.category_icon
+        self._render_category_chips()
         root.addLayout(category_row)
 
         extras = QHBoxLayout()
         self.extras_layout = extras
+        extras.setContentsMargins(24, 0, 0, 0)
         extras.setSpacing(4)
         self.repeat_chip = _add_chip("반복", "반복 설정")
         self.memo_chip = _add_chip("메모", "메모 추가")
@@ -318,7 +343,11 @@ class SchedulePopover(QFrame):
         self.reminder_details.hide()
         root.addWidget(self.reminder_details)
         root.removeWidget(self.reminder_details)
-        root.insertWidget(root.indexOf(self.category_label), self.reminder_details)
+        category_index = next(
+            (index for index in range(root.count()) if root.itemAt(index).layout() is self.category_row),
+            root.count(),
+        )
+        root.insertWidget(category_index, self.reminder_details)
 
         self.repeat_combo = QComboBox()
         for label, key in REPEAT_CHOICES:
@@ -341,25 +370,24 @@ class SchedulePopover(QFrame):
         self.dday_hint.hide()
         root.addWidget(self.dday_hint)
 
-        # 접기/해제는 헤더를 밀어내지 않고 펼친 설정 아래에 둔다.
+        # 세부 영역은 각 필/칩의 ▴ 토글로 닫는다. 설정 해제만 필요한 경우에만
+        # 작은 보조 동작을 남긴다.
         header.removeWidget(self.back_button)
         header.removeWidget(self.clear_detail_button)
         self.detail_actions = QWidget()
         action_row = QHBoxLayout(self.detail_actions)
         action_row.setContentsMargins(0, 0, 0, 0)
-        action_row.addWidget(self.back_button)
         action_row.addWidget(self.clear_detail_button)
         action_row.addStretch()
         root.addWidget(self.detail_actions)
         self.detail_actions.hide()
 
-        divider = QFrame()
-        divider.setObjectName("popoverDivider")
-        divider.setFrameShape(QFrame.Shape.HLine)
-        shell.addWidget(divider)
-
-        footer = QHBoxLayout()
+        footer_host = QWidget()
+        footer_host.setObjectName("popoverFooter")
+        footer_host.setStyleSheet("QWidget#popoverFooter { border-top: 1px solid #dce3ec; }")
+        footer = QHBoxLayout(footer_host)
         self.footer_layout = footer
+        footer.setContentsMargins(0, 8, 0, 0)
         footer.setSpacing(8)
         self.full_edit_button = QPushButton("전체 편집 ↗")
         self.full_edit_button.setObjectName("popoverLinkButton")
@@ -373,18 +401,11 @@ class SchedulePopover(QFrame):
         footer.addStretch()
         self.save_button = QPushButton("저장")
         self.save_button.setObjectName("primaryButton")
-        self.save_button.setAccessibleName("일정 저장")
+        self.save_button.setAccessibleName("일정 저장, Ctrl+S")
+        self.save_button.setToolTip("일정 저장 (Ctrl+S)")
         self.save_button.setMinimumWidth(52)
-        save_column = QVBoxLayout()
-        save_column.setContentsMargins(0, 0, 0, 0)
-        save_column.setSpacing(1)
-        save_column.addWidget(self.save_button)
-        self.save_hint = QLabel("Ctrl+S")
-        self.save_hint.setObjectName("popoverSaveShortcutHint")
-        self.save_hint.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        save_column.addWidget(self.save_hint)
-        footer.addLayout(save_column)
-        shell.addLayout(footer)
+        footer.addWidget(self.save_button)
+        shell.addWidget(footer_host)
 
         self.escape_button.clicked.connect(self._escape_requested)
         self.save_button.clicked.connect(self.save)
@@ -392,7 +413,7 @@ class SchedulePopover(QFrame):
         self.delete_button.clicked.connect(self._delete)
         self.point_chip.clicked.connect(lambda: self._select_time_mode("point"))
         self.time_chip.clicked.connect(lambda: self._select_time_mode("range"))
-        self.duration_chip.clicked.connect(self._pick_duration)
+        self.duration_chip.clicked.connect(lambda: self._select_time_mode("duration"))
         self.reminder_chip.toggled.connect(self._toggle_reminder_view)
         for chip, widget in ((self.repeat_chip, self.repeat_combo), (self.memo_chip, self.memo_edit),
                              (self.dday_chip, self.dday_hint)):
@@ -402,17 +423,21 @@ class SchedulePopover(QFrame):
         self.end_time_edit.timeChanged.connect(self._time_edited)
         self.title_edit.textChanged.connect(self._title_changed)
         self.title_edit.token_double_clicked.connect(self._cancel_parsed_token)
-        self.reminder_edit.textEdited.connect(self._reminder_text_edited)
+        # 제목 칸이 곧 한 줄 입력이다.  Enter로 바로 저장한다.
+        self.title_edit.returnPressed.connect(self.save)
+        self.reminder_edit.textChanged.connect(self._reminder_text_edited)
+        self.none_reminder_button.clicked.connect(self._clear_reminders)
         self.at_time_button.clicked.connect(lambda checked: self._select_main_reminder(0, checked))
         self.five_before_button.clicked.connect(lambda checked: self._select_main_reminder(5, checked))
+        self.ten_before_button.clicked.connect(lambda checked: self._select_main_reminder(10, checked))
         self.repeat_combo.activated.connect(self._repeat_combo_activated)
         self.repeat_combo.currentIndexChanged.connect(self._sync_extra_labels)
         self.repeat_chip.clicked.connect(lambda _checked: self._touched.add("repeat"))
         self.repeat_chip.toggled.connect(lambda _checked: self._sync_reminder_repeat_buttons())
         self._normal_reminder_view_widgets = [
             self.editing_label, self.title_edit, self.parse_label, self.point_chip, self.time_chip,
-            self.duration_chip, self.time_row, self.alarm_label, self.at_time_button,
-            self.five_before_button, self.reminder_edit, self.category_label,
+            self.duration_chip, self.time_row, self.alarm_icon, self.none_reminder_button, self.at_time_button,
+            self.five_before_button, self.ten_before_button, self.reminder_edit, self.category_icon,
             *self.category_chips.values(), self.reminder_chip, self.repeat_chip, self.memo_chip,
             self.dday_chip, self.repeat_combo, self.memo_edit, self.dday_hint,
         ]
@@ -516,11 +541,16 @@ class SchedulePopover(QFrame):
     # ------------------------------------------------------------- 열기/닫기 --
     def open_new(
         self, start: datetime, end: datetime | None = None,
-        *, relative_base: datetime | None = None,
+        *, relative_base: datetime | None = None, time_given: bool = True,
     ) -> None:
-        """드래그·클릭한 시간을 그대로 기본값으로 받는다."""
+        """드래그·클릭한 시간을 그대로 기본값으로 받는다.
+
+        ``time_given`` 이 False 면 시각은 ‘지금’으로 채워 둔 자리일 뿐이라
+        사람이 시간을 정하기 전까지 정각 알림을 켜지 않는다.
+        """
         self._reload_reminder_shortcuts()
         self._reset()
+        self._time_fixed_on_open = bool(time_given)
         self._set_range(start, end or start + timedelta(hours=1))
         # 자연어가 날짜를 말하지 않거나 지웠을 때 돌아올 자리.
         self._origin = (self._start, self._end)
@@ -577,6 +607,8 @@ class SchedulePopover(QFrame):
         finally:
             self._loading = False
         self._pick_category(str(item["category"]))
+        # 기존 일정의 저장 분류는 제목의 자동 추천보다 우선한다.
+        self._touched.add("category")
         start = datetime.strptime(str(item["start_at"]), DATETIME_FMT)
         end = datetime.strptime(str(item["end_at"]), DATETIME_FMT)
         if occurrence_at:
@@ -587,6 +619,7 @@ class SchedulePopover(QFrame):
         if str(item["time_mode"]) == "point":
             end = start + timedelta(hours=1)
         self._time_mode = str(item["time_mode"])
+        self._end_mode = "none" if self._time_mode == "point" else "end"
         self._set_range(start, end)
         self._origin = (self._start, self._end)
         details = str(item["details"] or "")
@@ -632,13 +665,27 @@ class SchedulePopover(QFrame):
 
     def _apply_scale_dimensions(self, scale: float) -> None:
         self._ui_scale = scale
-        self.parse_label.setFixedHeight(round(36 * scale))
-        self.shell_layout.setSpacing(3 if scale >= 1.4 else 4 if scale >= 1.1 else 5)
-        self.body_layout.setSpacing(0 if scale >= 1.1 else 1)
+        for widget, height in ((self.escape_button, 28), (self.title_edit, 36),
+                               (self.time_summary_button, 30), (self.time_chip, 26),
+                               (self.duration_chip, 26), (self.point_chip, 26),
+                               (self.none_reminder_button, 28), (self.at_time_button, 28),
+                               (self.five_before_button, 28), (self.ten_before_button, 28),
+                               (self.reminder_edit, 28), (self.reminder_chip, 28),
+                               (self.repeat_chip, 26), (self.memo_chip, 26),
+                               (self.dday_chip, 26), (self.full_edit_button, 28),
+                               (self.save_button, 32)):
+            widget.setFixedHeight(round(height * scale))
+        self.footer_layout.setContentsMargins(0, round(8 * scale), 0, 0)
+        icon_size = round(18 * scale)
+        self.time_icon.setPixmap(_schedule_icon("clock", icon_size).pixmap(icon_size, icon_size))
+        self.alarm_icon.setPixmap(_schedule_icon("bell", icon_size).pixmap(icon_size, icon_size))
+        self.category_icon.setPixmap(_schedule_icon("tag", icon_size).pixmap(icon_size, icon_size))
+        self.shell_layout.setSpacing(round(8 * scale))
+        self.body_layout.setSpacing(round(7 * scale))
         self.reminder_details.layout().setSpacing(0 if scale >= 1.4 else 3)
-        self.setFixedWidth(min(POPOVER_MAX_WIDTH, round(POPOVER_WIDTH + max(0, scale - 1) * 128)))
-        self.reminder_date_edit.setFixedWidth(round(120 + max(0, scale - 1) * 100))
-        self.reminder_time_edit.setFixedWidth(round(84 + max(0, scale - 1) * 24))
+        self.setFixedWidth(_scaled_popover_width(scale))
+        self.reminder_date_edit.setFixedWidth(round(120 + max(0, scale - 1) * 70))
+        self.reminder_time_edit.setFixedWidth(round(84 + max(0, scale - 1) * 16))
         self.date_edit.setFixedWidth(round(156 * scale))
         self.start_time_edit.setFixedWidth(round(104 * scale))
         self.end_time_edit.setFixedWidth(round(104 * scale))
@@ -656,28 +703,26 @@ class SchedulePopover(QFrame):
             self._relayout()
 
     def _relayout(self) -> None:
-        """기본 크기를 유지하되 펼친 내용만큼 아래로 늘리고 화면 안에 제한한다."""
+        """실제 보이는 내용만큼만 높이를 쓰고, 낮은 화면에서만 스크롤한다."""
         self._fit_width()
-        target = 493 if self._ui_scale >= 1.4 else 422 if self._ui_scale >= 1.1 else 369
-        if self._active_detail is not None:
-            detail = self._active_detail
-            extra = detail.sizeHint().height()
-            if detail.hasHeightForWidth():
-                extra = max(extra, detail.heightForWidth(self.body_scroll.viewport().width()))
-            if detail is self.memo_edit:
-                extra = min(extra, detail.maximumHeight())
-            target += extra + self.detail_actions.sizeHint().height() + max(4, self.body_layout.spacing()) * 2
+        self.body_layout.activate()
+        # QScrollArea 뷰포트 프레임/반올림 오차만큼 여유를 줘, 내용이 정확히
+        # 맞는 기본 상태에서 2~4px짜리 가짜 스크롤이 생기지 않게 한다.
+        body_height = max(1, self.body_layout.sizeHint().height() + 6)
+        self.body_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.body_scroll.setFixedHeight(body_height)
+        self.shell_layout.activate()
+        target = self.shell_layout.sizeHint().height()
         bounds = getattr(self, "_standalone_bounds", None)
         if bounds is None and self.parentWidget() is not None:
             bounds = self._bounds_rect()
         if bounds is not None and bounds.height() > 100:
-            target = min(target, bounds.height() - 16)
-        self.body_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.body_scroll.setFixedHeight(0)
-        self.shell_layout.activate()
-        chrome = self.shell_layout.sizeHint().height()
-        self.body_scroll.setFixedHeight(max(100, target - chrome))
-        self.shell_layout.activate()
+            maximum = bounds.height() - 16
+            if target > maximum:
+                overflow = target - maximum
+                self.body_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+                self.body_scroll.setFixedHeight(max(100, body_height - overflow))
+                target = maximum
         self.setFixedHeight(target)
         self._position()
 
@@ -694,8 +739,12 @@ class SchedulePopover(QFrame):
         if bounds.width() <= 0:
             return
         room = max(POPOVER_MIN_WIDTH, min(POPOVER_MAX_WIDTH, bounds.width() - 16))
-        desired = round(POPOVER_WIDTH + max(0, self._ui_scale - 1) * 128)
-        self.setFixedWidth(min(desired, room))
+        desired = _scaled_popover_width(self._ui_scale)
+        width = min(desired, room)
+        changed = self.width() != width
+        self.setFixedWidth(width)
+        if changed and hasattr(self, "category_row"):
+            self._render_category_chips()
 
     def _position(self) -> None:
         anchor = self._anchor
@@ -731,11 +780,13 @@ class SchedulePopover(QFrame):
 
     def _reset(self) -> None:
         self._close_detail_page()
+        self._category_specs = schedule_categories(self.store)
         self.item_id = None
         self.occurrence_at = None
         self._base = {}
         self._all_day = False
         self._time_mode = "range"
+        self._end_mode = "end"
         self._touched.clear()
         self._parser_fields.clear()
         self._parsed = None
@@ -743,13 +794,14 @@ class SchedulePopover(QFrame):
         self._parsed_time_signature = None
         self._parsed_date_signature = None
         self._auto_reminders.clear()
+        self._auto_category = False
         self._manual_day = None
         self._manual_time = None
         self._origin = None
         self._relative_base = None
         self.editing_label.hide()
         self.parse_label.clear()
-        self.parse_label.show()
+        self.parse_label.hide()
         self._loading = True
         try:
             self.title_edit.clear()
@@ -764,7 +816,7 @@ class SchedulePopover(QFrame):
             chip.setChecked(False)
         self.time_row.hide()
         self._sync_reminder_repeat_buttons()
-        self._pick_category(CATEGORIES[0][1])
+        self._pick_category(self._category_specs[0]["id"])
 
     # ---------------------------------------------------------------- 시간 --
     def _set_range(self, start: datetime, end: datetime) -> None:
@@ -789,37 +841,72 @@ class SchedulePopover(QFrame):
             self.end_time_edit.blockSignals(False)
 
     def _sync_time_labels(self) -> None:
-        for button, selected in ((self.point_chip, self._time_mode == "point"),
-                                 (self.time_chip, self._time_mode == "range")):
+        selections = (
+            (self.time_chip, self._time_mode == "range" and self._end_mode == "end"),
+            (self.duration_chip, self._time_mode == "range" and self._end_mode == "duration"),
+            (self.point_chip, self._time_mode == "point"),
+        )
+        for button, selected in selections:
             button.blockSignals(True)
             button.setChecked(selected)
             button.blockSignals(False)
         self.time_dash.setVisible(self._time_mode == "range")
         self.end_time_edit.setVisible(self._time_mode == "range")
+        arrow = "▴" if self._active_detail is self.time_row else "▾"
+        self.range_label.setText(_day_label(self._start))
         if self._all_day:
-            self.range_label.setText(f"{_day_label(self._start)} · 종일")
-            self.time_chip.setText("종일")
-            self.duration_chip.setText("종일")
-            self.point_chip.setText(f"{self._start:%H:%M}")
+            self.time_summary_button.setText(f"종일 {arrow}")
+            self.duration_label.setText("종일")
+            self._apply_default_reminder()
             self._refresh_reminder_details()
             return
-        self.range_label.setText(_day_label(self._start))
-        self.point_chip.setText("종료 없음")
-        self.time_chip.setText(f"{'✓ ' if self._time_mode == 'range' else ''}{self._start:%H:%M}–{self._end:%H:%M}")
-        self.duration_chip.setText("소요 " + _duration_text(self._end - self._start))
+        span = (f"{self._start:%H:%M}" if self._time_mode == "point"
+                else f"{self._start:%H:%M} - {self._end:%H:%M}")
+        self.time_summary_button.setText(f"{span} {arrow}")
+        self.duration_label.setText(
+            "종료 없음" if self._time_mode == "point" else _duration_text(self._end - self._start)
+        )
+        self._apply_default_reminder()
         self._refresh_reminder_details()
 
-    def _select_time_mode(self, mode: str) -> None:
-        collapse = self._active_detail is self.time_row and self._time_mode == mode
-        self._touched.add("time")
-        self._time_mode = mode
-        self._all_day = False
-        self._remember_manual_time()
-        self._sync_time_labels()
-        if collapse:
+    def _apply_default_reminder(self) -> None:
+        """새 일정에 시각이 있으면 정각 알림을 기본으로 켠다.  종일이면 끈다.
+
+        사람이 알림을 고쳤거나 제목에서 알림을 읽었으면 그 값을 따른다.
+        """
+        if (
+            self.item_id is not None or self._loading
+            or "reminder" in self._touched or "reminder" in self._parser_fields
+        ):
+            return
+        timed = self._time_fixed_on_open or self._time_was_given()
+        wanted = [0] if timed and not self._all_day else []
+        if sorted(self._reminder_values()) != wanted:
+            self._set_reminder_values(wanted)
+
+    def _toggle_time_summary(self) -> None:
+        if self._active_detail is self.time_row:
             self._close_detail_page()
         else:
             self._show_detail_page(self.time_row)
+
+    def _select_time_mode(self, mode: str) -> None:
+        self._touched.add("time")
+        self._time_mode = "point" if mode == "point" else "range"
+        self._end_mode = "none" if mode == "point" else mode
+        self._all_day = False
+        if self._time_mode == "range" and self._end <= self._start + timedelta(minutes=1):
+            self._end = self._start + timedelta(hours=1)
+        self._remember_manual_time()
+        self._sync_time_labels()
+        if mode == "duration":
+            if self._active_detail is self.duration_row:
+                self._close_detail_page()
+            else:
+                self._show_detail_page(self.duration_row)
+        else:
+            if self._active_detail is self.duration_row:
+                self._close_detail_page()
         self._relayout()
 
     def _toggle_time_row(self, checked: bool) -> None:
@@ -830,6 +917,7 @@ class SchedulePopover(QFrame):
         self._touched.add("date" if self.sender() is self.date_edit else "time")
         if self.sender() is self.end_time_edit:
             self._time_mode = "range"
+            self._end_mode = "end"
         day = self.date_edit.date().toPyDate()
         start_time = self.start_time_edit.time().toPyTime()
         end_time = self.end_time_edit.time().toPyTime()
@@ -847,7 +935,8 @@ class SchedulePopover(QFrame):
 
     def _remember_manual_time(self) -> None:
         self._manual_time = (
-            self._start.time(), self._end - self._start, self._all_day, self._time_mode,
+            self._start.time(), self._end - self._start, self._all_day,
+            self._time_mode, self._end_mode,
         )
 
     def _pick_duration(self) -> None:
@@ -861,11 +950,13 @@ class SchedulePopover(QFrame):
         if minutes == 0:
             self._all_day = True
             self._time_mode = "range"
+            self._end_mode = "duration"
             self._start = datetime.combine(self._start.date(), time.min)
             self._end = datetime.combine(self._start.date(), time(23, 59))
         else:
             self._all_day = False
             self._time_mode = "range"
+            self._end_mode = "duration"
             self._end = self._start + timedelta(minutes=minutes)
         self._remember_manual_time()
         self._sync_time_widgets()
@@ -874,27 +965,140 @@ class SchedulePopover(QFrame):
         self._relayout()
 
     # ---------------------------------------------------------------- 분류 --
+    def _render_category_chips(self) -> None:
+        while self.category_row.count():
+            item = self.category_row.takeAt(0)
+            if item.widget() is not None:
+                if item.widget() is getattr(self, "category_icon", None):
+                    continue
+                item.widget().hide()
+                item.widget().deleteLater()
+        self.category_chips = {}
+        self.category_row.addWidget(self.category_icon)
+        # 현재 폼의 실제 사용 폭에서 5개까지 배치한다. 선택값은 메뉴에 숨기지 않는다.
+        # 폭은 스타일이 적용된 실제 칩의 sizeHint로 잰다. 팝오버 글꼴로 재면 첫 표시(스타일 적용 전)와
+        # 칩을 누른 뒤의 측정값이 달라져, 선택할 때마다 보이는 칩 수가 바뀐다.
+
+        def make_chip(row) -> QPushButton:
+            name = row["name"]
+            chip = QPushButton(name[:4] + ("…" if len(name) > 4 else ""), self)
+            chip.setObjectName("popoverCategoryChip")
+            chip.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+            chip.setIconSize(QSize(round(6 * self._ui_scale), round(6 * self._ui_scale)))
+            chip.setIcon(_category_dot(schedule_category_colors(self._category_specs, row["id"])[1]))
+            chip.hide()
+            chip.ensurePolished()
+            return chip
+
+        def measured(widget: QPushButton) -> int:
+            widget.ensurePolished()
+            return widget.sizeHint().width()
+
+        form_width = self.form.width() if hasattr(self, "form") else self.width()
+        margins = self.shell_layout.contentsMargins()
+        budget = max(100, form_width - margins.left() - margins.right()
+                     - self.category_icon.sizeHint().width() - self.category_row.spacing())
+        self._category_render_budget = budget
+        selected = category_spec(self._category_specs, self._category)
+        candidates = {row["id"]: make_chip(row) for row in self._category_specs[:5]}
+        if selected is not None and selected["id"] not in candidates:
+            candidates[selected["id"]] = make_chip(selected)
+        widths = {key: measured(chip) for key, chip in candidates.items()}
+        probe = QPushButton(f"+{len(self._category_specs)} ▾", self)
+        probe.setObjectName("popoverCategoryOverflow")
+        probe.setMenu(QMenu(probe))  # 메뉴가 붙은 버튼은 표시 폭이 달라진다.
+        probe.hide()
+        more_width = measured(probe)
+        probe.deleteLater()
+        visible = self._category_specs[:1]
+        for count in range(min(5, len(self._category_specs)), 0, -1):
+            trial = self._category_specs[:count]
+            if selected is not None and selected not in trial:
+                trial = [*trial[:-1], selected]
+            has_more = len(self._category_specs) > count
+            required = sum(widths[row["id"]] for row in trial)
+            required += self.category_row.spacing() * (len(trial) - 1 + int(has_more))
+            required += more_width if has_more else 0
+            if required <= budget:
+                visible = trial
+                break
+        visible_ids = {row["id"] for row in visible}
+        for key, chip in candidates.items():
+            if key not in visible_ids:
+                chip.deleteLater()
+        for row in visible:
+            key, name = row["id"], row["name"]
+            chip = candidates[key]
+            chip.setFixedWidth(widths[key])
+            chip.setFixedHeight(round(24 * self._ui_scale))
+            chip.setCheckable(True)
+            chip.setAccessibleName(f"{name} 분류")
+            chip.clicked.connect(lambda _checked=False, value=key: self._pick_category(value, manual=True))
+            self.category_chips[key] = chip
+            self.category_row.addWidget(chip)
+            chip.show()
+        remaining = [row for row in self._category_specs if row["id"] not in visible_ids]
+        more = QPushButton(f"+{len(remaining)} ▾")
+        more.setObjectName("popoverCategoryOverflow")
+        more.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        more.setFixedWidth(more_width)
+        more.setFixedHeight(round(24 * self._ui_scale))
+        more.setAccessibleName("다른 일정 분류와 관리")
+        menu = QMenu(more)
+        for row in remaining:
+            action = menu.addAction(
+                row["name"],
+                lambda _checked=False, value=row["id"]: self._pick_category(value, manual=True),
+            )
+            action.setCheckable(True)
+            action.setChecked(row["id"] == self._category)
+        if remaining:
+            menu.addSeparator()
+        menu.addAction("관리", self._manage_categories)
+        more.setMenu(menu)
+        self.category_overflow_button = more
+        self.category_manage_button = more
+        if remaining:
+            self.category_row.addWidget(more)
+        else:
+            more.hide()
+        self.category_icon.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        try:
+            self.category_icon.customContextMenuRequested.disconnect()
+        except TypeError:
+            pass
+        self.category_icon.customContextMenuRequested.connect(
+            lambda pos: menu.exec(self.category_icon.mapToGlobal(pos))
+        )
+        self.category_row.addStretch()
+        for key, chip in self.category_chips.items():
+            selected = key == self._category
+            chip.setChecked(selected)
+            chip.setToolTip(f"{schedule_category_name(self._category_specs, key)}{' · 선택됨' if selected else ''}")
+        if hasattr(self, "category_icon"):
+            self.category_icon.setToolTip("분류 · 자동 추천" if self._auto_category else "분류")
+
+    def _manage_categories(self) -> None:
+        dialog = ScheduleCategoryDialog(self.store, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        self.reload_categories()
+        self.categories_changed.emit()
+        self._relayout()
+
+    def reload_categories(self) -> None:
+        self._category_specs = schedule_categories(self.store)
+        if category_spec(self._category_specs, self._category) is None:
+            self._category = self._category_specs[0]["id"]
+            self._auto_category = False
+        self._render_category_chips()
+
     def _pick_category(self, key: str, manual: bool = False) -> None:
         if manual:
             self._touched.add("category")
-        self._category = key if key in self.category_chips else CATEGORIES[0][1]
-        for value, chip in self.category_chips.items():
-            background, foreground = CATEGORY_COLORS.get(value, ("#E7F0FF", "#234F9A"))
-            selected = value == self._category
-            chip.setChecked(selected)
-            chip.setText(category_name(value))
-            if selected:
-                check = QPixmap(10, 10)
-                check.fill(Qt.GlobalColor.transparent)
-                painter = QPainter(check)
-                painter.setPen(QColor("#4263eb"))
-                painter.drawText(check.rect(), Qt.AlignmentFlag.AlignCenter, "✓")
-                painter.end()
-                chip.setIcon(QIcon(check))
-            else:
-                chip.setIcon(chip.property("categoryDot"))
-            chip.setStyleSheet("")
-            chip.setToolTip(f"{category_name(value)}{' · 선택됨' if selected else ''}")
+            self._auto_category = False
+        self._category = key if category_spec(self._category_specs, key) else self._category_specs[0]["id"]
+        self._render_category_chips()
 
     def _toggle_extra(self, widget: QWidget):
         def apply(checked: bool) -> None:
@@ -930,13 +1134,13 @@ class SchedulePopover(QFrame):
         self._page_visibility = {}
         self._active_detail = widget
         widget.show()
+        can_clear = widget in (self.repeat_combo, self.memo_edit, self.dday_hint)
         self.body_layout.removeWidget(self.detail_actions)
         self.body_layout.insertWidget(self.body_layout.indexOf(widget) + 1, self.detail_actions)
-        self.detail_actions.show()
-        self.back_button.setText("접기")
-        self.back_button.setAccessibleName("펼친 설정 접기")
-        self.back_button.show()
-        self.clear_detail_button.setVisible(widget in (self.repeat_combo, self.memo_edit, self.dday_hint))
+        self.detail_actions.setVisible(can_clear)
+        self.back_button.hide()
+        self.clear_detail_button.setVisible(can_clear)
+        self._sync_time_labels()
         self._relayout()
 
     def _close_detail_page(self) -> None:
@@ -954,6 +1158,7 @@ class SchedulePopover(QFrame):
         self.back_button.hide()
         self.clear_detail_button.hide()
         self._sync_extra_labels()
+        self._sync_time_labels()
         self._relayout()
         if self._page_focus is not None and self._page_focus.isVisible():
             self._page_focus.setFocus()
@@ -991,9 +1196,9 @@ class SchedulePopover(QFrame):
         return super().eventFilter(watched, event)
 
     def _sync_extra_labels(self, *_args) -> None:
-        self.repeat_chip.setText(self.repeat_combo.currentText() if self.repeat_chip.isChecked() else "+ 반복")
-        self.memo_chip.setText("메모 있음" if self.memo_chip.isChecked() and self.memo_edit.toPlainText().strip() else "+ 메모")
-        self.dday_chip.setText("D-Day ✓" if self.dday_chip.isChecked() else "+ D-Day")
+        self.repeat_chip.setText("+ 반복")
+        self.memo_chip.setText("+ 메모")
+        self.dday_chip.setText("+ D-Day")
 
     def _escape_requested(self) -> None:
         if self._active_detail is not None:
@@ -1003,12 +1208,18 @@ class SchedulePopover(QFrame):
 
     def _set_reminder_values(self, values) -> None:
         minutes = sorted({int(value) for value in values})[:5]
-        for button, value in ((self.at_time_button, 0), (self.five_before_button, 5)):
+        for button, value in ((self.at_time_button, 0), (self.five_before_button, 5),
+                              (self.ten_before_button, 10)):
             button.blockSignals(True)
             button.setChecked(value in minutes)
             button.blockSignals(False)
+        self.none_reminder_button.blockSignals(True)
+        self.none_reminder_button.setChecked(not minutes)
+        self.none_reminder_button.blockSignals(False)
         self.reminder_edit.blockSignals(True)
-        self.reminder_edit.setText(", ".join(reminder_input_value(value) for value in minutes if value not in (0, 5)))
+        self.reminder_edit.setText(", ".join(
+            reminder_input_value(value) for value in minutes if value not in (0, 5, 10)
+        ))
         self.reminder_edit.blockSignals(False)
         self._refresh_reminder_details()
 
@@ -1025,12 +1236,28 @@ class SchedulePopover(QFrame):
     def _select_main_reminder(self, minutes: int, checked: bool) -> None:
         self._touched.add("reminder")
         self._auto_reminders.clear()
-        self._set_reminder_values([minutes] if checked else [])
+        values = set(self._reminder_values())
+        if checked:
+            values.add(minutes)
+        else:
+            values.discard(minutes)
+        if len(values) > 5:
+            self._show_status("알림은 최대 5개")
+            values.discard(minutes)
+        self._set_reminder_values(values)
 
     def _select_reminder_preset(self, minutes: int, checked: bool) -> None:
         self._touched.add("reminder")
         self._auto_reminders.clear()
-        self._set_reminder_values([minutes] if checked else [])
+        values = set(self._reminder_values())
+        if checked:
+            values.add(minutes)
+        else:
+            values.discard(minutes)
+        if len(values) > 5:
+            self._show_status("알림은 최대 5개")
+            values.discard(minutes)
+        self._set_reminder_values(values)
 
     def _quick_reminder(self, minutes: int, _label: str = "") -> None:
         values = set(self._reminder_values())
@@ -1039,7 +1266,7 @@ class SchedulePopover(QFrame):
         elif len(values) < 5:
             values.add(minutes)
         else:
-            self.range_label.setText("알림은 최대 5개")
+            self._show_status("알림은 최대 5개")
             return
         self._touched.add("reminder")
         self._auto_reminders.discard(minutes)
@@ -1050,8 +1277,9 @@ class SchedulePopover(QFrame):
             return
         self._detail_alarm_invalid = False
         values = self._reminder_values()
-        self.at_time_button.setText("✓ 정각" if 0 in values else "정각")
-        self.five_before_button.setText("✓ 5분 전" if 5 in values else "5분 전")
+        self.none_reminder_button.blockSignals(True)
+        self.none_reminder_button.setChecked(not values)
+        self.none_reminder_button.blockSignals(False)
         self._update_alarm_summary()
         for minutes, button in self.reminder_preset_buttons.items():
             button.setChecked(minutes in values)
@@ -1080,14 +1308,14 @@ class SchedulePopover(QFrame):
         minutes = int((self._start - due).total_seconds() // 60)
         if abs(minutes) > 525600:
             self._detail_alarm_invalid = True
-            self.range_label.setText("시작 전후 365일 이내")
+            self._show_status("시작 전후 365일 이내")
             return
         values = set(self._reminder_values())
         if self._detail_selected_minutes is not None:
             values.discard(self._detail_selected_minutes)
         if len(values) >= 5 and minutes not in values:
             self._detail_alarm_invalid = True
-            self.range_label.setText("알림은 최대 5개")
+            self._show_status("알림은 최대 5개")
             return
         values.add(minutes)
         self._touched.add("reminder")
@@ -1095,7 +1323,7 @@ class SchedulePopover(QFrame):
         self._auto_reminders.discard(minutes)
         self._set_reminder_values(values)
 
-    def _clear_reminders(self) -> None:
+    def _clear_reminders(self, *_args) -> None:
         self._touched.add("reminder")
         self._auto_reminders.clear()
         self._set_reminder_values([])
@@ -1153,6 +1381,7 @@ class SchedulePopover(QFrame):
             text, base=base, base_end=base_end,
             relative_base=self._relative_base,
             ignored_spans=tuple(sorted(self._ignored_tokens)),
+            category_keys={row["name"]: row["id"] for row in self._category_specs},
         )
         self.title_edit.set_token_spans(self._parsed.spans)
         self._apply_parsed(self._parsed)
@@ -1205,8 +1434,9 @@ class SchedulePopover(QFrame):
                               else origin_end - origin_start)
                     self._all_day = parsed.all_day
                     self._time_mode = parsed.time_mode or "range"
+                    self._end_mode = "none" if self._time_mode == "point" else "end"
                 elif self._parsed_time_signature and not parsed_time_signature and self._manual_time is not None:
-                    clock, length, self._all_day, self._time_mode = self._manual_time
+                    clock, length, self._all_day, self._time_mode, self._end_mode = self._manual_time
                 start = datetime.combine(day, clock)
                 self._set_range(start, start + length)
                 if parsed.start is not None:
@@ -1214,11 +1444,14 @@ class SchedulePopover(QFrame):
                 else:
                     fields.discard("time")
             if "category" not in self._touched:
-                if parsed.category:
-                    self._pick_category(parsed.category)
+                recommended = parsed.category or recommend_schedule_category(parsed.title, self._category_specs)
+                if recommended:
+                    self._pick_category(recommended)
+                    self._auto_category = not bool(parsed.category)
                     fields.add("category")
                 elif "category" in fields:
-                    self._pick_category(CATEGORIES[0][1])
+                    self._pick_category(self._category_specs[0]["id"])
+                    self._auto_category = False
                     fields.discard("category")
             if "reminder" not in self._touched:
                 if parsed.reminders:
@@ -1248,13 +1481,16 @@ class SchedulePopover(QFrame):
             self._loading = False
             self._parsed_time_signature = parsed_time_signature
             self._parsed_date_signature = parsed_date_signature
+        self._apply_default_reminder()
+        self.category_icon.setToolTip("분류 · 자동 추천" if self._auto_category else "분류")
         self._show_parse_summary(parsed)
 
     def _show_parse_summary(self, parsed) -> None:
         if parsed is not None and parsed.issues:
             self.parse_label.setText(" · ".join(parsed.issues))
             self.parse_label.setToolTip(self.parse_label.text())
-            self.parse_label.show()
+            self.title_edit.setToolTip(self.parse_label.toolTip())
+            self.parse_label.hide()
             self._relayout()
             return
         self._update_alarm_summary()
@@ -1264,7 +1500,6 @@ class SchedulePopover(QFrame):
         if self._parsed is not None and self._parsed.issues:
             return
         values = self._reminder_values()
-        self.alarm_label.setText("알림" if values else "알림 · 없음")
         kinds = {span.kind for span in self._parsed.spans} if self._parsed else set()
         if getattr(self, "_mini_origin", None) is not None or getattr(self, "_mini_time_selected", False):
             kinds.update(("date", "time"))
@@ -1309,7 +1544,22 @@ class SchedulePopover(QFrame):
         else:
             self.parse_label.clear()
             self.parse_label.setToolTip("")
-        self.parse_label.show()
+        # 이미 지난 시각으로 새 일정을 만들면 제목 툴팁에 한 줄 덧붙여 알린다.
+        past = (
+            "지난 시각입니다. 날짜·시간을 확인해 주세요."
+            if "time" in kinds and self.item_id is None and not self._all_day
+            and self._start < datetime.now() else ""
+        )
+        self.title_edit.setToolTip("\n".join(text for text in (self.parse_label.toolTip(), past) if text))
+        self.parse_label.hide()
+
+    def _show_status(self, message: str) -> None:
+        """입력 경고를 제목 툴팁에 남긴다."""
+        self.parse_label.setText(message)
+        self.parse_label.setToolTip(message)
+        self.title_edit.setToolTip(message)
+        self.parse_label.hide()
+        self._relayout()
 
     def parsed_title(self) -> str:
         """저장에 쓸 제목.  인식한 날짜·표시자는 빼고 남은 말이다."""
@@ -1318,6 +1568,15 @@ class SchedulePopover(QFrame):
         if parsed is None or parsed.is_empty or not self._nlp_enabled():
             return raw
         return parsed.title.strip()
+
+    def _fallback_title(self) -> str:
+        """제목 없이 날짜·시간만 정했을 때 쓸 제목.  기본 팝오버는 제목을 요구한다."""
+        return ""
+
+    def _time_was_given(self) -> bool:
+        """사람이 날짜·시간을 직접 정했는가.  열 때 채워 둔 현재 시각은 치지 않는다."""
+        kinds = {span.kind for span in self._parsed.spans} if self._parsed is not None else set()
+        return bool(kinds & {"date", "time"}) or bool(self._touched & {"date", "time"})             or bool(getattr(self, "_mini_time_selected", False))
 
     # ---------------------------------------------------------------- 저장 --
     def values(self) -> dict:
@@ -1330,7 +1589,7 @@ class SchedulePopover(QFrame):
             end = datetime.combine(start.date(), time(23, 59))
         return {
             "id": self.item_id,
-            "title": self.parsed_title(),
+            "title": self.parsed_title() or self._fallback_title(),
             "details": self.memo_edit.toPlainText() if self.memo_chip.isChecked() else "",
             "item_type": str(base.get("item_type") or "event"),
             "start_at": start.strftime(DATETIME_FMT),
@@ -1364,6 +1623,8 @@ class SchedulePopover(QFrame):
             values.append(0)
         if self.five_before_button.isChecked():
             values.append(5)
+        if self.ten_before_button.isChecked():
+            values.append(10)
         for piece in self.reminder_edit.text().split(","):
             if piece.strip():
                 try:
@@ -1373,7 +1634,8 @@ class SchedulePopover(QFrame):
         return sorted(set(values))
 
     def _save_with_notice(self) -> None:
-        self.save(show_confirmation=True)
+        # Ctrl+S도 저장 버튼과 같다.  저장 확인 창을 한 번 더 띄우지 않는다.
+        self.save()
 
     def save(self, _checked: bool = False, *, show_confirmation: bool = False) -> bool:
         if self._parsed is not None and self._parsed.issues:
@@ -1452,6 +1714,10 @@ class SchedulePopover(QFrame):
 class StandaloneSchedulePopover(SchedulePopover):
     """Show the same compact editor without making the main window visible."""
 
+    def _fallback_title(self) -> str:
+        # 빠른 일정 창: 시간만 적으면 ‘제목없음’으로 저장하고 그 시각에 알린다.
+        return UNTITLED_SCHEDULE if self._time_was_given() else ""
+
     def __init__(self, store):
         super().__init__(store)
         self.setWindowFlags(
@@ -1474,7 +1740,7 @@ class StandaloneSchedulePopover(SchedulePopover):
         self.mini_timeline = MiniScheduleTimeline(store, self)
         self.outer_layout.addWidget(self.mini_timeline)
         self.outer_layout.addWidget(self.form)
-        self.timeline_toggle = QPushButton("시간 선택 ▾")
+        self.timeline_toggle = QPushButton("시간 ▾")
         self.timeline_toggle.setObjectName("popoverAddChip")
         self.timeline_toggle.setCheckable(True)
         self.timeline_toggle.setAccessibleName("시간 선택 펼치기")
@@ -1487,7 +1753,7 @@ class StandaloneSchedulePopover(SchedulePopover):
         self.mini_timeline.selectionCanceled.connect(self._mini_cancel)
         self.mini_timeline.rangePreview.connect(self._mini_preview)
         self.mini_timeline.rangeSelected.connect(self._mini_selected)
-        for label in (self.heading, self.range_label):
+        for label in (self.heading,):
             label.setCursor(Qt.CursorShape.OpenHandCursor)
             label.installEventFilter(self)
 
@@ -1503,30 +1769,38 @@ class StandaloneSchedulePopover(SchedulePopover):
             screen.availableGeometry() if screen is not None else QRect(0, 0, 900, 650)
         )
         now = datetime.now().replace(second=0, microsecond=0)
-        self.open_new(now, now + timedelta(hours=1), relative_base=now)
+        self.open_new(now, now + timedelta(hours=1), relative_base=now, time_given=False)
         self.mini_timeline.set_draft(*self.current_range(), refresh=True)
         self._relayout()
-        self._compact_height = self.height()
-        self.setMinimumHeight(self._compact_height)
+        # 표시되면서 실제 글꼴/QSS 최소 높이가 확정된다. 그 뒤 한 번 더 재면
+        # 아래 시간표를 펼칠 때 푸터가 10px가량 뛰는 초기 지오메트리 오차가 없다.
         self.show()
+        self._relayout()
+        QTimer.singleShot(0, self._relayout)
+        self._compact_height = self.height()
         self.raise_()
         self.activateWindow()
         self.title_edit.setFocus()
 
-    def open_new(self, start, end=None, *, relative_base=None):
+    def open_new(self, start, end=None, *, relative_base=None, time_given=True):
         self._mini_time_selected = False
         self._mini_origin = None
         if hasattr(self, "timeline_toggle"):
             self.timeline_toggle.setChecked(False)
-        super().open_new(start, end, relative_base=relative_base)
+        super().open_new(start, end, relative_base=relative_base, time_given=time_given)
 
     def _relayout(self) -> None:
         if not hasattr(self, "mini_timeline"):
             return super()._relayout()
-        form_width = min(POPOVER_MAX_WIDTH, round(POPOVER_WIDTH + max(0, self._ui_scale - 1) * 128))
+        form_width = _scaled_popover_width(self._ui_scale)
         bounds = self._standalone_bounds
         side = bounds is None or bounds.width() >= form_width + 220 + 24
         self.form.setFixedWidth(form_width)
+        margins = self.shell_layout.contentsMargins()
+        category_budget = max(100, form_width - margins.left() - margins.right()
+                              - self.category_icon.sizeHint().width() - self.category_row.spacing())
+        if getattr(self, "_category_render_budget", None) != category_budget:
+            self._render_category_chips()
         self.outer_layout.removeWidget(self.mini_timeline)
         self.outer_layout.setDirection(QBoxLayout.Direction.LeftToRight if side else QBoxLayout.Direction.TopToBottom)
         if side:
@@ -1541,22 +1815,32 @@ class StandaloneSchedulePopover(SchedulePopover):
         border_width = self.contentsMargins().left() + self.contentsMargins().right()
         border_height = self.contentsMargins().top() + self.contentsMargins().bottom()
         self.setFixedWidth(form_width + (228 if side else 0) + border_width)
-        super()._relayout()
-        base_target = self.height()
-        form_height = base_target - border_height
+        self.body_layout.activate()
+        body_height = max(1, self.body_layout.sizeHint().height() + 6)
+        self.body_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.body_scroll.setFixedHeight(body_height)
+        self.shell_layout.activate()
+        form_height = self.shell_layout.sizeHint().height()
+        maximum = bounds.height() - 16 - border_height if bounds is not None else form_height
+        timeline_height = 0
         if not side and self.timeline_toggle.isChecked():
-            maximum = bounds.height() - 16 if bounds is not None else base_target + 228
-            extra = max(160, min(220, maximum - base_target - 8))
-            form_height = min(form_height, maximum - extra - 8 - border_height)
-            self.mini_timeline.setFixedHeight(extra)
-            self.setFixedHeight(form_height + extra + 8 + border_height)
-        self.body_scroll.setFixedHeight(max(100, self.body_scroll.height() - (base_target - form_height)))
+            timeline_height = max(160, min(220, maximum - form_height - 8))
+            maximum -= timeline_height + 8
+        if form_height > maximum:
+            self.body_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            self.body_scroll.setFixedHeight(max(100, body_height - (form_height - maximum)))
+            form_height = self.shell_layout.sizeHint().height()
         self.form.setFixedHeight(form_height)
+        if side:
+            self.mini_timeline.setFixedHeight(form_height)
+        elif timeline_height:
+            self.mini_timeline.setFixedHeight(timeline_height)
+        self.setFixedHeight(form_height + (timeline_height + 8 if timeline_height else 0) + border_height)
         self.outer_layout.activate()
         self._position()
 
     def _toggle_timeline(self, checked):
-        self.timeline_toggle.setText("시간 선택 ▴" if checked else "시간 선택 ▾")
+        self.timeline_toggle.setText("시간 ▴" if checked else "시간 ▾")
         self.timeline_toggle.setAccessibleName("시간 선택 접기" if checked else "시간 선택 펼치기")
         if checked and self._active_detail is not None:
             self._close_detail_page()
@@ -1585,10 +1869,11 @@ class StandaloneSchedulePopover(SchedulePopover):
             self.mini_timeline.set_draft(self._start, self._end, point=self._time_mode == "point", all_day=self._all_day)
 
     def _mini_started(self):
-        self._mini_origin = (self._start, self._end, self._time_mode, self._all_day)
+        self._mini_origin = (self._start, self._end, self._time_mode, self._all_day, self._end_mode)
 
     def _mini_preview(self, start, end):
         self._time_mode, self._all_day = "range", False
+        self._end_mode = "end"
         self._set_range(start, end)
         self._update_alarm_summary()
 
@@ -1598,12 +1883,13 @@ class StandaloneSchedulePopover(SchedulePopover):
         self._remember_manual_time()
         self._mini_time_selected = True
         self._mini_origin = None
+        self._apply_default_reminder()
         self._update_alarm_summary()
         self.title_edit.setFocus()
 
     def _mini_cancel(self):
         if self._mini_origin is not None:
-            start, end, self._time_mode, self._all_day = self._mini_origin
+            start, end, self._time_mode, self._all_day, self._end_mode = self._mini_origin
             self._mini_origin = None
             self._set_range(start, end)
             self._update_alarm_summary()
@@ -1640,7 +1926,7 @@ class StandaloneSchedulePopover(SchedulePopover):
         return False
 
     def eventFilter(self, watched, event) -> bool:
-        if watched in (self.heading, self.range_label) and self._drag_header_event(event):
+        if watched is self.heading and self._drag_header_event(event):
             return True
         return super().eventFilter(watched, event)
 
@@ -1670,6 +1956,24 @@ def _day_label(value: datetime) -> str:
     return f"{value.month}/{value.day} ({'월화수목금토일'[value.weekday()]})"
 
 
+def _category_dot(color: str) -> QIcon:
+    """분류 칩 앞의 색 점. 아이콘 크기는 칩 쪽 iconSize로 정한다."""
+    dot = QPixmap(16, 16)
+    dot.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(dot)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(color))
+    painter.drawEllipse(2, 2, 12, 12)
+    painter.end()
+    return QIcon(dot)
+
+
+def _scaled_popover_width(scale: float) -> int:
+    """배율이 커질 때 글자와 내부 여백이 1~4px 밖으로 밀리지 않을 폭."""
+    return min(POPOVER_MAX_WIDTH, round(POPOVER_WIDTH + max(0, scale - 1) * 144))
+
+
 def _flat_field(widget, object_name: str, width: int):
     """칩과 같은 말투로 그리되, 스핀 버튼과 달력 버튼은 그대로 둔다.
 
@@ -1684,12 +1988,58 @@ def _flat_field(widget, object_name: str, width: int):
 
 
 def _add_chip(name: str, accessible_name: str) -> QPushButton:
-    chip = QPushButton(f"＋{name}")
+    chip = QPushButton(f"+ {name}")
     chip.setObjectName("popoverAddChip")
+    chip.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+    chip.setMinimumWidth(60)
     chip.setCheckable(True)
     chip.setAccessibleName(accessible_name)
-    chip.toggled.connect(lambda checked, button=chip, label=name: button.setText(f"{'−' if checked else '＋'}{label}"))
+    chip.toggled.connect(
+        lambda _checked, button=chip, label=name: button.setText(f"+ {label}")
+    )
     return chip
+
+
+def _schedule_icon(kind: str, size: int = 18) -> QIcon:
+    """작은 단색 선 아이콘을 그려 OS 이모지 글꼴에 의존하지 않는다."""
+    canvas = QPixmap(size, size)
+    canvas.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(canvas)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.scale(size / 18, size / 18)
+    painter.setPen(QPen(QColor("#4263eb"), 1.5))
+    if kind == "calendar":
+        painter.drawRoundedRect(2, 3, 14, 13, 2, 2)
+        painter.drawLine(2, 7, 16, 7)
+        painter.drawLine(6, 1, 6, 5)
+        painter.drawLine(12, 1, 12, 5)
+    elif kind == "bell":
+        shape = QPainterPath()
+        shape.moveTo(4, 13)
+        shape.lineTo(5.5, 11)
+        shape.lineTo(5.5, 7)
+        shape.cubicTo(5.5, 2, 12.5, 2, 12.5, 7)
+        shape.lineTo(12.5, 11)
+        shape.lineTo(14, 13)
+        shape.closeSubpath()
+        painter.drawPath(shape)
+        painter.drawArc(7, 12, 4, 4, 180 * 16, 180 * 16)
+    elif kind == "clock":
+        painter.drawEllipse(2, 2, 14, 14)
+        painter.drawLine(9, 5, 9, 9)
+        painter.drawLine(9, 9, 12, 11)
+    elif kind == "tag":
+        shape = QPainterPath()
+        shape.moveTo(3, 4)
+        shape.lineTo(9, 2)
+        shape.lineTo(16, 9)
+        shape.lineTo(9, 16)
+        shape.lineTo(2, 9)
+        shape.closeSubpath()
+        painter.drawPath(shape)
+        painter.drawEllipse(6, 5, 2, 2)
+    painter.end()
+    return QIcon(canvas)
 
 
 def _duration_text(span: timedelta) -> str:

@@ -6,13 +6,15 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import Mock, patch
 
-from PyQt6.QtCore import QEvent, QPointF, Qt
-from PyQt6.QtGui import QImage, QKeyEvent, QMouseEvent, QTextCursor
+from PyQt6.QtCore import QEvent, QPoint, QPointF, Qt
+from PyQt6.QtGui import QContextMenuEvent, QImage, QKeyEvent, QMouseEvent, QTextCursor
 from PyQt6.QtWidgets import QApplication
 
 from alert_notes.image_move import move_image
 from alert_notes.block_identity import block_ids
+from alert_notes.memo_clipboard import BLOCK_MIME, get_json
 from alert_notes.rich_memo_edit import IMAGE_USER_WIDTH, RichMemoTextEdit
 from alert_notes.sqlite_store import NoteReminderStore
 from qt_test_support import destroy_widget
@@ -60,6 +62,84 @@ class MemoImageMoveTest(unittest.TestCase):
         self.mouse(QEvent.Type.MouseButtonRelease, point, Qt.MouseButton.NoButton)
         self.assertEqual(self.editor._selected_image_at, self.image().position())
         self.assertEqual(self.editor.content(), before)
+
+    def test_selected_image_ctrl_c_copies_standard_image_and_clones_attachment(self):
+        source = self.image()
+        source_format = source.charFormat().toImageFormat()
+        source_attachment_id = int(source_format.name().rsplit("/", 1)[-1])
+        self.editor._selected_image_at = source.position()
+        before = self.editor.content()
+
+        event = QKeyEvent(
+            QKeyEvent.Type.KeyPress, Qt.Key.Key_C,
+            Qt.KeyboardModifier.ControlModifier,
+        )
+        self.editor.keyPressEvent(event)
+        mime = QApplication.clipboard().mimeData()
+
+        self.assertTrue(event.isAccepted())
+        self.assertTrue(mime.hasImage())
+        self.assertTrue(mime.hasFormat(BLOCK_MIME))
+        payload = get_json(mime, BLOCK_MIME)
+        self.assertEqual(payload["kind"], "image")
+        self.assertEqual(int(payload["attachments"][0]["id"]), source_attachment_id)
+        self.assertEqual(self.editor.content(), before)
+
+        destination_note = self.store.create_note("복사 대상", "")
+        destination = RichMemoTextEdit(self.store)
+        try:
+            destination.set_note_context(destination_note)
+            destination.insertFromMimeData(mime)
+            self.app.processEvents()
+            copied = list(destination._image_fragments())
+            rows = self.store.note_attachments(destination_note)
+            self.assertEqual(len(copied), 1)
+            self.assertEqual(len(rows), 1)
+            self.assertNotEqual(int(rows[0]["id"]), source_attachment_id)
+            copied_format = copied[0].charFormat().toImageFormat()
+            self.assertAlmostEqual(copied_format.width(), source_format.width())
+            self.assertAlmostEqual(copied_format.height(), source_format.height())
+            self.assertIn(f"attachment/{int(rows[0]['id'])}", copied_format.name())
+        finally:
+            destroy_widget(destination, self.app)
+
+    def test_image_context_menu_offers_copy(self):
+        rect = self.editor.image_rect(self.image())
+        point = QPoint(int(rect.left() + 12), int(rect.top() + 12))
+        event = QContextMenuEvent(
+            QContextMenuEvent.Reason.Mouse, point,
+            self.editor.viewport().mapToGlobal(point),
+        )
+
+        action = Mock()
+        with (
+            patch("alert_notes.rich_memo_edit.QMenu.addAction", return_value=action) as add,
+            patch("alert_notes.rich_memo_edit.QMenu.exec", return_value=None),
+        ):
+            self.editor.contextMenuEvent(event)
+
+        self.assertEqual(self.editor._selected_image_at, self.image().position())
+        add.assert_called_once_with("이미지 복사\tCtrl+C")
+        action.triggered.connect.assert_called_once_with(self.editor.copy_selected_image)
+
+    def test_selected_image_pastes_in_same_memo_as_independent_attachment(self):
+        source = self.image()
+        source_id = int(source.charFormat().toImageFormat().name().rsplit("/", 1)[-1])
+        self.editor._selected_image_at = source.position()
+        mime = self.editor._selected_image_mime()
+        self.assertIsNotNone(mime)
+        cursor = self.editor.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        cursor.insertBlock()
+        self.editor.setTextCursor(cursor)
+
+        self.editor.insertFromMimeData(mime)
+        rows = self.store.note_attachments(self.note_id)
+
+        self.assertEqual(len(list(self.editor._image_fragments())), 2)
+        self.assertEqual(len(rows), 2)
+        self.assertIn(source_id, {int(row["id"]) for row in rows})
+        self.assertEqual(len({int(row["id"]) for row in rows}), 2)
 
     def test_move_preserves_attachment_size_and_single_undo(self):
         source = self.image()

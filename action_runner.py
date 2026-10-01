@@ -2,6 +2,7 @@ import json
 import hashlib
 import os
 import re
+import subprocess
 import time
 import webbrowser
 from pathlib import Path
@@ -28,6 +29,7 @@ from macro_playback_config import (
 )
 from stop_monitor import StopHotkeyMonitor
 from window_layout import (
+    bring_window_to_front,
     enumerate_explorer_window_handles,
     enumerate_monitors,
     explorer_window_paths,
@@ -35,6 +37,7 @@ from window_layout import (
     is_window_visible,
     move_window,
     show_explorer_window,
+    window_matches_layout,
 )
 from window_restore import restore_minimized_target
 
@@ -61,6 +64,8 @@ class ActionRunner:
         window_visibility_provider=None,
         window_hider=None,
         window_shower=None,
+        window_layout_matcher=None,
+        window_activator=None,
     ):
         self.stop_requested = False
         self.stop_monitor = StopHotkeyMonitor(stop_hotkey)
@@ -96,6 +101,15 @@ class ActionRunner:
                 handle_provider=self._explorer_handle_provider,
                 path_provider=self._explorer_path_provider,
             )
+        )
+        self._window_layout_matcher = window_layout_matcher or window_matches_layout
+        self._window_activator = window_activator or bring_window_to_front
+        self._tracked_layout_hwnds = frozenset(
+            int(record.get("hwnd", 0) or 0)
+            for records in self._layout_records().values()
+            if isinstance(records, list)
+            for record in records
+            if isinstance(record, dict) and int(record.get("hwnd", 0) or 0)
         )
 
     def set_stop_hotkey(self, hotkey: str) -> None:
@@ -271,7 +285,7 @@ class ActionRunner:
             hwnd = int(item["hwnd"] or 0)
             if not hwnd:
                 failures[item["index"]] = (
-                    f"{item['label']} (새 탐색기 창 매칭 시간 초과)"
+                    f"{item['label']} (새 탐색기 창 경로 확인 실패)"
                 )
                 continue
             try:
@@ -297,20 +311,44 @@ class ActionRunner:
 
     def _toggle_layout_windows(self, layout_key: str, windows: list) -> str | None:
         saved_records = self._layout_records().get(layout_key, [])
+        valid_count = sum(
+            isinstance(entry, dict) and bool(str(entry.get("path", "") or "").strip())
+            for entry in windows
+        )
         if saved_records:
             candidates = self._verified_layout_records(saved_records)
             if not candidates:
                 self._save_layout_records(layout_key, [])
                 return None
-            complete = len(candidates) == len(saved_records)
+            layout_entries = _layout_entries_for_records(windows, candidates)
+            complete = (
+                valid_count > 0
+                and len(saved_records) == valid_count
+                and len(candidates) == valid_count
+                and len(layout_entries) == valid_count
+            )
+            if not complete:
+                # A previous partial run must never become the whole layout.
+                # Make every still-owned window visible so the normal runner
+                # can reuse it, then let that path open and place the missing
+                # payload entries.
+                updated: list[dict] = []
+                for record in candidates:
+                    hwnd = int(record["hwnd"])
+                    path = str(record["path"])
+                    try:
+                        visible = bool(self._window_visibility_provider(hwnd))
+                        if record.get("hidden") or not visible:
+                            visible = bool(self._window_shower(hwnd, path))
+                    except Exception:
+                        visible = False
+                    updated.append({"hwnd": hwnd, "path": path, "hidden": not visible})
+                self._save_layout_records(layout_key, updated)
+                return None
         else:
             candidates = self._matching_layout_records(windows)
             if not candidates:
                 return None
-            valid_count = sum(
-                isinstance(entry, dict) and bool(str(entry.get("path", "") or "").strip())
-                for entry in windows
-            )
             complete = len(candidates) == valid_count
 
         try:
@@ -323,7 +361,18 @@ class ActionRunner:
             # A hidden window without our persisted ownership marker may belong
             # to another app. Never un-hide it; the scratch path opens a new one.
             return None
-        action = "hide" if all_visible else "show"
+        layout_entries = _layout_entries_for_records(windows, candidates)
+        monitors: list[dict] = []
+        monitor_error = ""
+        try:
+            monitors = list(self._monitor_provider())
+        except Exception as exc:
+            monitor_error = str(exc) or exc.__class__.__name__
+        all_at_saved_layout = all_visible and not monitor_error and all(
+            self._record_matches_saved_layout(record, layout_entries, monitors)
+            for record in candidates
+        )
+        action = "hide" if all_at_saved_layout else "show"
         if action == "hide":
             # Record ownership before the first SW_HIDE. If persistence fails,
             # no window is hidden; if the process stops mid-loop, startup can
@@ -335,16 +384,33 @@ class ActionRunner:
         changed = 0
         failures: list[str] = []
         updated: list[dict] = []
+        restored: list[int] = []
         for record in candidates:
             hwnd = int(record["hwnd"])
             path = str(record["path"])
             try:
                 if action == "hide":
                     succeeded = bool(self._window_hider(hwnd, path))
-                elif record.get("hidden"):
-                    succeeded = bool(self._window_shower(hwnd, path))
                 else:
-                    succeeded = bool(self._window_visibility_provider(hwnd))
+                    visible = bool(self._window_visibility_provider(hwnd))
+                    if record.get("hidden") or not visible:
+                        visible = bool(self._window_shower(hwnd, path))
+                    if not visible:
+                        raise RuntimeError("창 표시 전환 실패")
+                    entry = layout_entries.get(hwnd)
+                    if entry is None:
+                        raise RuntimeError("저장된 창 배치 항목 없음")
+                    if monitor_error:
+                        raise RuntimeError(f"모니터 조회 실패: {monitor_error}")
+                    monitor = _saved_monitor(entry, monitors) or _primary_monitor(monitors)
+                    if monitor is None:
+                        raise RuntimeError("사용 가능한 모니터 없음")
+                    self._move_layout_window({
+                        "hwnd": hwnd,
+                        "entry": entry,
+                        "monitor": monitor,
+                    })
+                    succeeded = True
             except Exception as exc:
                 succeeded = False
                 reason = str(exc) or exc.__class__.__name__
@@ -361,12 +427,48 @@ class ActionRunner:
                 except Exception:
                     hidden = True
             updated.append({"hwnd": hwnd, "path": path, "hidden": hidden})
+            if action == "show" and succeeded:
+                restored.append(hwnd)
 
+        # Restored windows must come up above the app that currently has focus.
+        for hwnd in restored:
+            try:
+                self._window_activator(hwnd)
+            except Exception:
+                pass
         self._save_layout_records(layout_key, updated)
         result = f"{changed}개 창 {'숨김' if action == 'hide' else '복원'}"
         if failures:
             result += f" · 실패 {len(failures)}개: " + ", ".join(failures)
         return result
+
+    def _record_matches_saved_layout(
+        self, record: dict, layout_entries: dict[int, dict], monitors: list[dict],
+    ) -> bool:
+        hwnd = int(record.get("hwnd", 0) or 0)
+        entry = layout_entries.get(hwnd)
+        if entry is None:
+            return False
+        monitor = _saved_monitor(entry, monitors) or _primary_monitor(monitors)
+        if monitor is None:
+            return False
+        options = {
+            "source_dpi": int(entry.get("dpi", 96) or 96),
+        }
+        if "work_area" in entry:
+            options["source_work_area"] = entry.get("work_area")
+        if "rect_basis" in entry:
+            options["rect_basis"] = entry.get("rect_basis")
+        try:
+            return bool(self._window_layout_matcher(
+                hwnd,
+                entry.get("rect", [0, 0, 1, 1]),
+                monitor,
+                str(entry.get("state", "normal") or "normal"),
+                **options,
+            ))
+        except Exception:
+            return False
 
     def _matching_layout_records(self, windows: list) -> list[dict]:
         try:
@@ -409,6 +511,63 @@ class ActionRunner:
             ):
                 verified.append({"hwnd": hwnd, "path": path, "hidden": bool(record.get("hidden"))})
         return verified
+
+    def tracks_layout_window(self, hwnd: int) -> bool:
+        """Fast hook-thread check against the last main-thread state snapshot."""
+        return int(hwnd or 0) in self._tracked_layout_hwnds
+
+    def hide_layout_for_window(self, hwnd: int) -> str | None:
+        """Hide the complete verified saved layout that owns ``hwnd``."""
+        target = int(hwnd or 0)
+        state = self._layout_records()
+        match = next(
+            (
+                (layout_key, records)
+                for layout_key, records in state.items()
+                if isinstance(records, list)
+                and any(
+                    isinstance(record, dict)
+                    and int(record.get("hwnd", 0) or 0) == target
+                    for record in records
+                )
+            ),
+            None,
+        )
+        if match is None:
+            return None
+        layout_key, saved_records = match
+        candidates = self._verified_layout_records(saved_records)
+        if len(candidates) != len(saved_records) or not candidates:
+            return None
+
+        # Persist ownership for the whole group before hiding its first window.
+        self._save_layout_records(layout_key, [
+            {"hwnd": int(record["hwnd"]), "path": str(record["path"]), "hidden": True}
+            for record in candidates
+        ])
+        changed = 0
+        failures: list[str] = []
+        updated: list[dict] = []
+        for record in candidates:
+            record_hwnd = int(record["hwnd"])
+            path = str(record["path"])
+            try:
+                hidden = bool(self._window_hider(record_hwnd, path))
+            except Exception as exc:
+                hidden = False
+                reason = str(exc) or exc.__class__.__name__
+            else:
+                reason = "창 확인 또는 숨김 실패"
+            if hidden:
+                changed += 1
+            else:
+                failures.append(f"{path} ({reason})")
+            updated.append({"hwnd": record_hwnd, "path": path, "hidden": hidden})
+        self._save_layout_records(layout_key, updated)
+        result = f"{changed}개 창 숨김"
+        if failures:
+            result += f" · 실패 {len(failures)}개: " + ", ".join(failures)
+        return result
 
     def restore_all_hidden_windows(self) -> tuple[int, int]:
         state = self._layout_records()
@@ -469,6 +628,13 @@ class ActionRunner:
         self._write_layout_records(state)
 
     def _write_layout_records(self, state: dict[str, list[dict]]) -> None:
+        self._tracked_layout_hwnds = frozenset(
+            int(record.get("hwnd", 0) or 0)
+            for records in state.values()
+            if isinstance(records, list)
+            for record in records
+            if isinstance(record, dict) and int(record.get("hwnd", 0) or 0)
+        )
         if self._settings_store is not None:
             self._settings_store.set_setting(
                 LAYOUT_WINDOW_STATE_SETTING, json.dumps(state, ensure_ascii=False),
@@ -496,8 +662,7 @@ class ActionRunner:
     def _match_new_explorer_windows(
         self, pending: list[dict], known_handles: set[int], claimed_hwnds: set[int],
     ) -> None:
-        discovered = set(known_handles)
-        provisional_hwnds: set[int] = set()
+        discovered: set[int] = set()
         tab_check_ready = False
         tab_checked = False
         deadline = self._clock() + self._layout_timeout
@@ -508,16 +673,23 @@ class ActionRunner:
                 }
             except Exception:
                 handles = set()
-            new_handles = handles - discovered
-            if new_handles:
-                discovered.update(new_handles)
-                available_items = [item for item in pending if not item["hwnd"]]
-                for item, hwnd in zip(available_items, sorted(new_handles)):
-                    item["hwnd"] = hwnd
-                    claimed_hwnds.add(hwnd)
-                    provisional_hwnds.add(hwnd)
-                    self._move_new_layout_window(item)
-            elif tab_check_ready and not tab_checked:
+            discovered.update(handles - known_handles)
+            if discovered:
+                try:
+                    verified = _windows_for_handles(
+                        self._explorer_path_provider(discovered), discovered,
+                    )
+                except Exception:
+                    verified = []
+                for item in pending:
+                    if item["hwnd"]:
+                        continue
+                    hwnd = _matching_explorer_hwnd(verified, item["path"], claimed_hwnds)
+                    if hwnd:
+                        item["hwnd"] = hwnd
+                        claimed_hwnds.add(hwnd)
+                        self._move_new_layout_window(item)
+            if tab_check_ready and not tab_checked:
                 self._match_tabbed_explorer_windows(
                     pending, known_handles, claimed_hwnds,
                 )
@@ -529,53 +701,6 @@ class ActionRunner:
                 break
             tab_check_ready = True
             self._sleeper(min(self._layout_poll_interval, deadline - now))
-
-        if not provisional_hwnds:
-            return
-        try:
-            verified_windows = _windows_for_handles(
-                self._explorer_path_provider(discovered - known_handles),
-                discovered - known_handles,
-            )
-        except Exception:
-            return
-
-        verified_by_hwnd = {
-            int(window.get("hwnd", 0) or 0): window
-            for window in verified_windows
-            if isinstance(window, dict) and int(window.get("hwnd", 0) or 0)
-        }
-        corrected_claims = set(claimed_hwnds) - provisional_hwnds
-        for item in pending:
-            hwnd = int(item["hwnd"] or 0)
-            if not hwnd:
-                continue
-            actual = verified_by_hwnd.get(hwnd)
-            if actual is None:
-                corrected_claims.add(hwnd)
-                continue
-            if _normalized_path(actual.get("path", "")) == _normalized_path(item["path"]):
-                corrected_claims.add(hwnd)
-                continue
-
-            corrected_hwnd = _matching_explorer_hwnd(
-                verified_windows, item["path"], corrected_claims,
-            )
-            if not corrected_hwnd:
-                item["hwnd"] = 0
-                item["moved"] = False
-                item.pop("move_error", None)
-                continue
-            item["hwnd"] = corrected_hwnd
-            corrected_claims.add(corrected_hwnd)
-            if corrected_hwnd != hwnd:
-                item["moved"] = False
-                self._move_new_layout_window(item)
-
-        claimed_hwnds.difference_update(provisional_hwnds)
-        claimed_hwnds.update(
-            int(item["hwnd"] or 0) for item in pending if int(item["hwnd"] or 0)
-        )
 
     def _match_tabbed_explorer_windows(
         self, pending: list[dict], known_handles: set[int], claimed_hwnds: set[int],
@@ -728,7 +853,13 @@ class ActionRunner:
 
 
 def _open_explorer(path: str) -> None:
-    os.startfile(path)
+    # Layout entries need distinct top-level windows.  Plain ``startfile`` can
+    # be absorbed as a tab by Windows 11 Explorer, leaving a multi-window
+    # layout with only one HWND to place.
+    target = Path(path)
+    if not target.is_dir():
+        raise ValueError("폴더 경로를 확인해 주세요.")
+    subprocess.Popen(["explorer.exe", "/n,", str(target.resolve())], close_fds=True)
 
 
 def _layout_state_key(payload: dict, layout_id=None) -> str:
@@ -787,6 +918,25 @@ def _matching_explorer_hwnd(windows, path: str, excluded_hwnds=()) -> int:
         if hwnd and hwnd not in excluded and _normalized_path(window.get("path", "")) == wanted:
             return hwnd
     return 0
+
+
+def _layout_entries_for_records(windows, records) -> dict[int, dict]:
+    """Pair verified handles with saved layout entries, including duplicate paths."""
+    available = [
+        entry for entry in windows
+        if isinstance(entry, dict) and str(entry.get("path", "") or "").strip()
+    ]
+    matched: dict[int, dict] = {}
+    used: set[int] = set()
+    for record in records:
+        wanted = _normalized_path(record.get("path", ""))
+        for index, entry in enumerate(available):
+            if index in used or _normalized_path(entry.get("path", "")) != wanted:
+                continue
+            used.add(index)
+            matched[int(record.get("hwnd", 0) or 0)] = entry
+            break
+    return matched
 
 
 def _saved_monitor(entry: dict, monitors) -> dict | None:

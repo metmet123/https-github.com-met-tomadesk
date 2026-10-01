@@ -20,6 +20,7 @@ from .deadline import (
 )
 from .monthly_rule import describe
 from .reminder_choice_dialog import display_due
+from .schedule_recurrence import is_daily_repeat
 from .sqlite_store import DATETIME_FMT
 
 TODAY_LIMIT = 3
@@ -445,6 +446,8 @@ class TodaySummaryPanel(QWidget):
             )
         except Exception:
             items = []
+        # 매일 반복 일정은 알림으로만 다룬다.  오늘 목록을 매일 같은 줄로 채우지 않는다.
+        items = [item for item in items if not is_daily_repeat(item)]
         self._has_schedule_content = bool(items)
         if not items:
             self._add_placeholder(self.schedule_list, "오늘 등록된 일정이 없습니다.")

@@ -7,11 +7,13 @@ from types import MethodType, SimpleNamespace
 from unittest.mock import Mock, patch
 
 from explorer_dblclick import (
+    HTCAPTION,
     WM_MBUTTONDOWN,
     WM_MBUTTONUP,
     ExplorerDoubleClickNavigator,
     WindowHit,
     is_explorer_file_list,
+    is_explorer_title_bar_blank,
 )
 from main_window import MainWindow
 from store import EXPLORER_DBLCLICK_SETTING, EXPLORER_MIDDLE_CLICK_SETTING, Store
@@ -45,6 +47,16 @@ def file_list_hit() -> WindowHit:
         top_hwnd=EXPLORER_HWND,
         top_class="CabinetWClass",
         class_chain=FILE_LIST_CLASS_CHAIN,
+    )
+
+
+def title_blank_hit(non_client_hit=HTCAPTION) -> WindowHit:
+    return WindowHit(
+        child_hwnd=EXPLORER_HWND,
+        top_hwnd=EXPLORER_HWND,
+        top_class="CabinetWClass",
+        class_chain=("CabinetWClass",),
+        non_client_hit=non_client_hit,
     )
 
 
@@ -117,6 +129,45 @@ class ExplorerMiddleClickTest(unittest.TestCase):
         self.assertEqual(event, ("middle", 120))
         self.assertTrue(sent)
         sender.assert_called_once_with("Alt+Up")
+
+    def test_tracked_layout_title_blank_hides_layout_instead_of_navigating(self):
+        requester = Mock()
+        navigator, sender = self.navigator(
+            hit=title_blank_hit(),
+            layout_window_provider=Mock(return_value=True),
+            layout_hide_requester=requester,
+        )
+
+        self.assertTrue(is_explorer_title_bar_blank(title_blank_hit()))
+        self.assertTrue(navigator._handle_hook_event(WM_MBUTTONDOWN, 640, 12, 100))
+        self.assertTrue(navigator._handle_hook_event(WM_MBUTTONUP, 640, 12, 120))
+        event = navigator._events.get_nowait()
+
+        self.assertEqual(event, ("layout-hide", EXPLORER_HWND, 120))
+        self.assertTrue(navigator.handle_layout_title_middle_click(EXPLORER_HWND))
+        requester.assert_called_once_with(EXPLORER_HWND)
+        sender.assert_not_called()
+
+    def test_untracked_or_interactive_title_regions_pass_through(self):
+        for label, hit, tracked in (
+            ("untracked caption", title_blank_hit(), False),
+            ("tab client", title_blank_hit(1), True),
+            ("minimize", title_blank_hit(8), True),
+            ("maximize", title_blank_hit(9), True),
+            ("close", title_blank_hit(20), True),
+        ):
+            with self.subTest(label=label):
+                navigator, _sender = self.navigator(
+                    hit=hit,
+                    layout_window_provider=Mock(return_value=tracked),
+                )
+                self.assertFalse(
+                    navigator._handle_hook_event(WM_MBUTTONDOWN, 640, 12, 100)
+                )
+                self.assertFalse(
+                    navigator._handle_hook_event(WM_MBUTTONUP, 640, 12, 120)
+                )
+                self.assertTrue(navigator._events.empty())
 
     def test_middle_click_worker_sends_without_initializing_com(self):
         com_initializer = Mock()
@@ -308,6 +359,8 @@ class ExplorerDoubleClickSettingTest(unittest.TestCase):
 
         navigator_class.assert_called_once_with(
             recording_provider=unittest.mock.ANY,
+            layout_window_provider=unittest.mock.ANY,
+            layout_hide_requester=unittest.mock.ANY,
             double_click_enabled=True,
             middle_click_enabled=False,
         )

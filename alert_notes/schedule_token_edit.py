@@ -70,6 +70,21 @@ class ScheduleTokenLineEdit(QLineEdit):
     def token_spans(self) -> tuple:
         return self._token_spans
 
+    def paintable_token_spans(self) -> tuple:
+        """Return spans that still refer to the current committed text.
+
+        Qt keeps IME preedit text outside ``text()`` until it is committed.
+        Existing parsed spans therefore remain valid while another Korean
+        character is being composed, but a stale span must not survive an
+        actual replacement or deletion of its source text.
+        """
+        text = self.text()
+        return tuple(
+            span for span in self._token_spans
+            if 0 <= span.start < span.end <= len(text)
+            and text[span.start:span.end] == span.text
+        )
+
     def token_rect(self, span) -> QRect:
         """현재 가로 스크롤을 반영한 토큰 사각형. 테스트와 히트 검사에서 공유한다."""
         text = self.displayText()
@@ -92,12 +107,13 @@ class ScheduleTokenLineEdit(QLineEdit):
 
     def paintEvent(self, event) -> None:
         super().paintEvent(event)
-        if not self._token_spans or self._preediting:
+        spans = self.paintable_token_spans()
+        if not spans:
             return
         painter = QPainter(self)
         painter.setClipRect(self.contentsRect().adjusted(1, 1, -1, -1))
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        for span in self._token_spans:
+        for span in spans:
             color = QColor(TOKEN_COLORS[span.kind])
             color.setAlpha(112)
             painter.setBrush(color)

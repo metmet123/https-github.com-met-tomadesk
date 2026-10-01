@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from .schedule_reminders import parse_reminder_value, reminder_input_value
+from .categories import schedule_categories, recommend_schedule_category
+from .schedule_category_dialog import ScheduleCategoryDialog
 
 from PyQt6.QtCore import QDateTime, Qt, pyqtSignal
 from PyQt6.QtGui import QColor
@@ -28,6 +30,7 @@ class ScheduleEditor(QWidget):
     saved = pyqtSignal(int)
     deleted = pyqtSignal(int)
     close_requested = pyqtSignal()
+    categories_changed = pyqtSignal()
 
     def __init__(self, store, parent=None):
         super().__init__(parent)
@@ -37,8 +40,46 @@ class ScheduleEditor(QWidget):
         self.hotkey_validator = None
         self._loading = False
         self._dirty = False
+        self._category_touched = False
+        self._auto_category = False
         self._build_ui()
+        self.title_edit.textEdited.connect(self._recommend_category)
+        self.category_combo.activated.connect(self._manual_category_selected)
         self.new_item()
+
+    def _manual_category_selected(self, _index: int) -> None:
+        self._category_touched = True
+        self._auto_category = False
+        self.category_combo.setToolTip("")
+
+    def _recommend_category(self, title: str) -> None:
+        if self._loading or self._category_touched or self.item_id is not None:
+            return
+        key = recommend_schedule_category(title, self._category_specs)
+        if key is None and not self._auto_category:
+            return
+        self.category_combo.setCurrentIndex(max(0, self.category_combo.findData(key)))
+        self._auto_category = key is not None
+        self.category_combo.setToolTip("제목에서 자동 추천된 분류입니다." if key else "")
+
+    def reload_categories(self) -> None:
+        rows = schedule_categories(self.store)
+        current = self.category_combo.currentData()
+        self.category_combo.blockSignals(True)
+        try:
+            self.category_combo.clear()
+            for row in rows:
+                self.category_combo.addItem(row["name"], row["id"])
+            self.category_combo.setCurrentIndex(max(0, self.category_combo.findData(current)))
+        finally:
+            self.category_combo.blockSignals(False)
+        self._category_specs = rows
+
+    def _manage_categories(self) -> None:
+        dialog = ScheduleCategoryDialog(self.store, self)
+        if dialog.exec():
+            self.reload_categories()
+            self.categories_changed.emit()
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
@@ -88,8 +129,12 @@ class ScheduleEditor(QWidget):
         self.count_as_dday_check.setAccessibleName("할 일을 D-Day로 세기")
         self.count_as_dday_check.setToolTip("캘린더와 D-Day 보기에 이 할 일의 마감을 표시합니다.")
         self.category_combo = QComboBox()
-        for label, key in (("업무", "sky"), ("개인", "mint"), ("중요", "peach"), ("학습", "vanilla"), ("기타", "lavender")):
-            self.category_combo.addItem(label, key)
+        self._category_specs = schedule_categories(self.store)
+        for row in self._category_specs:
+            self.category_combo.addItem(row["name"], row["id"])
+        self.category_manage_button = QPushButton("관리")
+        self.category_manage_button.setAccessibleName("일정 분류 관리")
+        self.category_manage_button.clicked.connect(self._manage_categories)
         self.priority_combo = QComboBox()
         for label, value in (("없음", 0), ("낮음", 1), ("보통", 2), ("높음", 3)):
             self.priority_combo.addItem(label, value)
@@ -109,7 +154,10 @@ class ScheduleEditor(QWidget):
         flags.addWidget(self.count_as_dday_check)
         flags.addStretch()
         form.addRow("상태", flags)
-        form.addRow("분류", self.category_combo)
+        category_row = QHBoxLayout()
+        category_row.addWidget(self.category_combo, 1)
+        category_row.addWidget(self.category_manage_button)
+        form.addRow("분류", category_row)
         root.addLayout(form)
         details_label = QLabel("메모 내용")
         details_label.setObjectName("mutedLabel")
@@ -243,6 +291,9 @@ class ScheduleEditor(QWidget):
         item_type: str = "event",
     ) -> None:
         self._loading = True
+        self.reload_categories()
+        self._category_touched = False
+        self._auto_category = False
         self._set_mirror_read_only(False)
         self.item_id = None
         self.occurrence_at = None
@@ -297,6 +348,9 @@ class ScheduleEditor(QWidget):
             )
             return
         self._loading = True
+        self.reload_categories()
+        self._category_touched = True
+        self._auto_category = False
         self.item_id = int(item["id"])
         self.occurrence_at = occurrence_at
         self._set_editor_kind(item_type)
@@ -537,6 +591,7 @@ class ScheduleEditor(QWidget):
         경로가 하나로 이어지지 않는다."""
         item_type = str(values.get("item_type") or "event")
         self.new_item(item_type=item_type if item_type in {"event", "task"} else "event")
+        self._category_touched = True
         self._loading = True
         try:
             self.title_edit.setText(str(values.get("title", "")))

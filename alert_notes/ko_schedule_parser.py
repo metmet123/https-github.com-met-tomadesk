@@ -123,6 +123,7 @@ def parse(
     base: datetime | None = None, base_end: datetime | None = None,
     relative_base: datetime | None = None,
     ignored_spans: tuple[tuple[int, int, str], ...] = (),
+    category_keys: dict[str, str] | None = None,
 ) -> ParsedSchedule:
     """한 줄을 일정 값으로 나눈다.
 
@@ -139,7 +140,7 @@ def parse(
     spans: list[Span] = []
 
     ignored = tuple(ignored_spans or ())
-    category = _take_category(raw, spans)
+    category = _take_category(raw, spans, category_keys or CATEGORY_KEYS, ignored)
     reminders = _take_reminders(raw, spans, ignored)
     cursor = _skip_space(raw, 0)
     recurrence, cursor = _take_recurrence(raw, cursor, spans)
@@ -205,6 +206,19 @@ def parse(
             else:
                 end = start + (kept_span if parsed_time is None else timedelta(hours=1))
 
+    if (
+        start is not None and parsed_time is not None and parsed_date is None
+        and not all_day and offset is None and recurrence is None
+        and _is_ambiguous_morning(start, spans)
+        and start.date() == relative_base.date() and start < relative_base
+        # 범위는 끝까지 이미 지났을 때만 옮긴다.  "10~18시"는 진행 중인 일정이다.
+        and (end_time is None or (end is not None and end <= relative_base))
+    ):
+        # 오전·오후 없이 적은 7~11시가 이미 지났으면 오늘 저녁으로 본다
+        # (11시 반에 적은 "9시 회의"는 21시).  오전을 원하면 ‘오전’을 적는다.
+        start += timedelta(hours=12)
+        end = end + timedelta(hours=12) if end is not None else None
+
     if recurrence is not None and start is not None and recurrence.get("weekdays"):
         # 매주 월요일이라고 했으면 첫 회차도 그 요일이어야 한다.
         start, end = _align_to_weekday(start, end, recurrence["weekdays"][0])
@@ -225,9 +239,14 @@ def parse(
 
 
 # ------------------------------------------------------------------ 표시자 --
-def _take_category(raw: str, spans: list[Span]) -> str | None:
+def _take_category(
+    raw: str, spans: list[Span], category_keys: dict[str, str],
+    ignored: tuple[tuple[int, int, str], ...],
+) -> str | None:
     for match in _RE_CATEGORY.finditer(raw):
-        key = CATEGORY_KEYS.get(match.group(1))
+        if _is_ignored(match.start(), match.end(), "category", ignored):
+            continue
+        key = category_keys.get(match.group(1))
         if key is None:
             # 모르는 태그는 제목의 일부다.  임의로 지우지 않는다.
             continue
@@ -518,6 +537,14 @@ def _match_bare_hour(raw: str, cursor: int):
         if hour is not None:
             return time(hour), match
     return None
+
+
+def _is_ambiguous_morning(start: datetime, spans: list[Span]) -> bool:
+    """오전·오후 표시 없이 7~11시를 적었는가."""
+    if not 7 <= start.hour <= 11:
+        return False
+    texts = [span.text for span in spans if span.kind == "time"]
+    return bool(texts) and not any(word in text for text in texts for word in MERIDIEM)
 
 
 def _apply_meridiem(hour: int, meridiem: str | None) -> int | None:

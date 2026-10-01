@@ -14,9 +14,11 @@ from alert_notes.rich_memo_edit import IMAGE_ORIGINAL_HEIGHT, IMAGE_ORIGINAL_WID
 from alert_notes.sqlite_store import NoteReminderStore
 from ui_theme import scaled_stylesheet
 
+APP = QApplication.instance() or QApplication([])
+
 
 def _editor(tmp_path):
-    app = QApplication.instance() or QApplication([])
+    app = APP
     store = NoteReminderStore(tmp_path / "reading-width.db")
     editor = MemoEditor(store)
     editor.resize(1300, 900)

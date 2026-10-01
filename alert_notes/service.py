@@ -129,6 +129,8 @@ class AlertService(QObject):
             dialog.snoozed.connect(self._snooze)
             dialog.skipped.connect(self._skip)
             dialog.note_open_requested.connect(self.open_note_callback)
+        if hasattr(dialog, "quick_schedule_saved"):
+            dialog.quick_schedule_saved.connect(lambda _item_id: self.refresh_callback())
         self.active_dialog = dialog
         dialog.finished.connect(lambda _result, key=reminder_key: self._finished(key))
         dialog.show()
@@ -143,6 +145,7 @@ class AlertService(QObject):
                 reminder, is_schedule, self.parent(),
                 persistent_pet=persistent_pet,
                 modifier=modifier_setting(self.store),
+                store=self.store,
             )
         except (OSError, RuntimeError, ValueError):
             return None

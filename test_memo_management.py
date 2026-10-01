@@ -8,7 +8,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from openpyxl import load_workbook
 from PyQt6.QtCore import QRect, Qt
-from PyQt6.QtTest import QTest
+from PyQt6.QtTest import QSignalSpy, QTest
 from PyQt6.QtWidgets import QApplication, QMessageBox, QStyleOptionViewItem
 
 from alert_notes.editor_shortcut_settings import EditorShortcutSettingsDialog
@@ -272,6 +272,57 @@ class MemoManagementQtTest(unittest.TestCase):
 
         self.panel.open_standalone_note(note_id)
         self.assertIs(self.panel.standalone_window, window)
+
+    def test_standalone_escape_closes_after_pending_auto_save(self):
+        note_id = self.store.create_note("ESC 메모", "원본")
+        self.panel.open_standalone_note(note_id)
+        window = self.panel.standalone_window
+        window.editor.title_edit.setText("ESC로 저장")
+        self.assertTrue(window.editor.save_timer.isActive())
+        window.editor.title_edit.setFocus()
+        self.app.processEvents()
+        escape_events = QSignalSpy(window.escape_shortcut.activated)
+        QTest.keyClick(window.editor.title_edit, Qt.Key.Key_Escape)
+        self.app.processEvents()
+        self.assertEqual(len(escape_events), 1)
+        self.assertFalse(window.isVisible())
+        self.assertEqual(self.store.note(note_id)["title"], "ESC로 저장")
+        self.panel.open_standalone_note(note_id)
+        window.editor.content_edit.setFocus()
+        self.app.processEvents()
+        QTest.keyClick(window.editor.content_edit, Qt.Key.Key_Escape)
+        self.app.processEvents()
+        self.assertFalse(window.isVisible())
+
+    def test_standalone_escape_preserves_draft_when_auto_save_is_off(self):
+        note_id = self.store.create_note("수동 메모", "원본")
+        self.panel.open_standalone_note(note_id)
+        window = self.panel.standalone_window
+        window.editor.set_auto_save_enabled(False)
+        window.editor.title_edit.setText("미저장 초안")
+        window.editor.title_edit.setFocus()
+        self.app.processEvents()
+        QTest.keyClick(window.editor.title_edit, Qt.Key.Key_Escape)
+        self.app.processEvents()
+        self.assertFalse(window.isVisible())
+        self.assertEqual(self.store.note(note_id)["title"], "수동 메모")
+        self.assertIn("미저장 초안", self.store.setting(f"memo_draft_{note_id}", ""))
+
+    def test_standalone_escape_stays_open_if_auto_save_fails(self):
+        note_id = self.store.create_note("저장 실패 메모", "원본")
+        self.panel.open_standalone_note(note_id)
+        window = self.panel.standalone_window
+        window.editor.title_edit.setText("실패한 변경")
+        window.editor.title_edit.setFocus()
+        self.app.processEvents()
+        with (
+            patch.object(self.store, "update_note", side_effect=RuntimeError("디스크 오류")),
+            patch("alert_notes.panel.QMessageBox.warning"),
+        ):
+            QTest.keyClick(window.editor.title_edit, Qt.Key.Key_Escape)
+            self.app.processEvents()
+        self.assertTrue(window.isVisible())
+        self.assertEqual(self.store.note(note_id)["title"], "저장 실패 메모")
 
     def test_trash_header_selects_and_restores_checked_items(self):
         restored = []

@@ -4,7 +4,7 @@ import tempfile
 from pathlib import Path
 from alert_notes.external_ai_policy import ExternalAIPolicy
 
-from PyQt6.QtCore import QUrl, Qt
+from PyQt6.QtCore import QUrl, Qt, pyqtSignal
 from PyQt6.QtGui import QDesktopServices, QGuiApplication
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -35,6 +35,7 @@ from alert_notes.schedule_postit_settings import (
     COMPLETE_STRIKE, COMPLETE_TRASH, SchedulePostitPreferences,
     VIEW_DAY, VIEW_DUE, VIEW_PRIORITY, VIEW_WEEK,
 )
+from alert_notes.schedule_category_dialog import ScheduleCategoryDialog
 
 
 HOTKEY_FIELDS = (
@@ -43,7 +44,7 @@ HOTKEY_FIELDS = (
     ("tray_hide_hotkey", "트레이로 숨기기"),
     ("record_stop_hotkey", "녹화 종료"),
     ("playback_stop_hotkey", "실행 긴급 중지"),
-    ("quick_memo_hotkey", "빠른 메모"),
+    ("quick_memo_hotkey", "메모 목록 열기"),
     ("new_memo_hotkey", "새 메모"),
     ("today_view_hotkey", "오늘 일정 열기"),
     ("memo_search_hotkey", "메모·일정 검색"),
@@ -81,8 +82,9 @@ DEADLINE_OPTIONS = (
     ),
     (
         "schedule_nlp_enabled", "제목에서 날짜·시간 읽기",
-        "‘내일 오후 3시 팀 회의’처럼 적으면 시간과 분류를 자동으로 채웁니다. "
-        "직접 고친 항목은 건드리지 않고, 끄면 제목을 있는 그대로 둡니다.", True,
+        "‘내일 오후 3시 팀 회의’처럼 적으면 날짜·시간을 읽습니다. "
+        "제목에 분류명이나 등록한 연관어가 있으면 분류를 추천하며 직접 고른 값은 유지합니다. "
+        "끄면 제목을 있는 그대로 둡니다.", True,
     ),
 )
 HOTKEY_DEFAULTS = {
@@ -97,9 +99,13 @@ HOTKEY_DEFAULTS = {
     "file_rename_hotkey": "",
     "screen_ocr_hotkey": "Ctrl+Alt+O",
 }
+# 녹화·실행을 멈추는 유일한 키라서 비워 둘 수 없다.  나머지는 ‘사용안함’으로 끌 수 있다.
+REQUIRED_HOTKEYS = frozenset({"record_stop_hotkey", "playback_stop_hotkey"})
 
 
 class SettingsDialog(QDialog):
+    schedule_categories_changed = pyqtSignal()
+
     def __init__(
         self,
         hotkeys: dict[str, str],
@@ -124,6 +130,7 @@ class SettingsDialog(QDialog):
         self.external_ai_policy = ExternalAIPolicy(
             external_ai_store if external_ai_store is not None else getattr(parent, "note_store", None)
         )
+        self.schedule_category_store = getattr(parent, "note_store", None)
         self.accepted.connect(self._save_external_ai_policy)
         self.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
         self._action_hotkeys = action_hotkeys or set()
@@ -184,9 +191,10 @@ class SettingsDialog(QDialog):
         self.hotkey_grid.setVerticalSpacing(6)
         self.hotkey_conflict_labels: dict[str, QLabel] = {}
         self.hotkey_reset_buttons: dict[str, QPushButton] = {}
+        self.hotkey_disable_buttons: dict[str, QPushButton] = {}
         for key, label in HOTKEY_FIELDS:
             builder = HotkeyBuilder()
-            if key == "file_rename_hotkey":
+            if key not in REQUIRED_HOTKEYS:
                 builder.setAllowEmpty(True)
             builder.setText(hotkeys.get(key, HOTKEY_DEFAULTS[key]))
             builder.setAccessibleName(label)
@@ -204,6 +212,17 @@ class SettingsDialog(QDialog):
             heading_row.setSpacing(6)
             heading_row.addWidget(QLabel(label))
             heading_row.addStretch()
+            if key not in REQUIRED_HOTKEYS:
+                disable = QPushButton("사용안함")
+                disable.setObjectName("linkButton")
+                disable.setAccessibleName(f"{label} 사용안함")
+                disable.setToolTip("이 단축키를 비워 등록하지 않습니다.")
+                disable.setCursor(Qt.CursorShape.PointingHandCursor)
+                disable.clicked.connect(
+                    lambda _checked=False, target=key: self._disable_hotkey(target)
+                )
+                self.hotkey_disable_buttons[key] = disable
+                heading_row.addWidget(disable)
             # Getting back to the shipped default used to mean remembering it.
             reset = QPushButton("기본값")
             reset.setObjectName("linkButton")
@@ -276,7 +295,11 @@ class SettingsDialog(QDialog):
         self.explorer_double_click_check.setChecked(bool(explorer_double_click_enabled))
         startup_layout.addWidget(self.explorer_double_click_check)
         self.explorer_middle_click_check = QCheckBox(
-            "탐색기 파일 목록 가운데 클릭 상위 폴더 이동"
+            "탐색기 가운데 클릭 기능 사용"
+        )
+        self.explorer_middle_click_check.setToolTip(
+            "파일 목록: 상위 폴더 이동\n"
+            "창 배치로 연 탐색기 상단 빈 공간: 해당 배치 전체 숨김"
         )
         self.explorer_middle_click_check.setChecked(bool(explorer_middle_click_enabled))
         startup_layout.addWidget(self.explorer_middle_click_check)
@@ -317,6 +340,11 @@ class SettingsDialog(QDialog):
         for column in range(self._deadline_columns):
             deadline_grid.setColumnStretch(column, 1)
         deadline_layout.addLayout(deadline_grid)
+        category_manage = QPushButton("일정 분류 관리…")
+        category_manage.setAccessibleName("일정 분류 관리")
+        category_manage.setEnabled(self.schedule_category_store is not None)
+        category_manage.clicked.connect(self._manage_schedule_categories)
+        deadline_layout.addWidget(category_manage)
         # 오른쪽 칸만 길어 왼쪽이 200px 남던 것을, 이 칸을 옮겨 맞춘다.
         main_layout.addWidget(deadline_card)
 
@@ -511,9 +539,16 @@ class SettingsDialog(QDialog):
     def _save_external_ai_policy(self) -> None:
         self.external_ai_policy.save(bool(self.external_ai_combo.currentData()))
 
+    def _manage_schedule_categories(self) -> None:
+        if self.schedule_category_store is None:
+            return
+        dialog = ScheduleCategoryDialog(self.schedule_category_store, self)
+        if dialog.exec():
+            self.schedule_categories_changed.emit()
+
     def values(self) -> dict:
         values = dict(self._accepted_hotkey_values or {
-            key: (_optional_hotkey_text(builder) if key == "file_rename_hotkey" else parse_hotkey(builder.text()).text)
+            key: (parse_hotkey(builder.text()).text if key in REQUIRED_HOTKEYS else _optional_hotkey_text(builder))
             for key, builder in self.hotkey_builders.items()
         })
         values["startup_mode"] = str(self.startup_combo.currentData())
@@ -613,6 +648,10 @@ class SettingsDialog(QDialog):
         self.path_labels[key].setText(str(path))
         self.path_labels[key].setToolTip(str(path))
 
+    def _disable_hotkey(self, key: str) -> None:
+        self.hotkey_builders[key].setText("")
+        self._refresh_hotkey_conflicts()
+
     def _reset_hotkey_to_default(self, key: str) -> None:
         self.hotkey_builders[key].setText(HOTKEY_DEFAULTS[key])
         self._refresh_hotkey_conflicts()
@@ -664,8 +703,8 @@ class SettingsDialog(QDialog):
         rejected: list[str] = []
         for key, _label in HOTKEY_FIELDS:
             try:
-                hotkey = (_optional_hotkey_text(self.hotkey_builders[key]) if key == "file_rename_hotkey"
-                          else parse_hotkey(self.hotkey_builders[key].text()).text)
+                hotkey = (parse_hotkey(self.hotkey_builders[key].text()).text if key in REQUIRED_HOTKEYS
+                          else _optional_hotkey_text(self.hotkey_builders[key]))
             except Exception as exc:
                 rejected.append(f"{labels[key]}: {exc}")
                 hotkey = parse_hotkey(self._original_hotkeys[key]).text if self._original_hotkeys[key] else ""

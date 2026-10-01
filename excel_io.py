@@ -83,8 +83,7 @@ def action_to_excel_row(action) -> list:
         json.dumps(payload, ensure_ascii=False, indent=2) if action_type == "macro" else "",
         json.dumps(payload, ensure_ascii=False, indent=2) if action_type == "layout" else "",
         _bool_label(payload.get("restore_if_minimized", False)) if action_type == "path" else "",
-        json.dumps(persisted_app_list(payload.get("excluded_apps", [])), ensure_ascii=False)
-        if action_type != "layout" else "",
+        json.dumps(persisted_app_list(payload.get("excluded_apps", [])), ensure_ascii=False),
     ]
 
 
@@ -102,9 +101,6 @@ def excel_row_to_action(values, index: dict[str, int]) -> dict:
             _cell_optional(values, index, RESTORE_MINIMIZED_HEADER),
             default=False,
         )
-    if action_type == "layout":
-        return {"id": action_id, "name": name, "hotkey": hotkey, "action_type": action_type,
-                "payload": payload, "active": active}
     excluded_text = str(_cell_optional(values, index, EXCLUDED_APPS_HEADER) or "").strip()
     if excluded_text:
         try:

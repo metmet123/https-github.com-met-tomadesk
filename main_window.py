@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
-from PyQt6.QtCore import QByteArray, QEvent, QPointF, QRect, QRectF, Qt, QTimer
+from PyQt6.QtCore import QByteArray, QEvent, QPointF, QRect, QRectF, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QGuiApplication, QKeySequence, QPainter, QShortcut
 from PyQt6.QtWidgets import (
     QFileDialog, QAbstractItemView, QAbstractSpinBox, QBoxLayout, QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QGridLayout,
@@ -37,6 +37,7 @@ from alert_notes.sqlite_store import (
 from app_icon import application_icon
 from app_config import APP_NAME
 from app_utils import now_key
+from combo_click_cycle import install_combo_click_cycle
 from excel_io import ExcelImportError, export_actions_xlsx, import_actions_xlsx
 from excluded_apps_dialog import ExcludedAppsDialog
 from foreground_app import (
@@ -393,6 +394,8 @@ class TrashDialog(QDialog):
 
 
 class MainWindow(QMainWindow):
+    explorer_layout_hide_requested = pyqtSignal(int)
+
     def __init__(self, store: Store | None = None):
         super().__init__()
         self.store = store or Store()
@@ -425,6 +428,7 @@ class MainWindow(QMainWindow):
         self.screen_ocr = None
         self.startup_mode = self.store.setting(STARTUP_MODE_SETTING, "window")
         self.runner = ActionRunner(self.playback_stop_hotkey, settings_store=self.store)
+        self.explorer_layout_hide_requested.connect(self._hide_explorer_layout_from_title)
         self._hidden_windows_exit_restored = False
         self._hidden_windows_startup_checked = False
         QApplication.instance().aboutToQuit.connect(self._restore_hidden_windows_on_exit)
@@ -492,6 +496,7 @@ class MainWindow(QMainWindow):
         self._apply_ui_scale()
         self._reset_macro_history()
         QApplication.instance().installEventFilter(self)
+        install_combo_click_cycle(QApplication.instance())
         self.refresh()
         self._set_action_form_baseline()
         QTimer.singleShot(1000, self._create_automatic_backup)
@@ -543,7 +548,7 @@ class MainWindow(QMainWindow):
         self.alert_tab_group = QButtonGroup(self)
         self.alert_tab_group.setExclusive(True)
         self.alert_tab_buttons = []
-        for index, label in enumerate(("메모 편집", "캘린더", "알림내역")):
+        for index, label in enumerate(("메모 편집", "캘린더", "알림내역", "메모 정리")):
             button = QPushButton(label)
             button.setObjectName("workspaceSubTabButton")
             button.setCheckable(True)
@@ -555,7 +560,7 @@ class MainWindow(QMainWindow):
             mode_layout.addWidget(button)
         # The one D-Day you must not forget, always on screen in one line.  It
         # sits with the tools on the right, not among the tabs: a chip wedged
-        # between 알림내역 and the hint read as a fourth tab.
+        # beside the navigation read as an extra tab.
         self.deadline_chip = QPushButton("")
         self.deadline_chip.setObjectName("deadlineChip")
         self.deadline_chip.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -565,7 +570,7 @@ class MainWindow(QMainWindow):
         self.subtab_switch_hint = QLabel("Ctrl+Shift+Tab 전환")
         self.subtab_switch_hint.setObjectName("workspaceSwitchHint")
         self.subtab_switch_hint.setAccessibleName("Ctrl+Shift+Tab으로 메모·일정 탭 전환")
-        self.subtab_switch_hint.setToolTip("Ctrl+Shift+Tab: 메모 편집 → 캘린더 → 알림내역")
+        self.subtab_switch_hint.setToolTip("Ctrl+Shift+Tab: 메모 편집 → 캘린더 → 알림내역 → 메모 정리")
         mode_layout.addWidget(self.subtab_switch_hint)
         mode_layout.addStretch(1)
         mode_layout.addWidget(self.deadline_chip)
@@ -925,6 +930,16 @@ class MainWindow(QMainWindow):
         self._quick_memo_dialog.show()
         self._quick_memo_dialog.raise_()
         self._quick_memo_dialog.activateWindow()
+
+    def show_memo_list(self) -> None:
+        """메인 창을 앞으로 가져와 메모 목록을 펼치고 검색칸에 커서를 둔다."""
+        self.restore_from_tray()
+        self._switch_workspace(1)
+        self.alert_panel.tabs.setCurrentIndex(0)
+        if self.alert_panel.editor_fullscreen:
+            self.alert_panel.toggle_editor_fullscreen(False)
+        self.alert_panel.toggle_memo_list(False)
+        self.alert_panel.list_panel.search.setFocus(Qt.FocusReason.ShortcutFocusReason)
 
     def show_new_memo_editor(self) -> None:
         """Create a memo and open only its standalone editor window."""
@@ -1796,7 +1811,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "form_save_button"):
             self.form_save_button.setVisible(not is_macro)
         if hasattr(self, "form_excluded_apps_button"):
-            self.form_excluded_apps_button.setVisible(action_type in {"text", "url", "path"})
+            self.form_excluded_apps_button.setVisible(not is_macro)
 
     def toggle_recording_help(self, expanded: bool) -> None:
         self.recording_help_panel.setVisible(expanded)
@@ -1893,6 +1908,7 @@ class MainWindow(QMainWindow):
         # 신호로 이어 둔다.
         dialog.setModal(False)
         dialog.setWindowModality(Qt.WindowModality.NonModal)
+        dialog.schedule_categories_changed.connect(self.alert_panel.calendar.refresh_categories)
         dialog.accepted.connect(lambda: self._apply_settings(dialog))
         dialog.finished.connect(self._forget_settings_dialog)
         self._settings_dialog = dialog
@@ -2063,13 +2079,28 @@ class MainWindow(QMainWindow):
                 EXPLORER_MIDDLE_CLICK_SETTING, "true" if enabled else "false"
             )
 
+    def _hide_explorer_layout_from_title(self, hwnd: int) -> None:
+        result = self.runner.hide_layout_for_window(int(hwnd))
+        if result:
+            self._set_status(result, "success")
+
     def _sync_explorer_mouse_hook(self) -> None:
         navigator = getattr(self, "_explorer_double_click_navigator", None)
         double_enabled = bool(getattr(self, "_explorer_double_click_enabled", False))
         middle_enabled = bool(getattr(self, "_explorer_middle_click_enabled", False))
         if (double_enabled or middle_enabled) and navigator is None:
+            runner = getattr(self, "runner", None)
+            layout_window_provider = getattr(
+                runner, "tracks_layout_window", lambda _hwnd: False,
+            )
+            hide_signal = getattr(self, "explorer_layout_hide_requested", None)
+            layout_hide_requester = (
+                hide_signal.emit if hide_signal is not None else lambda _hwnd: None
+            )
             navigator = ExplorerDoubleClickNavigator(
                 recording_provider=lambda: self._recording,
+                layout_window_provider=layout_window_provider,
+                layout_hide_requester=layout_hide_requester,
                 double_click_enabled=double_enabled,
                 middle_click_enabled=middle_enabled,
             )
@@ -2760,13 +2791,16 @@ class MainWindow(QMainWindow):
         self._update_macro_history_buttons()
 
     def _record_stop_hotkey_from_store(self) -> str:
-        return self._hotkey_from_store(RECORD_STOP_HOTKEY_SETTING, RECORD_STOP_HOTKEY)
+        return self._hotkey_from_store(RECORD_STOP_HOTKEY_SETTING, RECORD_STOP_HOTKEY, allow_empty=False)
 
     def _playback_stop_hotkey_from_store(self) -> str:
-        return self._hotkey_from_store(PLAYBACK_STOP_HOTKEY_SETTING, PLAYBACK_STOP_HOTKEY)
+        return self._hotkey_from_store(PLAYBACK_STOP_HOTKEY_SETTING, PLAYBACK_STOP_HOTKEY, allow_empty=False)
 
-    def _hotkey_from_store(self, key: str, fallback: str) -> str:
+    def _hotkey_from_store(self, key: str, fallback: str, *, allow_empty: bool = True) -> str:
         value = self.store.setting(key, fallback)
+        # 설정에서 ‘사용안함’으로 비운 단축키는 기본값으로 되살리지 않는다.
+        if allow_empty and not value.strip():
+            return ""
         try:
             return parse_hotkey(value).text
         except Exception:
@@ -2843,7 +2877,7 @@ class MainWindow(QMainWindow):
             self.tray_hide_hotkey: "트레이로 숨기기",
             self.record_stop_hotkey: "녹화 종료",
             self.playback_stop_hotkey: "실행 긴급 중지",
-            self.quick_memo_hotkey: "빠른 메모",
+            self.quick_memo_hotkey: "메모 목록 열기",
             self.new_memo_hotkey: "새 메모",
             self.today_view_hotkey: "오늘 일정 열기",
             self.memo_search_hotkey: "메모·일정 검색",
@@ -2911,7 +2945,7 @@ class MainWindow(QMainWindow):
                     item.setData(Qt.ItemDataRole.UserRole, row["action_type"])
                 if c == 6:
                     item.setForeground(QColor(_registration_status_color(status)))
-                if c == 3:
+                if c in (3, 4, 5):
                     item.setToolTip(str(value))
                 polish_action_item(item, c)
                 self.table.setItem(r, c, item)
@@ -3356,7 +3390,7 @@ class MainWindow(QMainWindow):
             payload = self._macro_document()
             payload.update(self._timing_options())
         elif action_type == "layout":
-            return {"windows": self._layout_windows(selected_only=True)}
+            payload = {"windows": self._layout_windows(selected_only=True)}
         else:
             payload = {}
         payload["excluded_apps"] = persisted_app_list(self.excluded_apps)
@@ -3628,7 +3662,7 @@ class MainWindow(QMainWindow):
             (MAIN_OPEN_HOTKEY_ID, self.main_open_hotkey, self.restore_from_tray, "메인창 열기"),
             (TRAY_HIDE_HOTKEY_ID, self.tray_hide_hotkey, self.hide_to_tray, "트레이로 숨기기"),
             (HOTKEY_ID_STOP, self.playback_stop_hotkey, self.runner.stop, "긴급 중지"),
-            (QUICK_MEMO_HOTKEY_ID, self.quick_memo_hotkey, self.show_quick_memo, "빠른 메모"),
+            (QUICK_MEMO_HOTKEY_ID, self.quick_memo_hotkey, self.show_memo_list, "메모 목록 열기"),
             (NEW_MEMO_HOTKEY_ID, self.new_memo_hotkey, self.show_new_memo_editor, "새 메모"),
             (TODAY_VIEW_HOTKEY_ID, self.today_view_hotkey, self.open_today_schedule, "오늘 일정"),
             (MEMO_SEARCH_HOTKEY_ID, self.memo_search_hotkey, self.show_memo_search, "메모·일정 검색"),

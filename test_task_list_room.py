@@ -148,6 +148,20 @@ class TaskListRoomTest(unittest.TestCase):
     def test_the_status_column_is_narrow(self):
         self.assertLessEqual(self.window.table.columnWidth(6), 60)
 
+    def test_narrow_action_columns_keep_full_text_in_tooltips(self):
+        name = "제출요청 템플릿과 관련 문서 열기"
+        hotkey = "Ctrl+Alt+Shift+F12"
+        action_id = self._add(name, hotkey)
+        self.window.refresh()
+        self.window.table.setColumnWidth(3, 55)
+        self.window.table.setColumnWidth(4, 55)
+        self.window.table.setColumnWidth(5, 55)
+        row = next(row for row in range(self.window.table.rowCount())
+                   if self.window.table.item(row, 1).data(Qt.ItemDataRole.UserRole) == action_id)
+        self.assertEqual(self.window.table.item(row, 3).toolTip(), name)
+        self.assertEqual(self.window.table.item(row, 4).toolTip(), hotkey)
+        self.assertEqual(self.window.table.item(row, 5).toolTip(), "문구 입력")
+
     # ------------------------------------------------------- 걷어 낸 줄 --
     def test_the_button_bars_are_gone(self):
         for name in (

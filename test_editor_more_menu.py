@@ -2,7 +2,7 @@ import json
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -10,9 +10,11 @@ import pytest
 from PyQt6.QtCore import QPoint, QRect, Qt
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QMenu
 
 from alert_notes.editor import MemoEditor
 from alert_notes.sqlite_store import NoteReminderStore
+from alert_notes.structured_import import STRATEGY_PRESERVE, STRATEGY_TOP_TWO_TOGGLES, import_strategy
 from qt_test_support import destroy_widget
 from ui_theme import scaled_stylesheet
 
@@ -143,6 +145,27 @@ def test_unknown_search_keeps_no_false_action(ui):
     assert editor.more_menu.empty.isVisible()
     QTest.keyClick(editor.more_menu.search, Qt.Key.Key_Return)
     assert editor.more_menu.isVisible()
+
+
+def test_more_opens_saved_heading_auto_toggle_defaults(ui):
+    app, editor, store = ui
+    assert any(command.key == "heading_auto_toggle" for command in editor.more_menu.commands)
+    panel = editor.format_toolbar.insert_menu.actions()[0].defaultWidget()
+    with patch.object(QMenu, "popup") as popup:
+        editor._open_heading_auto_toggle_settings()
+    popup.assert_called_once()
+    assert panel.tabs.tabText(panel.tabs.currentIndex()) == "가져오기"
+    panel.clipboard_import_combo.setCurrentIndex(
+        panel.clipboard_import_combo.findData(STRATEGY_PRESERVE)
+    )
+    panel._save_import_settings()
+    assert import_strategy(store, "clipboard") == STRATEGY_PRESERVE
+    panel.clipboard_import_combo.setCurrentIndex(
+        panel.clipboard_import_combo.findData(STRATEGY_TOP_TWO_TOGGLES)
+    )
+    with patch.object(QMenu, "popup"):
+        editor._open_heading_auto_toggle_settings()
+    assert panel.clipboard_import_combo.currentData() == STRATEGY_PRESERVE
 
 
 def test_more_group_headers_stand_apart_without_changing_search_actions(ui):

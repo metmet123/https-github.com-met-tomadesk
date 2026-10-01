@@ -50,6 +50,9 @@ class HotkeyBuilder(QWidget):
         self.first_modifier.setAccessibleName("첫 번째 보조키")
         self.second_modifier.setAccessibleName("두 번째 보조키")
         self.third_modifier.setAccessibleName("세 번째 보조키")
+        # 보조키 칸은 눌러서 다음 항목으로 넘기지 않는다.  목록에서 고른다.
+        for combo in (self.first_modifier, self.second_modifier, self.third_modifier):
+            combo.setProperty("cycleOnClick", False)
         self.key_edit.setAccessibleName("단축키 조합 입력")
         self.first_modifier.addItems(MODIFIERS)
         self.second_modifier.addItem(NO_MODIFIER)
@@ -58,6 +61,8 @@ class HotkeyBuilder(QWidget):
         self.third_modifier.addItems(MODIFIERS)
         # Long key names (Backspace, PageDown) were being clipped to "ace"/"nter".
         self.key_edit.setMinimumWidth(self.key_edit.fontMetrics().horizontalAdvance("Backspace") + 26)
+        # 첫 칸만 ‘지정안함’이 빠질 수 있다.  빠져도 옆 칸과 같은 폭으로 둔다.
+        self.first_modifier.setMinimumWidth(self.second_modifier.sizeHint().width())
         layout.addWidget(self.first_modifier)
         layout.addWidget(self.second_modifier)
         layout.addWidget(self.third_modifier)

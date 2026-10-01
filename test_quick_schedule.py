@@ -61,6 +61,18 @@ class QuickScheduleTest(unittest.TestCase):
         self.assertIn("15:00", self.dialog.fields_label.text())
         self.assertIn("개인", self.dialog.fields_label.text())
 
+    def test_title_first_date_and_natural_alarm_are_saved(self):
+        self.dialog.input_edit.setText("공직자안보 견학 10.2. 알람 5분전")
+        item_id = self.dialog.save()
+        item = self.store.schedules.item(item_id)
+        expected_year = datetime.now().year
+        expected = datetime(expected_year, 10, 2)
+        if expected.date() < datetime.now().date() - timedelta(days=1):
+            expected = expected.replace(year=expected_year + 1)
+        self.assertEqual(item["title"], "공직자안보 견학")
+        self.assertTrue(str(item["start_at"]).startswith(expected.strftime("%Y%m%d")))
+        self.assertEqual(self.store.schedules.notifications(item_id), [5])
+
     def test_conflict_line_reports_an_overlap(self):
         start = self.dialog.default_start() + timedelta(days=1)
         start = start.replace(hour=15, minute=0)

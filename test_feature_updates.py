@@ -26,7 +26,7 @@ from foreground_app import is_app_excluded, normalize_app_list
 from macro_recorder import MacroRecorder
 from macro_step_editor import MacroStepDialog
 from macro_timing_editor import TimingEditorDialog
-from qt_test_support import accept_form_state, close_main_window
+from qt_test_support import accept_form_state, close_main_window, destroy_widget
 from settings_dialog import SettingsDialog
 from store import Store
 
@@ -86,11 +86,46 @@ class FeatureUpdateTest(unittest.TestCase):
         self.app.processEvents()
 
     def tearDown(self):
+        quick_schedule_popover = getattr(self.window, "_quick_schedule_popover", None)
         close_main_window(self.window, self.app)
+        # 빠른 일정창은 의도적으로 부모 없는 독립 창이다. 메인 창 closeEvent는
+        # 닫기만 하므로, 임시 DB를 닫기 전에 DeferredDelete까지 끝내야 뒤 테스트의
+        # 이벤트가 이미 닫힌 저장소를 다시 조회해 프로세스를 중단하지 않는다.
+        destroy_widget(quick_schedule_popover, self.app)
         for item in reversed(self.patches):
             item.stop()
         self.store.close()
         self.temp_dir.cleanup()
+
+    def test_quick_schedule_opens_compact_window_without_main_window(self):
+        self.window.hide()
+        self.window.show_quick_schedule()
+        self.app.processEvents()
+        popover = self.window._quick_schedule_popover
+        self.assertFalse(self.window.isVisible())
+        self.assertTrue(popover.isVisible())
+        self.assertIsNone(popover.parentWidget())
+        popover.title_edit.setText("1시간 후 단독 일정")
+        popover.save_button.click()
+        self.app.processEvents()
+        self.assertFalse(self.window.isVisible())
+        self.assertEqual(self.window.note_store.schedules.item(popover.item_id)["title"], "단독 일정")
+
+    def test_quick_schedule_full_edit_opens_main_only_when_requested(self):
+        self.window.hide()
+        self.window.show_quick_schedule()
+        popover = self.window._quick_schedule_popover
+        popover.title_edit.setText("전체 편집 초안")
+        self.assertFalse(self.window.isVisible())
+        popover.full_edit_button.click()
+        self.app.processEvents()
+        self.assertFalse(popover.isVisible())
+        self.assertTrue(self.window.isVisible())
+        self.assertTrue(self.window.alert_panel.calendar._drawer_open)
+        self.assertEqual(
+            self.window.alert_panel.calendar.schedule_editor.title_edit.text(),
+            "전체 편집 초안",
+        )
 
     def test_wheel_step_keeps_direction_position_and_timing(self):
         recorder = MacroRecorder(clock=lambda: 10.0)
@@ -374,9 +409,10 @@ class FeatureUpdateTest(unittest.TestCase):
         self.window.excluded_apps = [
             {"name": "notepad.exe", "path": r"C:\Windows\notepad.exe", "title": "메모장"}
         ]
-        payload = self.window._payload("text")
-        self.assertEqual(payload["excluded_apps"][0]["name"], "notepad.exe")
-        self.assertEqual(payload["excluded_apps"][0]["path"], r"C:\Windows\notepad.exe")
+        for action_type in ("text", "url", "path", "macro", "layout"):
+            payload = self.window._payload(action_type)
+            self.assertEqual(payload["excluded_apps"][0]["name"], "notepad.exe")
+            self.assertEqual(payload["excluded_apps"][0]["path"], r"C:\Windows\notepad.exe")
         self.window._sync_excluded_apps_buttons()
         self.assertEqual(self.window.form_excluded_apps_button.text(), "제외 프로그램 선택 (1)")
         self.assertEqual(self.window.macro_excluded_apps_button.text(), "제외 프로그램 선택 (1)")
@@ -918,7 +954,7 @@ class FeatureUpdateTest(unittest.TestCase):
         ]
         self.assertEqual(dialog._hotkey_columns, 2)
         self.assertEqual([(row, column) for row, column, _, _ in positions[:7]], [(0, 0), (1, 0), (2, 0), (3, 0), (4, 0), (5, 0), (6, 0)])
-        self.assertEqual([(row, column) for row, column, _, _ in positions[7:]], [(0, 1), (1, 1), (2, 1), (3, 1), (4, 1), (5, 1), (6, 1)])
+        self.assertEqual([(row, column) for row, column, _, _ in positions[7:]], [(0, 1), (1, 1), (2, 1), (3, 1), (4, 1), (5, 1)])
         self.assertEqual(dialog.findChildren(QScrollArea), [])
         self.assertGreaterEqual(dialog.minimumWidth(), 980)
         self.assertGreaterEqual(dialog.minimumHeight(), 660)

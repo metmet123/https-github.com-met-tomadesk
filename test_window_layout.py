@@ -127,6 +127,46 @@ class WindowCollectionTest(unittest.TestCase):
 
 
 class WindowMovementTest(unittest.TestCase):
+    def test_layout_match_rejects_minimized_or_maximized_normal_window(self):
+        monitor = {"work_rect": (0, 0, 1920, 1040), "dpi": 96}
+        bounds = FakeWindowBoundsProvider((20, 30, 820, 630), (20, 30, 820, 630))
+
+        self.assertFalse(window_layout.window_matches_layout(
+            300, (20, 30, 800, 600), monitor, "normal",
+            api_provider=bounds, minimized=True, maximized=False,
+        ))
+        self.assertFalse(window_layout.window_matches_layout(
+            300, (20, 30, 800, 600), monitor, "normal",
+            api_provider=bounds, minimized=False, maximized=True,
+        ))
+
+    def test_layout_match_detects_moved_or_resized_normal_window(self):
+        monitor = {"work_rect": (0, 0, 1920, 1040), "dpi": 96}
+        matching = FakeWindowBoundsProvider((20, 30, 820, 630), (20, 30, 820, 630))
+        changed = FakeWindowBoundsProvider((100, 30, 900, 630), (100, 30, 900, 630))
+
+        self.assertTrue(window_layout.window_matches_layout(
+            300, (20, 30, 800, 600), monitor, "normal",
+            api_provider=matching, minimized=False, maximized=False,
+        ))
+        self.assertFalse(window_layout.window_matches_layout(
+            300, (20, 30, 800, 600), monitor, "normal",
+            api_provider=changed, minimized=False, maximized=False,
+        ))
+
+    def test_layout_match_accepts_only_the_saved_maximized_state(self):
+        monitor = {"work_rect": (0, 0, 1920, 1040), "dpi": 96}
+        bounds = FakeWindowBoundsProvider((0, 0, 1920, 1040), (0, 0, 1920, 1040))
+
+        self.assertTrue(window_layout.window_matches_layout(
+            300, (20, 30, 800, 600), monitor, "maximized",
+            api_provider=bounds, minimized=False, maximized=True,
+        ))
+        self.assertFalse(window_layout.window_matches_layout(
+            300, (20, 30, 800, 600), monitor, "maximized",
+            api_provider=bounds, minimized=False, maximized=False,
+        ))
+
     def test_saved_125_and_150_percent_sizes_restore_at_100_percent(self):
         monitor = {"work_rect": (0, 0, 1920, 1032), "dpi": 96}
         for source_dpi, expected_width, expected_height in (

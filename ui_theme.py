@@ -139,10 +139,14 @@ QFrame#scheduleAdditionalCard {
 QFrame#scheduleSubCard { background: transparent; border: 0; }
 /* 클릭한 자리에서 끝내는 일정 입력 팝오버. */
 QFrame#schedulePopover {
-    background: @surface; border: 1px solid #c7d2e4; border-radius: 14px;
+    background: @surface; border: 1px solid #c7d2e4; border-radius: 10px;
 }
 QLabel#popoverHeading { font-size: 14px; font-weight: 700; color: @title; }
-QLabel#popoverRange { color: @muted; }
+QPushButton#popoverHeaderDate {
+    min-height: 24px; padding: 1px 5px; border: 0; border-radius: 6px;
+    background: transparent; color: @muted; font-size: 12px;
+}
+QPushButton#popoverHeaderDate:hover { background: @surface-muted; color: @blue-dark; }
 QLabel#popoverFieldLabel { color: @muted; font-size: 12px; }
 QLabel#popoverHint { color: @muted; font-size: 12px; }
 QLabel#popoverParse {
@@ -181,45 +185,77 @@ QDateEdit#popoverDateField:focus, QTimeEdit#popoverTimeField:focus {
 /* 스핀·달력 버튼은 네이티브 그대로 둔다.  QSS로 하위 컨트롤을 다시 그리면
    화살표 그림이 사라져 빈 상자만 남는다. */
 QLineEdit#popoverTitleEdit {
-    border: 0; border-bottom: 2px solid @line; border-radius: 0;
-    padding: 3px 2px; font-size: 15px; background: transparent;
+    min-height: 28px; max-height: 28px; border: 1px solid @line; border-radius: 10px;
+    padding: 3px 10px; font-size: 15px; font-weight: 700; background: @surface-muted;
 }
-QLineEdit#popoverTitleEdit:focus { border-bottom: 2px solid @blue; }
-QPushButton#popoverEscButton, QPushButton#popoverLinkButton {
-    min-height: 26px; padding: 2px 8px; border: 0; background: transparent; color: @muted;
+QLineEdit#popoverTitleEdit:focus { border: 1px solid @blue; background: @surface; }
+QPushButton#popoverEscButton {
+    min-width: 26px; max-width: 26px; min-height: 26px; max-height: 26px;
+    padding: 0; border: 1px solid @line; border-radius: 14px;
+    background: @surface-muted; color: @muted; font-size: 18px;
+}
+QPushButton#popoverLinkButton {
+    min-height: 24px; max-height: 24px; padding: 2px 8px; border: 0; background: transparent; color: @muted;
 }
 QPushButton#popoverEscButton:hover, QPushButton#popoverLinkButton:hover {
-    color: @blue-dark; background: @blue-soft; border-radius: 6px;
+    color: @blue-dark; background: @blue-soft;
 }
-QPushButton#popoverTimeChip {
-    min-height: 22px; padding: 2px 5px; border-radius: 9px; font-size: 12px;
-    background: @surface; border: 1px solid @line; color: @ink; font-weight: 600;
+QPushButton#popoverTimeSummary {
+    min-height: 22px; max-height: 22px; padding: 3px 10px; text-align: left; font-weight: 700;
+    background: @blue; border: 1px solid @blue; border-radius: 10px; color: white;
 }
-QPushButton#popoverTimeChip:checked { background: @blue-soft; border-color: @blue; color: @blue-dark; }
-QPushButton#popoverDurationChip, QPushButton#popoverAddChip {
-    min-height: 22px; padding: 2px 7px; border-radius: 9px;
-    background: @surface-muted; border: 1px solid @line; color: #475569;
+QPushButton#popoverTimeSummary:hover { background: @blue-dark; border-color: @blue-dark; }
+QLabel#popoverDurationText { color: @muted; font-size: 12px; }
+QPushButton#popoverEndModeSegment {
+    min-height: 22px; max-height: 22px; padding: 1px 9px; border: 1px solid @line;
+    border-radius: 0; background: @surface-muted; color: #475569; font-size: 11px;
+}
+QPushButton#popoverEndModeSegment[segment="first"] {
+    border-top-left-radius: 10px; border-bottom-left-radius: 10px;
+}
+QPushButton#popoverEndModeSegment[segment="middle"] { border-left-width: 0; }
+QPushButton#popoverEndModeSegment[segment="last"] {
+    border-left-width: 0; border-top-right-radius: 10px; border-bottom-right-radius: 10px;
+}
+QPushButton#popoverEndModeSegment:checked {
+    background: @blue; border-color: @blue; color: white; font-weight: 700;
+}
+QPushButton#popoverAddChip {
+    min-height: 22px; max-height: 22px; padding: 1px 8px; border-radius: 10px;
+    background: transparent; border: 1px dashed #aab5c5; color: #475569;
 }
 QPushButton#popoverAddChip:checked {
     background: @blue-soft; border-color: @blue; color: @blue-dark; font-weight: 700;
 }
-QPushButton#popoverDurationChip { font-size: 12px; }
-QPushButton#popoverAlarmNow, QPushButton#popoverAlarmFive {
-    min-height: 22px; padding: 1px 7px; border-radius: 10px;
+QPushButton#popoverAlarmChip {
+    min-height: 24px; max-height: 24px; padding: 1px 6px; border-radius: 10px;
     background: @surface-muted; border: 1px solid @line; color: @ink;
 }
-QPushButton#popoverAlarmNow:checked,
-QPushButton#popoverAlarmFive:checked {
-    background: @blue-soft; border-color: @blue; color: @blue-dark; font-weight: 700;
+QPushButton#popoverAlarmChip:checked {
+    background: @blue; border-color: @blue; color: white; font-weight: 700;
 }
 QPushButton#popoverCategoryChip {
-    min-height: 24px; padding: 1px 3px; border-radius: 8px;
+    min-height: 20px; max-height: 20px; min-width: 0; padding: 1px 5px; border-radius: 8px;
     background: transparent; border: 1px solid transparent; color: @ink;
 }
 QPushButton#popoverCategoryChip:hover { background: @surface-muted; }
 QPushButton#popoverCategoryChip:checked {
     background: @blue-soft; border-color: @blue; color: @blue-dark;
 }
+QPushButton#popoverCategoryOverflow {
+    min-height: 20px; max-height: 20px; min-width: 0; padding: 1px 6px; border-radius: 9px;
+    background: @surface-muted; border: 1px solid @line; color: @muted;
+}
+QPushButton#popoverCategoryOverflow::menu-indicator { image: none; width: 0; }
+QPushButton#popoverCategoryOverflow:hover { border-color: @blue; color: @blue-dark; }
+QPushButton#popoverCategoryRowAction {
+    min-height: 24px; padding: 1px 4px; border: 0; border-radius: 6px;
+    background: transparent; color: @muted;
+}
+QPushButton#popoverCategoryRowAction:hover {
+    background: @blue-soft; color: @blue-dark;
+}
+QPushButton#popoverCategoryRowAction:disabled { color: @line; }
 QPushButton#popoverDetailLink {
     min-height: 24px; padding: 0px 2px; border: 0; background: transparent; color: @muted;
 }
@@ -228,6 +264,14 @@ QLineEdit#popoverAlarmInput {
     background: @surface; border: 1px solid @line; color: @ink;
 }
 QLineEdit#popoverAlarmInput:focus { border-color: @blue; }
+QDialog#scheduleCategoryDialog { background: @surface; color: @ink; }
+QFrame#scheduleCategoryCard {
+    background: @surface; border: 1px solid @line; border-radius: 9px;
+}
+QPushButton#popoverCategoryAdd {
+    min-height: 32px; background: @blue-soft; border: 1px solid @blue;
+    border-radius: 9px; color: @blue-dark; font-weight: 600;
+}
 QPushButton#popoverReminderPreset, QPushButton#popoverReminderAction {
     min-height: 21px; padding: 1px 2px; border-radius: 8px; font-size: 10px;
     background: @surface; border: 1px solid @line; color: @ink;
@@ -493,6 +537,10 @@ QPushButton:hover { background: #f1f5f9; border-color: #94a3b8; }
 QPushButton:pressed { background: #e2e8f0; padding-top: 4px; padding-bottom: 2px; }
 QPushButton#primaryButton {
     background: @blue; border-color: @blue; color: white; font-weight: 700;
+}
+QFrame#schedulePopover QPushButton#primaryButton { border-radius: 10px; }
+QFrame#schedulePopover QPushButton#primaryButton {
+    min-height: 24px; max-height: 24px; padding: 3px 10px;
 }
 QPushButton#primaryButton:hover { background: @blue-dark; }
 QPushButton#toolbarButton { background: @surface-muted; color: #334155; }

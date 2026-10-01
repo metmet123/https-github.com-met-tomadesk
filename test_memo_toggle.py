@@ -4,14 +4,17 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import unittest
+from unittest.mock import patch
 
 from PyQt6.QtCore import QEvent, QMimeData, QPointF, Qt
-from PyQt6.QtGui import QKeyEvent, QMouseEvent, QTextCursor
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtGui import QContextMenuEvent, QKeyEvent, QMouseEvent, QTextCursor
+from PyQt6.QtTest import QTest
+from PyQt6.QtWidgets import QApplication, QMenu
 
 from alert_notes.rich_memo_edit import (
     EMPTY_TOGGLE_HINT, TOGGLE_CLOSED_PREFIX, TOGGLE_OPEN_PREFIX, RichMemoTextEdit,
 )
+from alert_notes.block_identity import is_section_break
 from qt_test_support import destroy_widget
 
 
@@ -74,6 +77,304 @@ class MemoToggleTest(unittest.TestCase):
         children = list(self.editor._toggle_children(toggle))
         self.assertEqual([block.text() for block in children], ["우산", "장갑"])
 
+    def test_shift_enter_from_child_opens_outside_without_changing_children(self):
+        toggle = self._toggle_with_children()
+        child = toggle.next()
+        self.editor.setTextCursor(QTextCursor(child))
+        before = [block.text() for block in self.editor._toggle_children(toggle)]
+        press(self.editor, Qt.Key.Key_Return, modifiers=Qt.KeyboardModifier.ShiftModifier)
+        outside = self.editor.textCursor().block()
+        self.assertEqual(outside.blockFormat().indent(), 0)
+        self.assertEqual([block.text() for block in self.editor._toggle_children(toggle)], before)
+        self.assertFalse(outside.text())
+        self.editor.undo()
+        self.assertEqual([block.text() for block in self.editor._toggle_children(toggle)], before)
+        self.assertEqual(self.editor.document().lastBlock().text(), "장갑")
+
+    def test_shift_enter_from_closed_toggle_keeps_outside_line_visible(self):
+        toggle = self._toggle_with_children()
+        self.editor.fold_toggle(toggle)
+        self.editor.setTextCursor(QTextCursor(toggle))
+        press(self.editor, Qt.Key.Key_Enter, modifiers=Qt.KeyboardModifier.ShiftModifier)
+        outside = self.editor.textCursor().block()
+        self.assertEqual(outside.blockFormat().indent(), 0)
+        self.assertTrue(outside.isVisible())
+        self.assertFalse(toggle.next().isVisible())
+
+    def test_shift_enter_reuses_existing_outside_blank(self):
+        toggle = self._toggle_with_children()
+        press(self.editor, Qt.Key.Key_Return, modifiers=Qt.KeyboardModifier.ShiftModifier)
+        count = self.editor.document().blockCount()
+        outside = self.editor.textCursor().block()
+        self.editor.setTextCursor(QTextCursor(toggle.next()))
+        press(self.editor, Qt.Key.Key_Return, modifiers=Qt.KeyboardModifier.ShiftModifier)
+        self.assertEqual(self.editor.document().blockCount(), count)
+        self.assertEqual(self.editor.textCursor().block(), outside)
+
+    def test_shift_enter_from_nested_toggle_exits_nearest_toggle(self):
+        outer = self._type_toggle("바깥")
+        press(self.editor, Qt.Key.Key_Return)
+        self.editor.textCursor().insertText("안쪽")
+        self.editor.make_toggle()
+        inner = outer.next()
+        press(self.editor, Qt.Key.Key_Return)
+        self.editor.textCursor().insertText("깊은 줄")
+        press(self.editor, Qt.Key.Key_Return, modifiers=Qt.KeyboardModifier.ShiftModifier)
+        outside = self.editor.textCursor().block()
+        self.assertEqual(outside.blockFormat().indent(), 1)
+        self.assertEqual(self.editor._parent_toggle(outside), outer)
+        self.assertNotIn(outside, list(self.editor._toggle_children(inner)))
+
+    def test_shift_enter_from_folded_heading_opens_visible_outside_line(self):
+        self.editor.setPlainText("제목\n본문\n다음 제목")
+        first = self.editor.document().begin()
+        self.editor.setTextCursor(QTextCursor(first))
+        self.editor.apply_heading1()
+        second_heading = self.editor.document().lastBlock()
+        self.editor.setTextCursor(QTextCursor(second_heading))
+        self.editor.apply_heading1()
+        self.editor.fold_heading(first)
+        self.editor.setTextCursor(QTextCursor(first))
+        press(self.editor, Qt.Key.Key_Return, modifiers=Qt.KeyboardModifier.ShiftModifier)
+        outside = self.editor.textCursor().block()
+        self.assertTrue(outside.isVisible())
+        self.assertTrue(is_section_break(outside))
+        self.assertIsNone(self.editor._heading_section_owner(outside))
+        self.assertEqual(outside.next().text(), "다음 제목")
+        self.assertEqual(first.next().text(), "본문")
+        self.editor.undo()
+        self.assertEqual(self.editor.document().blockCount(), 3)
+        self.assertEqual(self.editor.document().begin().next().text(), "본문")
+
+    def test_backspace_at_outside_line_keeps_folded_heading_boundary(self):
+        self.editor.setPlainText("제목\n숨은 내용\n바깥 내용\n뒤 문단")
+        heading = self.editor.document().begin()
+        self.editor.setTextCursor(QTextCursor(heading))
+        self.editor.apply_heading1()
+        outside = heading.next().next()
+        self.assertTrue(self.editor.mark_section_break(outside))
+        self.editor.fold_heading(heading)
+        self.editor.setTextCursor(QTextCursor(outside))
+
+        press(self.editor, Qt.Key.Key_Backspace)
+
+        self.assertTrue(is_section_break(outside))
+        self.assertTrue(self.editor._heading_is_folded(heading))
+        self.assertFalse(heading.next().isVisible())
+        self.assertTrue(outside.isVisible())
+        self.assertTrue(outside.next().isVisible())
+        self.assertEqual(outside.text(), "바깥 내용")
+        self.assertEqual(outside.next().text(), "뒤 문단")
+
+    def test_backspace_after_three_closed_title_toggles_keeps_outside_content(self):
+        self.editor.insert_structured_html(
+            "<h1>1. 터널이란?</h1><h1>2. Codex 페이지</h1><h1>3. 이점</h1>",
+            {1},
+        )
+        self.assertTrue(self.editor._place_caret_outside_toggles())
+        outside = self.editor.textCursor().block()
+        self.editor.textCursor().insertText("asaefd")
+        cursor = self.editor.textCursor()
+        cursor.insertBlock()
+        cursor.insertText("매뉴얼")
+        self.editor.setTextCursor(cursor)
+        headings = [
+            block for block in self.editor._iter_blocks()
+            if self.editor.heading_level(block)
+        ]
+        self.assertEqual(len(headings), 3)
+        for heading in headings:
+            self.editor.fold_toggle(heading)
+        self.assertFalse(is_section_break(outside))
+        self.assertEqual(outside.blockFormat().indent(), 0)
+        self.assertFalse(outside.previous().isVisible())
+        self.assertTrue(outside.isVisible())
+        self.editor.setTextCursor(QTextCursor(outside))
+        self.editor.setFocus()
+        self.app.processEvents()
+
+        QTest.keyClick(self.editor, Qt.Key.Key_Backspace)
+
+        self.assertEqual(outside.text(), "asaefd")
+        self.assertEqual(outside.blockFormat().indent(), 0)
+        self.assertTrue(outside.isVisible())
+        self.assertEqual(outside.next().text(), "매뉴얼")
+        self.assertTrue(outside.next().isVisible())
+        self.assertEqual([heading.text()[:1] for heading in headings], [
+            TOGGLE_CLOSED_PREFIX[:1], TOGGLE_CLOSED_PREFIX[:1], TOGGLE_CLOSED_PREFIX[:1],
+        ])
+
+    def test_backspace_on_blank_after_closed_title_toggles_keeps_following_text_outside(self):
+        self.editor.insert_structured_html(
+            "<h1>1. 터널이란?</h1><h1>2. Codex 페이지</h1><h1>3. 이점</h1>",
+            {1},
+        )
+        self.assertTrue(self.editor._place_caret_outside_toggles())
+        outside_blank = self.editor.textCursor().block()
+        cursor = self.editor.textCursor()
+        cursor.insertBlock()
+        cursor.insertText("asaefd")
+        cursor.insertBlock()
+        cursor.insertText("매뉴얼")
+        self.editor.setTextCursor(cursor)
+        for heading in [block for block in self.editor._iter_blocks() if self.editor.heading_level(block)]:
+            self.editor.fold_toggle(heading)
+        self.assertEqual(outside_blank.blockFormat().indent(), 0)
+        self.editor.setTextCursor(QTextCursor(outside_blank))
+
+        press(self.editor, Qt.Key.Key_Backspace)
+
+        body = self.editor.document().find("asaefd").block()
+        link_line = self.editor.document().find("매뉴얼").block()
+        self.assertEqual(body.blockFormat().indent(), 0)
+        self.assertTrue(body.isVisible())
+        self.assertEqual(link_line.blockFormat().indent(), 0)
+        self.assertTrue(link_line.isVisible())
+
+    def test_backspace_after_closed_title_with_hidden_content_does_not_merge_into_child(self):
+        self.editor.insert_structured_html(
+            "<h1>1. 터널이란?</h1><h1>2. Codex 페이지</h1>"
+            "<h1>3. 이점</h1><p>접힌 본문</p>", {1},
+        )
+        self.assertTrue(self.editor._place_caret_outside_toggles())
+        outside = self.editor.textCursor().block()
+        self.editor.textCursor().insertText("asaefd")
+        cursor = self.editor.textCursor()
+        cursor.insertBlock()
+        cursor.insertText("매뉴얼")
+        self.editor.setTextCursor(cursor)
+        headings = [block for block in self.editor._iter_blocks() if self.editor.heading_level(block)]
+        for heading in headings:
+            self.editor.fold_toggle(heading)
+        saved = self.editor.content()
+        self.editor.set_content(saved)
+        outside = self.editor.document().find("asaefd").block()
+        self.assertEqual(outside.previous().text(), "접힌 본문")
+        self.assertFalse(outside.previous().isVisible())
+        self.assertTrue(outside.isVisible())
+        before = self.editor.content()
+        self.editor.setTextCursor(QTextCursor(outside))
+        self.editor.setFocus()
+        self.app.processEvents()
+
+        QTest.keyClick(self.editor, Qt.Key.Key_Backspace)
+
+        body = self.editor.document().find("asaefd").block()
+        self.assertEqual(body.text(), "asaefd")
+        self.assertEqual(body.blockFormat().indent(), 0)
+        self.assertTrue(body.isVisible())
+        self.assertEqual(body.next().text(), "매뉴얼")
+        self.assertTrue(body.next().isVisible())
+        self.assertEqual(self.editor.content(), before)
+
+    def test_backspace_deletes_only_outside_blank_after_hidden_content(self):
+        toggle = self._type_toggle("TEST")
+        press(self.editor, Qt.Key.Key_Return)
+        self.editor.textCursor().insertText("숨은 내용")
+        press(self.editor, Qt.Key.Key_Return, modifiers=Qt.KeyboardModifier.ShiftModifier)
+        outside_blank = self.editor.textCursor().block()
+        cursor = self.editor.textCursor()
+        cursor.insertBlock()
+        cursor.insertText("TEST")
+        self.editor.setTextCursor(cursor)
+        self.editor.fold_toggle(toggle)
+        before_count = self.editor.document().blockCount()
+        self.assertFalse(outside_blank.previous().isVisible())
+        self.assertTrue(outside_blank.isVisible())
+        self.editor.setTextCursor(QTextCursor(outside_blank))
+
+        QTest.keyClick(self.editor, Qt.Key.Key_Backspace)
+
+        remaining = self.editor.document().find("TEST", toggle.position() + toggle.length()).block()
+        self.assertEqual(self.editor.document().blockCount(), before_count - 1)
+        self.assertEqual(remaining.text(), "TEST")
+        self.assertEqual(remaining.blockFormat().indent(), 0)
+        self.assertTrue(remaining.isVisible())
+        self.assertFalse(toggle.next().isVisible())
+        self.editor.undo()
+        self.assertEqual(self.editor.document().blockCount(), before_count)
+        self.assertTrue(self.editor.document().find("TEST", toggle.position() + toggle.length()).block().isVisible())
+        self.editor.redo()
+        self.assertEqual(self.editor.document().blockCount(), before_count - 1)
+
+    def test_backspace_deletes_outside_heading_blank_and_moves_boundary(self):
+        self.editor.setPlainText("제목\n숨은 내용\n\nTEST")
+        heading = self.editor.document().begin()
+        self.editor.setTextCursor(QTextCursor(heading))
+        self.editor.apply_heading1()
+        blank = heading.next().next()
+        self.assertTrue(self.editor.mark_section_break(blank))
+        self.editor.fold_heading(heading)
+        before_count = self.editor.document().blockCount()
+        self.editor.setTextCursor(QTextCursor(blank))
+
+        QTest.keyClick(self.editor, Qt.Key.Key_Backspace)
+
+        body = self.editor.document().find("TEST").block()
+        self.assertEqual(self.editor.document().blockCount(), before_count - 1)
+        self.assertTrue(is_section_break(body))
+        self.assertTrue(body.isVisible())
+        self.assertEqual(body.text(), "TEST")
+
+    def test_enter_after_folded_heading_without_child_creates_outside_boundary(self):
+        self.editor.setPlainText("제목")
+        heading = self.editor.document().begin()
+        self.editor.setTextCursor(QTextCursor(heading))
+        self.editor.apply_heading1()
+        self.editor.fold_heading(heading)
+        self.editor.setTextCursor(QTextCursor(heading))
+
+        press(self.editor, Qt.Key.Key_Return)
+
+        outside = self.editor.textCursor().block()
+        self.assertEqual(outside, heading.next())
+        self.assertTrue(is_section_break(outside))
+        self.assertTrue(outside.isVisible())
+        self.assertIsNone(self.editor._heading_section_owner(outside))
+
+    def test_shift_enter_from_nested_imported_heading_toggle_starts_at_root(self):
+        self.editor.insert_structured_html(
+            "<h1>첫째</h1><h2>둘째</h2><h3>셋째</h3>",
+            toggle_heading_levels={1, 2, 3},
+        )
+        third = self.editor.document().begin().next().next()
+        self.assertEqual(third.blockFormat().indent(), 2)
+        self.editor.setTextCursor(QTextCursor(third))
+        press(self.editor, Qt.Key.Key_Return, modifiers=Qt.KeyboardModifier.ShiftModifier)
+        outside = self.editor.textCursor().block()
+        self.assertEqual(outside.blockFormat().indent(), 0)
+        self.editor.textCursor().insertText("새 항목")
+        self.editor.make_toggle()
+        created = self.editor.textCursor().block()
+        self.assertEqual(created.blockFormat().indent(), 0)
+        self.assertTrue(created.isVisible())
+        first = self.editor.document().begin()
+        self.editor.fold_toggle(first)
+        self.assertTrue(created.isVisible())
+
+    def test_shift_enter_on_plain_line_keeps_soft_line_break(self):
+        self.editor.setPlainText("일반 문장")
+        cursor = self.editor.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        self.editor.setTextCursor(cursor)
+        press(self.editor, Qt.Key.Key_Return, modifiers=Qt.KeyboardModifier.ShiftModifier)
+        self.assertEqual(self.editor.document().blockCount(), 1)
+
+    def test_right_click_outside_table_creates_default_table(self):
+        menu = QMenu(self.editor)
+        point = self.editor.cursorRect().center()
+        event = QContextMenuEvent(
+            QContextMenuEvent.Reason.Mouse, point, self.editor.mapToGlobal(point),
+        )
+        with patch.object(self.editor, "createStandardContextMenu", return_value=menu), \
+                patch.object(QMenu, "exec", return_value=None):
+            self.editor.contextMenuEvent(event)
+        action = next(action for action in menu.actions() if action.text() == "표 만들기")
+        action.trigger()
+        table = self.editor.current_table()
+        self.assertIsNotNone(table)
+        self.assertEqual((table.rows(), table.columns()), (3, 3))
+
     def test_folding_hides_the_children(self):
         toggle = self._toggle_with_children()
         self.editor.fold_toggle(toggle)
@@ -87,6 +388,21 @@ class MemoToggleTest(unittest.TestCase):
         self.editor.fold_toggle(toggle)
         self.assertTrue(toggle.text().startswith(TOGGLE_OPEN_PREFIX))
         self.assertTrue(all(child.isVisible() for child in self.editor._toggle_children(toggle)))
+
+    def test_middle_click_on_toggle_marker_and_title_folds_and_unfolds(self):
+        toggle = self._toggle_with_children()
+        self.app.processEvents()
+        marker = self.editor._toggle_marker_rect(toggle).center().toPoint()
+        QTest.mouseClick(self.editor.viewport(), Qt.MouseButton.MiddleButton, pos=marker)
+        self.assertFalse(self.editor._toggle_is_open(toggle))
+        self.assertFalse(toggle.next().isVisible())
+
+        title_cursor = QTextCursor(toggle)
+        title_cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+        title = self.editor.cursorRect(title_cursor).center()
+        QTest.mouseClick(self.editor.viewport(), Qt.MouseButton.MiddleButton, pos=title)
+        self.assertTrue(self.editor._toggle_is_open(toggle))
+        self.assertTrue(toggle.next().isVisible())
 
     def test_space_at_the_marker_folds(self):
         toggle = self._toggle_with_children()
@@ -199,6 +515,65 @@ class EmptyToggleHintTest(unittest.TestCase):
         self.assertTrue(self.editor.current_block_is_toggle(), "커서가 안쪽 빈 줄로 끌려갔습니다")
         self.editor.textCursor().insertText("2")
         self.assertEqual(self.editor.document().begin().text(), f"{TOGGLE_OPEN_PREFIX}테스트2")
+
+    def test_empty_title_enter_moves_directly_to_the_hint_line(self):
+        self.editor.make_toggle()
+        toggle = self.editor.document().begin()
+        hint = self.editor._lone_empty_child(toggle)
+        self.assertEqual(self.editor.textCursor().block(), toggle)
+        self.assertEqual(toggle.next(), hint)
+        press(self.editor, Qt.Key.Key_Return)
+        self.assertEqual(self.editor.textCursor().block(), hint)
+        self.assertEqual(self.editor.document().blockCount(), 2)
+        self.assertEqual(self._hinted(), [TOGGLE_OPEN_PREFIX])
+
+    def test_typed_empty_toggle_enter_uses_the_same_hint_line(self):
+        press(self.editor, Qt.Key.Key_Greater, ">")
+        press(self.editor, Qt.Key.Key_Space, " ")
+        toggle = self.editor.document().begin()
+        hint = self.editor._lone_empty_child(toggle)
+        self.assertEqual(self.editor.textCursor().block(), toggle)
+        self.assertEqual(toggle.next(), hint)
+        press(self.editor, Qt.Key.Key_Return)
+        self.assertEqual(self.editor.textCursor().block(), hint)
+        self.assertEqual(self.editor.document().blockCount(), 2)
+
+    def test_after_heading_exit_empty_toggle_has_no_intermediate_child_line(self):
+        self.editor.insert_structured_html("<h1>A</h1><h2>B</h2><h3>C</h3>", {1, 2, 3})
+        third = self.editor.document().begin().next().next()
+        self.editor.setTextCursor(QTextCursor(third))
+        press(self.editor, Qt.Key.Key_Return, modifiers=Qt.KeyboardModifier.ShiftModifier)
+        self.editor.make_toggle()
+        toggle = self.editor.textCursor().block()
+        hint = self.editor._lone_empty_child(toggle)
+        self.assertTrue(is_section_break(toggle))
+        self.assertEqual(toggle.next(), hint)
+        self.assertEqual(self.editor.textCursor().block(), toggle)
+        press(self.editor, Qt.Key.Key_Return)
+        self.assertEqual(self.editor.textCursor().block(), hint)
+
+    def test_empty_toggle_discards_inherited_heading_spacing(self):
+        cursor = self.editor.textCursor()
+        inherited = cursor.blockFormat()
+        inherited.setHeadingLevel(3)
+        inherited.setTopMargin(12)
+        inherited.setBottomMargin(24)
+        cursor.setBlockFormat(inherited)
+        self.editor.setTextCursor(cursor)
+        self.editor.make_toggle()
+        title = self.editor.document().begin()
+        child = self.editor._lone_empty_child(title)
+        self.assertEqual(self.editor.textCursor().block(), title)
+        self.assertEqual(self.editor.heading_level(title), 0)
+        self.assertEqual(title.blockFormat().topMargin(), 0)
+        self.assertEqual(title.blockFormat().bottomMargin(), 0)
+        self.assertEqual(title.next(), child)
+        self.app.processEvents()
+        self.assertLessEqual(
+            self.editor.cursorRect(QTextCursor(child)).top()
+            - self.editor.cursorRect(QTextCursor(title)).top(),
+            self.editor.fontMetrics().height() + 6,
+        )
 
     def test_writing_inside_puts_the_hint_away(self):
         self._make_toggle()
