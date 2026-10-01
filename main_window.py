@@ -582,16 +582,19 @@ class MainWindow(QMainWindow):
         mode_layout.addWidget(self.deadline_chip)
         self.workspace_utility_buttons = []
         for text, callback, tooltip in (
+            ("설명서", self.show_help, "화면 그림으로 보는 사용 설명서 열기"),
             ("시작", self.show_start_guide, "단축키, 메모, 일정 중 하나를 빠르게 시작"),
             ("휴지통", self.show_trash, "최근 7일 안에 삭제한 작업·메모·일정 복원"),
             ("설정", self.show_settings, "전역 단축키와 시작 위치 설정"),
-            ("설명서", self.show_help, "화면 그림으로 보는 사용 설명서 열기"),
         ):
             button = self._button(mode_layout, text, callback)
             button.setObjectName("workspaceUtilityButton")
             button.setToolTip(tooltip)
             button.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
             self.workspace_utility_buttons.append(button)
+        self.workspace_settings_button = next(
+            button for button in self.workspace_utility_buttons if button.text() == "설정"
+        )
         self.shortcut_mode_button.setChecked(True)
         self.workspace_mode_group.idClicked.connect(self._switch_workspace)
         self.workspace_switch_shortcut = QShortcut(QKeySequence("Ctrl+Tab"), self)

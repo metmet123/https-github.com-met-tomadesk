@@ -6,7 +6,7 @@ import subprocess
 import threading
 from pathlib import Path
 from PyQt6.QtCore import QObject,QTimer,Qt
-from PyQt6.QtWidgets import QApplication,QDialog,QFormLayout,QLineEdit,QPushButton,QLabel,QMessageBox,QVBoxLayout,QHBoxLayout
+from PyQt6.QtWidgets import QApplication,QDialog,QFormLayout,QLineEdit,QPushButton,QLabel,QMessageBox,QVBoxLayout,QHBoxLayout,QSizePolicy
 from .pairing import pairing_payload,pairing_qr
 from .security import Auth,certificate
 from .service import MobileService
@@ -31,8 +31,14 @@ class MobileController(QObject):
         self.cert,self.key,self.fingerprint=certificate(self.root)
         self.service=MobileService(window.note_store,self.busy)
         self.timer=QTimer(self); self.timer.setInterval(80); self.timer.timeout.connect(self.process)
-        button=QPushButton('휴대폰 연결 · 로그인'); button.setObjectName('mobileConnectButton'); button.clicked.connect(self.settings)
-        window.statusBar().addPermanentWidget(button)
+        button=QPushButton('휴대폰연결',window); button.setObjectName('workspaceUtilityButton'); button.setToolTip('휴대폰 연결과 로그인 설정')
+        button.setAccessibleName('휴대폰 연결'); button.setSizePolicy(QSizePolicy.Policy.Maximum,QSizePolicy.Policy.Fixed); button.clicked.connect(self.settings)
+        # Keep connection with the always-visible top tools.  It sits immediately
+        # left of Settings and uses the exact same button styling and height.
+        settings_button=window.workspace_settings_button
+        window.workspace_mode_layout.insertWidget(window.workspace_mode_layout.indexOf(settings_button),button)
+        button.setFixedHeight(settings_button.sizeHint().height())
+        self.button=button
         QApplication.instance().aboutToQuit.connect(self.stop)
 
     def busy(self):
