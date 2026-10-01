@@ -16,7 +16,8 @@ dist/
 
 # 실행파일/배포 결과
 output/
-release/
+release/*
+!release/*.apk
 
 # 로그
 *.log
@@ -45,7 +46,6 @@ __pycache__/
 tmp/
 tmpx6rm3gcr/
 output/
-release/
 data/
 # 테스트 산출물
 **/test/out/
