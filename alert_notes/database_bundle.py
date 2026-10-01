@@ -8,6 +8,47 @@ from datetime import datetime
 from pathlib import Path
 
 
+def full_database_schema(conn: sqlite3.Connection) -> dict[str, tuple[str, ...]]:
+    """Discover every ordinary application table in FK-safe restore order.
+
+    A future virtual/shadow table needs an explicit backup design. Fail instead
+    of silently producing a backup that calls itself complete but omits data.
+    """
+    tables = {}
+    for schema, name, kind, *_ in conn.execute('PRAGMA table_list'):
+        if schema != 'main' or name.startswith('sqlite_'):
+            continue
+        if kind == 'view':
+            continue  # Views store no rows; their source tables are backed up.
+        _validate_identifier(name)
+        if kind != 'table':
+            raise ValueError(f'{name}: 전체 백업이 지원하지 않는 테이블 형식입니다 ({kind}).')
+        columns = tuple(row[1] for row in conn.execute(f'PRAGMA table_info({name})'))
+        if not columns:
+            raise ValueError(f'{name}: 백업할 열을 확인할 수 없습니다.')
+        for column in columns:
+            _validate_identifier(column)
+        tables[name] = columns
+    if not tables:
+        raise ValueError('전체 백업 대상 테이블이 없습니다.')
+    dependencies = {
+        table: {row[2] for row in conn.execute(f'PRAGMA foreign_key_list({table})')
+                if row[2] in tables and row[2] != table}
+        for table in tables
+    }
+    ordered = {}
+    while dependencies:
+        ready = sorted(table for table, parents in dependencies.items() if not parents)
+        if not ready:
+            raise ValueError('테이블 참조 순환으로 전체 백업 복원 순서를 정할 수 없습니다.')
+        for table in ready:
+            ordered[table] = tables[table]
+            del dependencies[table]
+        for parents in dependencies.values():
+            parents.difference_update(ready)
+    return ordered
+
+
 def export_database_bundle(sources: dict, path: Path) -> Path:
     """Export named SQLite connections and selected tables to one JSON file."""
     payload = {"format": "sqlite-database-bundle", "version": 1, "exported_at": _timestamp(), "databases": {}}
@@ -31,7 +72,9 @@ def export_database_bundle(sources: dict, path: Path) -> Path:
     return output
 
 
-def import_database_bundle(targets: dict, path: Path, legacy_name: str | None = None) -> set[str]:
+def import_database_bundle(targets: dict, path: Path, legacy_name: str | None = None,
+                           optional_missing_tables: dict[str, set[str]] | None = None,
+                           reject_unknown_tables: bool = False) -> set[str]:
     """Validate first, then restore all file databases in one SQLite transaction.
 
     Attached rollback-journal databases participate in SQLite's super-journal.
@@ -55,7 +98,11 @@ def import_database_bundle(targets: dict, path: Path, legacy_name: str | None = 
         if name not in databases:
             continue
         tables = databases[name]
-        if not isinstance(tables, dict) or not table_columns or not set(table_columns).issubset(tables):
+        optional = set((optional_missing_tables or {}).get(name, ()))
+        if reject_unknown_tables and isinstance(tables, dict) and set(tables) - set(table_columns):
+            raise ValueError(f'{name}: 현재 프로그램에 없는 테이블이 포함된 백업입니다. 기존 데이터는 변경하지 않습니다.')
+        if (not isinstance(tables, dict) or not table_columns
+                or (set(table_columns) - set(tables)) - optional):
             raise ValueError(f'{name}: 필수 테이블이 빠진 백업입니다. 기존 데이터는 변경하지 않습니다.')
         if conn.in_transaction:
             raise ValueError('저장 중인 변경이 있습니다. 저장을 마친 뒤 복원해 주세요.')
@@ -74,7 +121,10 @@ def import_database_bundle(targets: dict, path: Path, legacy_name: str | None = 
             _validate_identifier(table)
             for column in columns:
                 _validate_identifier(column)
-            rows = tables[table]
+            # An older backup can omit newly introduced, explicitly optional
+            # tables. Restore them as empty in the same transaction so stale
+            # current-device rows cannot survive beside older source data.
+            rows = tables.get(table, [])
             if not isinstance(rows, list):
                 raise ValueError(f'{table}: 행 목록이 올바르지 않습니다.')
             primary = [r[1] for r in conn.execute(f'PRAGMA table_info({table})') if r[5]]
@@ -85,9 +135,17 @@ def import_database_bundle(targets: dict, path: Path, legacy_name: str | None = 
                     raise ValueError(f'{table}: 행 식별자가 빠졌습니다.')
                 if any(isinstance(v, (list, dict)) for v in row.values()):
                     raise ValueError(f'{table}: 지원하지 않는 값 형식입니다.')
+                if reject_unknown_tables and set(row) - set(columns):
+                    raise ValueError(f'{table}: 현재 프로그램에 없는 열이 포함된 백업입니다.')
                 if table == 'settings' and 'value' not in row:
                     raise ValueError('설정 값이 빠졌습니다.')
             cleaned[table] = [dict(row) for row in rows]
+            # Old full backups stored category_id in notes without exporting
+            # memo_categories. Those IDs must not point at unrelated categories
+            # after the missing category table is reset during restore.
+            if table == 'notes' and 'memo_categories' in table_columns and 'memo_categories' not in tables:
+                for row in cleaned[table]:
+                    row['category_id'] = None
             # Permission is a current user decision, never a capability granted
             # by an imported file. Reset it only when this setting exists locally
             # or in the backup; generic settings tables remain untouched.

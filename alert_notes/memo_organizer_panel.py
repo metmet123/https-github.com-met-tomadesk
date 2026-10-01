@@ -11,6 +11,8 @@ from PyQt6.QtWidgets import (
 
 from .categories import CATEGORIES, schedule_categories
 from .external_ai_policy import ExternalAIPolicy
+from .hub_actions import HubActionStore
+from .hub_snapshot_dialog import HubSnapshotVisibilityDialog
 from .memo_organizer import KINDS, validate
 from .memo_organizer_store import DRAFT_KEY, OrganizerStore, DuplicateMemoError
 
@@ -66,6 +68,9 @@ class OrganizerPanel(QWidget):
         self.captures = QComboBox()
         self.captures.currentIndexChanged.connect(self._load_capture)
         saved_row.addWidget(self.captures, 1)
+        self.capture_refresh_button = QPushButton("새로고침")
+        self.capture_refresh_button.clicked.connect(self.reload_captures)
+        saved_row.addWidget(self.capture_refresh_button)
         self.raw_toggle = QPushButton("원문 보기")
         self.raw_toggle.setCheckable(True)
         saved_row.addWidget(self.raw_toggle)
@@ -92,7 +97,13 @@ class OrganizerPanel(QWidget):
         box.addWidget(self.review, 1)
         self.apply_button = QPushButton("선택 항목 반영")
         self.apply_button.clicked.connect(self.apply_selected)
-        box.addWidget(self.apply_button)
+        action_row = QHBoxLayout()
+        action_row.addWidget(self.apply_button, 1)
+        self.reject_button = QPushButton("외부 요청 거부")
+        self.reject_button.setToolTip("수집된 외부 요청을 반영하지 않고 종료합니다. 원문과 영수증은 보존됩니다.")
+        self.reject_button.clicked.connect(self.reject_external)
+        action_row.addWidget(self.reject_button)
+        box.addLayout(action_row)
         self.views.addTab(capture_page, "수집함·검토")
         overview = QWidget()
         over = QVBoxLayout(overview)
@@ -113,7 +124,14 @@ class OrganizerPanel(QWidget):
         snapshot = QPushButton("전체 요약을 메모로 저장")
         snapshot.clicked.connect(self.save_snapshot)
         filters.addWidget(snapshot)
+        self.visibility_button = QPushButton("조회 공개 선택")
+        self.visibility_button.setToolTip("외부로 전송하지 않고, 향후 읽기 전용 조회에 포함할 일정만 선택합니다.")
+        self.visibility_button.clicked.connect(self.choose_snapshot_visibility)
         over.addLayout(filters)
+        visibility_row = QHBoxLayout()
+        visibility_row.addStretch()
+        visibility_row.addWidget(self.visibility_button)
+        over.addLayout(visibility_row)
         split = QSplitter(Qt.Orientation.Vertical)
         self.overview = QTableWidget(0, 6)
         self.overview.setHorizontalHeaderLabels(["완료", "내용", "종류", "날짜·D-day", "분류", "상태"])
@@ -172,6 +190,18 @@ class OrganizerPanel(QWidget):
             captures = self.repo.load()["captures"]
             for capture in reversed(captures):
                 label = capture["raw"].splitlines()[0][:55]
+                if capture.get("external"):
+                    source = capture["external"]["source"]
+                    try:
+                        state = HubActionStore(self.store).receipt(capture["external"]["action_id"])["state"]
+                    except KeyError:
+                        state = "missing"
+                    source_label = "텔레그램" if source == "telegram" else source
+                    state_label = {
+                        "awaiting_review": "검토 대기", "applied": "반영됨",
+                        "rejected": "거부됨", "missing": "영수증 없음",
+                    }.get(state, state)
+                    label = f"{source_label} · {state_label} · {label}"
                 self.captures.addItem(f"{capture['base']} · {label}", capture["id"])
             index = self.captures.findData(self.capture_id)
             self.captures.setCurrentIndex(index if index >= 0 else (0 if captures else -1))
@@ -184,9 +214,20 @@ class OrganizerPanel(QWidget):
     def _load_capture(self, *_):
         self.capture_id = self.captures.currentData()
         if not self.capture_id:
+            self.apply_button.setEnabled(False)
+            self.reject_button.setEnabled(False)
             return
         self._loading = True
         capture = self.repo.get_capture(self.capture_id)
+        external_state = None
+        if capture.get("external"):
+            try:
+                external_state = HubActionStore(self.store).receipt(capture["external"]["action_id"])["state"]
+            except KeyError:
+                external_state = "missing"
+        external_final = external_state is not None and external_state != "awaiting_review"
+        self.apply_button.setEnabled(not external_final)
+        self.reject_button.setEnabled(external_state == "awaiting_review")
         self.raw.setPlainText(capture["raw"])
         self._items = capture["items"]
         self.review.setRowCount(len(self._items))
@@ -195,7 +236,7 @@ class OrganizerPanel(QWidget):
             + [name for name, _ in CATEGORIES] + [str(c["name"]) for c in self.store.categories()]
         ))
         for row, item in enumerate(self._items):
-            locked = bool(item.get("schedule_id"))
+            locked = bool(item.get("schedule_id")) or external_final
             duplicate = bool(self.repo.duplicate_titles([item])) if not locked else False
             reason = item['reason'] + (' 중복 가능: 이미 반영한 항목이 있습니다.' if duplicate else '')
             choice = QTableWidgetItem()
@@ -203,7 +244,16 @@ class OrganizerPanel(QWidget):
             choice.setCheckState(Qt.CheckState.Checked if not locked and not reason else Qt.CheckState.Unchecked)
             self.review.setItem(row, 0, choice)
             for col, key in ((1, "title"), (3, "day"), (4, "clock"), (5, "end_clock"), (8, "reason")):
-                text = ("등록됨 · 캘린더에서 수정" if locked else reason) if col == 8 else str(item[key])
+                if col == 8 and locked:
+                    text = (
+                        "등록됨 · 캘린더에서 수정" if item.get("schedule_id") else
+                        "등록됨 · 메모에서 수정" if item.get("note_id") else
+                        "거부됨 · 원문만 보존" if external_state == "rejected" else
+                        "이번 승인에서 제외됨" if external_state == "applied" else
+                        "영수증 확인 필요"
+                    )
+                else:
+                    text = reason if col == 8 else str(item[key])
                 cell = QTableWidgetItem(text)
                 cell.setToolTip(item["raw"] if col == 1 else text)
                 if locked or col == 8:
@@ -272,8 +322,19 @@ class OrganizerPanel(QWidget):
         values = [self._values(row) for row in range(self.review.rowCount())
                   if self.review.item(row, 0).checkState() == Qt.CheckState.Checked]
         try:
+            capture = self.repo.get_capture(self.capture_id)
+            external = capture.get("external")
+
+            def apply(allow_duplicates=False):
+                if external:
+                    result = HubActionStore(self.store).apply_review(
+                        external["action_id"], values, allow_duplicates=allow_duplicates,
+                    )
+                    return result["applied_count"]
+                return self.repo.apply(self.capture_id, values, allow_duplicates=allow_duplicates)
+
             try:
-                count = self.repo.apply(self.capture_id, values) if values else 0
+                count = apply() if values else 0
             except DuplicateMemoError:
                 answer = QMessageBox.question(self, '중복 메모 확인',
                     '같은 내용·날짜·시각·분류의 항목이 있습니다.\n그래도 별도 항목으로 반영할까요?',
@@ -281,9 +342,30 @@ class OrganizerPanel(QWidget):
                     QMessageBox.StandardButton.No)
                 if answer != QMessageBox.StandardButton.Yes:
                     return
-                count = self.repo.apply(self.capture_id, values, allow_duplicates=True)
+                count = apply(allow_duplicates=True)
             self.status.setText(f"{count}개 항목을 반영했습니다." if count else "반영할 항목을 선택해 주세요.")
-            self._load_capture()
+            self.reload_captures()
+            self.refresh_overview()
+            self.changed.emit()
+        except (ValueError, KeyError, sqlite3.Error) as exc:
+            self._error(exc)
+
+    def reject_external(self):
+        try:
+            capture = self.repo.get_capture(self.capture_id)
+            external = capture.get("external")
+            if not external:
+                raise ValueError("외부 요청만 거부할 수 있습니다.")
+            answer = QMessageBox.question(
+                self, "외부 요청 거부", "이 요청을 반영하지 않고 종료할까요? 원문은 보존됩니다.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+            HubActionStore(self.store).reject(external["action_id"])
+            self.status.setText("외부 요청을 거부했습니다. 원문과 영수증은 보존됩니다.")
+            self.reload_captures()
             self.refresh_overview()
             self.changed.emit()
         except (ValueError, KeyError, sqlite3.Error) as exc:
@@ -352,6 +434,13 @@ class OrganizerPanel(QWidget):
             self.changed.emit()
         except (ValueError, sqlite3.Error) as exc:
             self._error(exc)
+
+    def choose_snapshot_visibility(self):
+        dialog = HubSnapshotVisibilityDialog(self.store, self)
+        accepted = dialog.exec() == dialog.DialogCode.Accepted
+        dialog.deleteLater()
+        if accepted:
+            self.status.setText("조회 공개 일정 선택을 저장했습니다. 현재는 외부로 전송하지 않습니다.")
 
     def _tick(self):
         if self.isVisible():

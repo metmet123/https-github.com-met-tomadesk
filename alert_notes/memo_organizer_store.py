@@ -6,6 +6,7 @@ The ledger and schedule inserts are committed in one transaction, without a sche
 from __future__ import annotations
 
 from copy import deepcopy
+from contextlib import nullcontext
 from datetime import date, datetime, time, timedelta
 from html import escape
 import json
@@ -59,16 +60,39 @@ class OrganizerStore:
         state = self.load()
         # Repeated clicks/reopening the same capture do not create duplicate schedules.
         for capture in state["captures"]:
-            if capture["raw"] == raw and capture["base"] == base.isoformat() and capture.get('parser_version') == 2:
+            if (not capture.get("external") and capture["raw"] == raw
+                    and capture["base"] == base.isoformat() and capture.get('parser_version') == 2):
                 return capture["id"]
+        capture = self._new_capture(raw, base, candidates)
+        state["captures"].append(capture)
+        with self.store.conn:
+            self._write(state)
+        return capture["id"]
+
+    @staticmethod
+    def _new_capture(raw, base, candidates):
         capture = {"id": uuid4().hex, "raw": raw, "base": base.isoformat(), "items": [], "parser_version": 2}
         for candidate in candidates:
             item = candidate.to_dict()
             item.update(id=uuid4().hex, applied=False, completed=False, schedule_id=None, notify=False)
             capture["items"].append(item)
+        return capture
+
+    def capture_external(self, raw: str, base: date, *, action_id: str, source: str,
+                         source_event_id: str) -> str:
+        """Capture a distinct external event inside the caller's transaction."""
+        if not self.store.conn.in_transaction:
+            raise ValueError("외부 트랜잭션이 시작되지 않았습니다.")
+        candidates = analyze(raw, base)
+        if not candidates:
+            raise ValueError("정리할 메모를 입력해 주세요.")
+        state = self.load()
+        capture = self._new_capture(raw, base, candidates)
+        capture["external"] = {
+            "action_id": action_id, "source": source, "source_event_id": source_event_id,
+        }
         state["captures"].append(capture)
-        with self.store.conn:
-            self._write(state)
+        self._write(state)
         return capture["id"]
 
     def get_capture(self, capture_id):
@@ -77,6 +101,13 @@ class OrganizerStore:
     def save_review(self, capture_id, edited):
         state = self.load()
         capture = next(c for c in state["captures"] if c["id"] == capture_id)
+        if capture.get("external"):
+            receipt = self.store.conn.execute(
+                "SELECT state FROM hub_actions WHERE action_id=?",
+                (capture["external"]["action_id"],),
+            ).fetchone()
+            if receipt is None or receipt["state"] != "awaiting_review":
+                raise ValueError("이미 종료되었거나 영수증이 없는 외부 요청은 수정할 수 없습니다.")
         by_id = {item["id"]: item for item in capture["items"]}
         for values in edited:
             item = by_id[values["id"]]
@@ -105,9 +136,14 @@ class OrganizerStore:
             existing[key] = item['id']
         return list(dict.fromkeys(duplicates))
 
-    def apply(self, capture_id: str, edited: list[dict], *, allow_duplicates=False):
+    def apply(self, capture_id: str, edited: list[dict], *, allow_duplicates=False,
+              manage_transaction=True):
+        if not manage_transaction and not self.store.conn.in_transaction:
+            raise ValueError("외부 트랜잭션이 시작되지 않았습니다.")
         state = self.load()
         capture = next(c for c in state["captures"] if c["id"] == capture_id)
+        if capture.get("external") and manage_transaction:
+            raise ValueError("외부 요청은 Action 영수증과 함께 반영해야 합니다.")
         by_id = {item["id"]: item for item in capture["items"]}
         selected = []
         seen = set()
@@ -117,8 +153,8 @@ class OrganizerStore:
                 raise ValueError("수집함 항목이 변경되었습니다. 다시 열어 주세요.")
             seen.add(identifier)
             old = by_id[identifier]
-            if old.get("schedule_id"):
-                continue  # Native calendar is authoritative after registration.
+            if old.get("schedule_id") or old.get("note_id"):
+                continue  # Native calendar/note is authoritative after registration.
             item = deepcopy(old)
             for key in ("title", "kind", "day", "clock", "end_clock", "category", "notify"):
                 item[key] = values.get(key, item.get(key))
@@ -128,7 +164,7 @@ class OrganizerStore:
             selected.append(item)
         if not allow_duplicates and self.duplicate_titles(selected):
             raise DuplicateMemoError("같은 내용·날짜·시각·분류의 항목이 이미 있습니다. 중복 여부를 확인해 주세요.")
-        with self.store.conn:
+        with self.store.conn if manage_transaction else nullcontext():
             for item in selected:
                 if item["kind"] in ("task", "event") and item["day"]:
                     day = date.fromisoformat(item["day"])
@@ -145,6 +181,14 @@ class OrganizerStore:
                         }.get(item["category"], dict(CATEGORIES).get(item["category"], "lavender")),
                         "count_as_dday": item["kind"] == "task", "reminders": [0] if item["notify"] else [],
                     }, manage_transaction=False)
+                elif capture.get("external") and item["kind"] in ("idea", "info"):
+                    # External free-form notes become ordinary native notes. The
+                    # original line remains in the capture and is HTML-escaped
+                    # so a pasted tag cannot become executable/editor markup.
+                    item["note_id"] = self.store.create_note(
+                        item["title"], f"<p>{escape(item['raw'])}</p>",
+                        manage_transaction=False, sync_alarms=False,
+                    )
                 item["applied"] = True
                 by_id[item["id"]].update(item)
             self._write(state)
@@ -153,7 +197,19 @@ class OrganizerStore:
     def rows(self):
         rows = []
         for capture in self.load()["captures"]:
+            external = capture.get("external")
+            external_state = None
+            if external:
+                receipt = self.store.conn.execute(
+                    "SELECT state FROM hub_actions WHERE action_id=?",
+                    (external["action_id"],),
+                ).fetchone()
+                external_state = receipt["state"] if receipt else "missing"
+                if external_state in ("rejected", "missing"):
+                    continue
             for source in capture["items"]:
+                if external_state == "applied" and not source["applied"]:
+                    continue
                 item = dict(source, capture_id=capture["id"], base=capture["base"])
                 if item.get("schedule_id"):
                     schedule = self.store.schedules.item(item["schedule_id"])
@@ -170,6 +226,11 @@ class OrganizerStore:
                     native_category = schedule_category_name(schedule_categories(self.store), schedule["category"])
                     if native_category != "기타" or item["category"] in dict(CATEGORIES):
                         item["category"] = native_category
+                elif item.get("note_id"):
+                    native_note = self.store.note(item["note_id"])
+                    if native_note is None:
+                        continue
+                    item["title"] = native_note["title"]
                 rows.append(item)
         return sorted(rows, key=lambda r: (r["completed"], r["day"] or "9999", r["clock"], r["title"]))
 

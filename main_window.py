@@ -19,7 +19,7 @@ from action_runner import ActionRunner
 from layout_favorites_panel import WorkspaceSettings
 from layout_workspace import workspace_payload
 from layout_workspace_controller import WorkspaceController
-from alert_notes.database_bundle import export_database_bundle, import_database_bundle
+from alert_notes.database_bundle import export_database_bundle, full_database_schema, import_database_bundle
 from alert_notes.deadline import (
     deadline_chip_text, deadline_days_left, deadline_title, deadline_urgency,
     set_count_today_as_one,
@@ -29,14 +29,8 @@ from alert_notes.schedule_popover import StandaloneSchedulePopover
 from alert_notes.quick_capture import QuickMemoDialog
 from alert_notes.service import AlertService
 from alert_notes.toma_pet_window import TomaPetController
-from alert_notes.schedule_store import (
-    EXCEPTION_COLUMNS, ITEM_COLUMNS, NOTIFICATION_COLUMNS, NOTIFICATION_LOG_COLUMNS,
-)
 from alert_notes.schedule_postit_settings import SchedulePostitPreferences
-from alert_notes.sqlite_store import (
-    ATTACHMENT_COLUMNS, HISTORY_COLUMNS, NOTE_COLUMNS, REMINDER_COLUMNS, SERIES_COLUMNS,
-    SETTING_COLUMNS, NoteReminderStore,
-)
+from alert_notes.sqlite_store import NoteReminderStore
 from app_icon import application_icon
 from app_config import APP_NAME, APP_VERSION
 from app_utils import now_key
@@ -74,10 +68,8 @@ from shortcut_overlay import (
     ShortcutOverlayEntry,
 )
 from store import (
-    COLUMNS as HOTKEY_COLUMNS,
     EXPLORER_DBLCLICK_SETTING,
     EXPLORER_MIDDLE_CLICK_SETTING,
-    TABLES as HOTKEY_TABLES,
     Store,
 )
 from storage_config import (
@@ -4062,12 +4054,8 @@ class MainWindow(QMainWindow):
     def _export_bundle(self, path: Path) -> Path:
         export_database_bundle(
             {
-                "hotkeys": (self.store.conn, HOTKEY_TABLES),
-                "alert_notes": (
-                    self.note_store.conn,
-                    ("notes", "note_attachments", "reminder_series", "reminders", "reminder_history", "settings", "schedule_items", "schedule_notifications",
-                     "schedule_notification_log", "schedule_occurrence_exceptions"),
-                ),
+                "hotkeys": (self.store.conn, full_database_schema(self.store.conn)),
+                "alert_notes": (self.note_store.conn, full_database_schema(self.note_store.conn)),
             },
             path,
         )
@@ -4103,11 +4091,21 @@ class MainWindow(QMainWindow):
         )
         if not path:
             return
+        missing_memo_warning = ""
         try:
             payload = json.loads(Path(path).read_text(encoding="utf-8"))
             databases = payload.get("databases", {})
             hotkeys = databases.get("hotkeys", {})
             notes = databases.get("alert_notes", {})
+            if isinstance(notes, dict):
+                missing = {"memo_categories", "memo_annotations", "memo_templates",
+                           "memo_versions", "sync_tombstones"} - set(notes)
+                if "alert_notes" in databases and missing:
+                    missing_memo_warning = (
+                        "이전 백업에는 메모 카테고리·주석·템플릿·버전 또는 동기화 삭제 기록이 "
+                        "포함되지 않았습니다. 누락된 항목은 복원할 수 없으며 현재 기기의 해당 기록은 "
+                        "비워집니다. 복원 직전 안전 백업에는 현재 기록이 저장됩니다.\n"
+                    )
             preview = (
                 f"단축키 작업 {len(hotkeys.get('hotkey_actions', []))}개, "
                 f"메모 {len(notes.get('notes', []))}개, "
@@ -4120,6 +4118,7 @@ class MainWindow(QMainWindow):
             "전체 복원",
             f"복원 대상: {preview}\n\n"
             "현재 단축키 작업·메모·일정·알림·설정을 교체합니다.\n"
+            f"{missing_memo_warning}"
             "외부 AI 설정이 포함된 복원은 차단 상태로 적용됩니다. 필요하면 설정에서 다시 허용하세요.\n"
             "복원 직전 현재 상태는 안전 백업으로 자동 저장됩니다. 복원할까요?",
         ) != QMessageBox.StandardButton.Yes:
@@ -4129,20 +4128,16 @@ class MainWindow(QMainWindow):
             self._export_bundle(safety_path)
             import_database_bundle(
                 {
-                    "hotkeys": (self.store.conn, HOTKEY_COLUMNS),
-                    "alert_notes": (
-                        self.note_store.conn,
-                        {"notes": list(NOTE_COLUMNS), "note_attachments": list(ATTACHMENT_COLUMNS),
-                         "reminder_series": list(SERIES_COLUMNS),
-                         "reminders": list(REMINDER_COLUMNS), "reminder_history": list(HISTORY_COLUMNS),
-                         "settings": list(SETTING_COLUMNS), "schedule_items": list(ITEM_COLUMNS),
-                         "schedule_notifications": list(NOTIFICATION_COLUMNS),
-                         "schedule_notification_log": list(NOTIFICATION_LOG_COLUMNS),
-                         "schedule_occurrence_exceptions": list(EXCEPTION_COLUMNS)},
-                    ),
+                    "hotkeys": (self.store.conn, full_database_schema(self.store.conn)),
+                    "alert_notes": (self.note_store.conn, full_database_schema(self.note_store.conn)),
                 },
                 Path(path),
                 legacy_name="hotkeys",
+                optional_missing_tables={"alert_notes": {
+                    "memo_categories", "memo_annotations", "memo_templates", "memo_versions",
+                    "sync_tombstones", "hub_actions", "hub_visible_schedule",
+                }},
+                reject_unknown_tables=True,
             )
         except Exception as exc:
             QMessageBox.warning(self, "전체 복원 실패", str(exc))

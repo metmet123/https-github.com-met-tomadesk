@@ -4,6 +4,7 @@ import os
 import json
 import sqlite3
 import tempfile
+from contextlib import nullcontext
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -49,6 +50,28 @@ HISTORY_COLUMNS = (
     "id", "note_id", "memo", "fired_at", "action", "series_id", "repeat_summary", "occurrence_kind",
 )
 SETTING_COLUMNS = ("key", "value")
+SYNC_TOMBSTONE_COLUMNS = (
+    "entity_type", "sync_id", "revision", "deleted_at_utc", "origin_device_id",
+)
+ANNOTATION_COLUMNS = (
+    "id", "sync_id", "memo_id", "block_id", "start_offset", "end_offset", "quote",
+    "context_before", "context_after", "comment", "location_status", "revision",
+    "created_at_utc", "modified_at_utc", "origin_device_id",
+)
+TEMPLATE_COLUMNS = (
+    "id", "sync_id", "name", "trigger", "sort_order", "payload_version", "payload_json",
+    "revision", "created_at_utc", "modified_at_utc", "origin_device_id",
+)
+VERSION_COLUMNS = (
+    "id", "sync_id", "memo_id", "payload_hash", "payload_json", "kind", "important",
+    "created_at_utc", "origin_device_id",
+)
+HUB_ACTION_COLUMNS = (
+    "action_id", "source", "source_event_id", "envelope_hash", "action_json",
+    "state", "capture_id", "result_ref", "error_code", "processed_at_utc",
+    "applied_count", "created_at_utc",
+)
+HUB_VISIBLE_SCHEDULE_COLUMNS = ("schedule_id", "external_id", "enabled", "created_at_utc")
 
 
 class NoteReminderStore(ReminderStoreMixin, ReminderRecurrenceStoreMixin):
@@ -103,6 +126,7 @@ class NoteReminderStore(ReminderStoreMixin, ReminderRecurrenceStoreMixin):
             "memo_categories", "sync_tombstones", "memo_annotations",
             "memo_templates", "memo_versions",
         }.issubset(tables)
+        needs_hub_actions = not {"hub_actions", "hub_visible_schedule"}.issubset(tables)
         needs_reminders = "reminders" in tables and self._reminders_need_rebuild()
         reminder_columns = (
             {str(row[1]) for row in self.conn.execute("PRAGMA table_info(reminders)")}
@@ -113,9 +137,10 @@ class NoteReminderStore(ReminderStoreMixin, ReminderRecurrenceStoreMixin):
         if not (
             needs_schedule or needs_schedule_shape or needs_notes or needs_attachments
             or needs_reminders or needs_inline_alarm or needs_support or needs_sync
+            or needs_hub_actions
         ):
             return None
-        stamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        stamp = datetime.now().strftime("%Y%m%d%H%M%S%f")
         target = self.path.with_name(f"alert_notes_before_upgrade_{stamp}.db")
         target_conn = sqlite3.connect(target)
         try:
@@ -216,6 +241,29 @@ class NoteReminderStore(ReminderStoreMixin, ReminderRecurrenceStoreMixin):
             );
             CREATE INDEX IF NOT EXISTS idx_memo_versions_memo_created
                 ON memo_versions(memo_id,created_at_utc DESC,id DESC);
+            CREATE TABLE IF NOT EXISTS hub_actions (
+                action_id TEXT PRIMARY KEY,
+                source TEXT NOT NULL,
+                source_event_id TEXT NOT NULL,
+                envelope_hash TEXT NOT NULL,
+                action_json TEXT NOT NULL,
+                state TEXT NOT NULL,
+                capture_id TEXT,
+                result_ref TEXT,
+                error_code TEXT,
+                processed_at_utc TEXT,
+                applied_count INTEGER NOT NULL DEFAULT 0,
+                created_at_utc TEXT NOT NULL,
+                UNIQUE(source,source_event_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_hub_actions_state ON hub_actions(state,created_at_utc);
+            CREATE TABLE IF NOT EXISTS hub_visible_schedule (
+                schedule_id INTEGER PRIMARY KEY,
+                external_id TEXT NOT NULL UNIQUE,
+                enabled INTEGER NOT NULL DEFAULT 0,
+                created_at_utc TEXT NOT NULL,
+                FOREIGN KEY(schedule_id) REFERENCES schedule_items(id) ON DELETE CASCADE
+            );
             CREATE TABLE IF NOT EXISTS reminder_series (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, note_id INTEGER, memo TEXT NOT NULL,
                 rule_type TEXT NOT NULL, weekdays TEXT NOT NULL DEFAULT '[]', month_day INTEGER,
@@ -388,9 +436,14 @@ class NoteReminderStore(ReminderStoreMixin, ReminderRecurrenceStoreMixin):
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,),
         ).fetchone() is not None
 
-    def create_note(self, title: str | None = None, content: str = "", *, d_day_at: str = "") -> int:
+    def create_note(self, title: str | None = None, content: str = "", *, d_day_at: str = "",
+                    manage_transaction: bool = True, sync_alarms: bool = True) -> int:
         # Optional, silent D-Day is inserted with the note in one transaction.
         # This avoids an orphan note if the second half of an OCR save fails.
+        if not manage_transaction and sync_alarms:
+            raise ValueError("외부 트랜잭션에서 메모를 만들 때는 알림 동기화를 끄세요.")
+        if not manage_transaction and not self.conn.in_transaction:
+            raise ValueError("외부 트랜잭션이 시작되지 않았습니다.")
         due = str(d_day_at or "")
         if due and (len(due) != 12 or not due.isascii() or not due.isdigit()):
             raise ValueError("올바른 D-Day 날짜·시간이 필요합니다.")
@@ -399,7 +452,7 @@ class NoteReminderStore(ReminderStoreMixin, ReminderRecurrenceStoreMixin):
         stamp = self._now_key()
         sync_stamp = utc_now_ms()
         resolved_title = str(title or "").strip() or self.default_title
-        with self.conn:
+        with self.conn if manage_transaction else nullcontext():
             cursor = self.conn.execute(
                 "INSERT INTO notes(title,content,created_at,updated_at,sync_id,revision,modified_at_utc,origin_device_id,d_day_at,d_day_label,d_day_alert) "
                 "VALUES(?,?,?,?,?,1,?,?,?,?,0)",
@@ -407,7 +460,8 @@ class NoteReminderStore(ReminderStoreMixin, ReminderRecurrenceStoreMixin):
                  new_sync_id(), sync_stamp, self.device_id, due, resolved_title if due else ""),
             )
         note_id = int(cursor.lastrowid)
-        self.sync_inline_alarms(note_id, content)
+        if sync_alarms:
+            self.sync_inline_alarms(note_id, content)
         return note_id
 
     def note(self, note_id: int):

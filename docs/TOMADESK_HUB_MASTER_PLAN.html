@@ -98,16 +98,17 @@
       <div class="timeline"><div class="phase"><div class="phase-no">FIRST LOOP · 0–3</div><strong>입력 → 검토 → 반영</strong><p>백업, Action, Telegram 수신, Organizer 승인. Dot 연결 가능성은 비차단 소규모 시험만 한다.</p></div><div class="phase"><div class="phase-no">DAILY USE · 4–5</div><strong>조회 → 완료 → 알림</strong><p>Snapshot을 만들고 오늘 목록과 버튼을 붙인다. 마지막 갱신 시각을 표시한다.</p></div><div class="phase"><div class="phase-no">CONNECTION · 6–8</div><strong>Calendar → AI 계층</strong><p>전용 달력 단방향 표시 후 ChatGPT·Dot 브리핑, AI Action 초안으로 확대한다.</p></div><div class="phase"><div class="phase-no">AFTER USAGE · 9–10</div><strong>모바일앱 → 고급 양방향</strong><p>실제 사용 빈도를 보고 긴 메모·오프라인·충돌 처리에 투자한다.</p></div></div>
       <div class="table-scroll"><table class="roadmap"><thead><tr><th>단계</th><th>개발 결과</th><th>실사용 시작점 / 완료 판정</th><th>상태</th></tr></thead><tbody>
         <tr><td>0</td><td>실제 DB의 백업·복원 시험, 일정 수정·완료 경로 확인, Telegram 수신 방식 소규모 실험. 별도 비차단 Dot 계정·연결 권한 PoC</td><td>자료 복원 성공. 수신 방식이 중복·누락 없이 확인됨. Dot 사용 불가여도 핵심 단계 진행.</td><td><span class="status warn">착수 전</span></td></tr>
-        <tr><td>1</td><td>Action/Receipt v1, Drive 대기열, PC 영수증, 재시도와 중복 방지</td><td>같은 요청 재전송·PC 재시작에도 적용은 한 번.</td><td><span class="status warn">착수 전</span></td></tr>
-        <tr><td>2</td><td>Telegram 개인 채팅 빠른 입력</td><td>PC가 꺼져 있어도 외부 수신 후 대기. 접수 결과 확인.</td><td><span class="status warn">착수 전</span></td></tr>
-        <tr><td>3</td><td>Organizer 외부 수집·검토, 일정/할 일/일반 메모 반영, 결과 회신</td><td>휴대폰 문장 한 건이 PC 승인 후 정확히 한 번 반영.</td><td><span class="status warn">첫 실사용</span></td></tr>
-        <tr><td>4</td><td>오늘 일정·미완료 할 일·D-Day의 최소 Snapshot</td><td>비공개 항목 제외, 오래된 Snapshot 표시, 마지막 성공본 유지.</td><td><span class="status future">후속</span></td></tr>
+        <tr><td>1</td><td>Action/Receipt v1, Drive 대기열, PC 영수증, 재시도와 중복 방지</td><td>같은 요청 재전송·PC 재시작에도 적용은 한 번.</td><td><span class="status warn">로컬 계약 구현 · Drive 전</span></td></tr>
+        <tr><td>2</td><td>Telegram 개인 채팅 빠른 입력</td><td>PC가 꺼져 있어도 외부 수신 후 대기. 접수 결과 확인.</td><td><span class="status warn">변환 어댑터 구현 · 수신 전</span></td></tr>
+        <tr><td>3</td><td>Organizer 외부 수집·검토, 일정/할 일/일반 메모 반영, 결과 회신</td><td>휴대폰 문장 한 건이 PC 승인 후 정확히 한 번 반영.</td><td><span class="status warn">로컬 승인 구현 · 결과 회신 전</span></td></tr>
+        <tr><td>4</td><td>오늘 일정·미완료 할 일·D-Day의 최소 Snapshot</td><td>비공개 항목 제외, 오래된 Snapshot 표시, 마지막 성공본 유지.</td><td><span class="status warn">공개 선택·로컬 JSON 구현 · 게시 전</span></td></tr>
         <tr><td>5</td><td><code>/today</code>·<code>/task</code>·<code>/dday</code>, 완료 버튼, 필요한 알림</td><td>완료 버튼 연타·PC 오프라인·오래된 버튼에서도 상태가 일치.</td><td><span class="status future">후속</span></td></tr>
         <tr><td>6</td><td>선택 일정 → 전용 Google Calendar → Samsung Calendar</td><td>실기기에서 생성·변경·삭제 확인, 외부 ID 대응 유지.</td><td><span class="status future">후속</span></td></tr>
         <tr><td>7</td><td>AI 브리핑 계층: ChatGPT 또는 Dot이 허용 Snapshot·선택 Calendar를 읽어 요약. 정시 실행은 예약 작업 사용</td><td>출처·마지막 PC 갱신 시각·오래됨 표시. Dot 없이도 동작.</td><td><span class="status future">후속</span></td></tr>
         <tr><td>8</td><td>AI Action 계층: ChatGPT 또는 Dot의 제안을 공통 Action 초안으로 접수. 향후 제한된 Plugin/MCP 검토</td><td>승인·revision 검증 전 DB 변경 없음. 중복·오래된 요청 거절.</td><td><span class="status future">후속</span></td></tr>
         <tr><td>9–10</td><td>기존 모바일앱의 기기 내 저장·대기 변경·PC 직접 동기화 검증 및 고도화, 필요할 때 Calendar 역방향</td><td>Telegram 없이 오프라인 편집 가능. PC 연결 복구 후 누락·중복·묵시적 덮어쓰기 없이 동기화되고, PC 미연결 상태가 명확히 표시됨.</td><td><span class="status future">선택</span></td></tr>
       </tbody></table></div>
+      <p class="small muted">1–4단계의 로컬 구현 범위와 아직 검증하지 못한 부분은 <a href="HUB_IMPLEMENTATION_SLICE_2026-10-02.md">Hub 구현·검증 경계</a>에 기록했다. 코드 추가만으로 실사용 완료를 선언하지 않는다.</p>
       <p class="small muted">기존 Android 앱과 모바일 브리지 코드는 이미 있다. 이 표의 9단계는 신규 앱을 처음부터 만들겠다는 뜻이 아니라 실제 기기 사용 결과를 바탕으로 기존 앱의 우선 개선 범위를 고른다는 뜻이다.</p>
       <div class="grid2" style="margin-top:20px"><div class="card"><h3>초기 Dot PoC · 핵심 일정 비차단</h3><p>계정에서 Dot을 사용할 수 있는지 확인하고, 연결 권한을 받은 Drive의 가짜 <code>briefing.json</code>과 선택 Calendar를 읽어 본다. 마지막 PC 갱신 시각을 브리핑에 표시하고, 제안과 실제 쓰기 권한이 분리되는지 확인한다. 실제 개인 메모는 올리지 않는다. 사용 불가·권한 부족이면 ChatGPT/예약 작업 경로를 유지한다.</p></div><div class="card"><h3>AI 권한과 역할</h3><p>ChatGPT는 요청 시 분석, Dot은 연결된 허용 자료의 지속 확인·후속 제안, 예약 작업은 정해진 시각의 실행을 맡는다. 모두 Snapshot만 읽고 Action 초안만 제안한다. PC DB 적용·중복·revision·충돌 판정은 TomaDesk가 담당한다. PC 로컬 파일 접근에는 온라인 PC와 열린 ChatGPT 앱이 필요하다.</p></div></div>
     </section>

@@ -888,15 +888,32 @@ class FeatureUpdateTest(unittest.TestCase):
             "name": "백업 대상", "hotkey": "Ctrl+Alt+7", "action_type": "text",
             "payload": {"text": "before"}, "active": True,
         })
+        note_id = self.window.note_store.create_note("미래 메모")
+        self.window.note_store.conn.execute(
+            "CREATE TABLE future_entries (id INTEGER PRIMARY KEY, note_id INTEGER NOT NULL, "
+            "value TEXT NOT NULL, FOREIGN KEY(note_id) REFERENCES notes(id))"
+        )
+        self.window.note_store.conn.execute(
+            "INSERT INTO future_entries(note_id,value) VALUES(?,?)", (note_id, "백업 대상 데이터"),
+        )
+        self.window.note_store.conn.commit()
         with patch.object(main_window.QMessageBox, "information"):
             self.window.export_backup()
         backups = list(self.store.data_dir.glob("backup_*.json"))
         self.assertEqual(len(backups), 1)
+        with backups[0].open(encoding="utf-8") as handle:
+            saved_tables = json.load(handle)["databases"]["alert_notes"]
+        self.assertTrue({
+            "memo_categories", "sync_tombstones", "memo_annotations",
+            "memo_templates", "memo_versions", "future_entries",
+        }.issubset(saved_tables))
 
         self.store.save_action({
             "name": "복원 시 제거", "hotkey": "Ctrl+Alt+8", "action_type": "text",
             "payload": {"text": "after"}, "active": True,
         })
+        self.window.note_store.conn.execute("DELETE FROM future_entries")
+        self.window.note_store.conn.commit()
         application = MagicMock()
         with (
             patch.object(main_window.QFileDialog, "getOpenFileName", return_value=(str(backups[0]), "JSON (*.json)")),
@@ -906,7 +923,27 @@ class FeatureUpdateTest(unittest.TestCase):
         ):
             self.window.import_backup()
         self.assertEqual([row["name"] for row in self.store.actions()], ["백업 대상"])
+        self.assertEqual(
+            self.window.note_store.conn.execute("SELECT value FROM future_entries").fetchone()[0],
+            "백업 대상 데이터",
+        )
         application.quit.assert_called_once()
+
+    def test_old_full_backup_warns_about_missing_memo_metadata_before_restore(self):
+        path = self.store.data_dir / "old_full.json"
+        self.window._export_bundle(path)
+        with path.open(encoding="utf-8") as handle:
+            payload = json.load(handle)
+        for table in ("memo_categories", "sync_tombstones", "memo_annotations",
+                      "memo_templates", "memo_versions"):
+            payload["databases"]["alert_notes"].pop(table)
+        path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        with (
+            patch.object(main_window.QFileDialog, "getOpenFileName", return_value=(str(path), "JSON (*.json)")),
+            patch.object(main_window.QMessageBox, "question", return_value=QMessageBox.StandardButton.No) as question,
+        ):
+            self.window.import_backup()
+        assert "누락된 항목은 복원할 수 없으며" in question.call_args.args[2]
 
     def test_settings_dialog_contains_only_requested_settings(self):
         data_dir = Path(self.temp_dir.name) / "data"

@@ -10,7 +10,8 @@ import re
 import zipfile
 
 from .sqlite_store import (
-    ATTACHMENT_COLUMNS, CATEGORY_COLUMNS, HISTORY_COLUMNS, NOTE_COLUMNS, REMINDER_COLUMNS, SERIES_COLUMNS,
+    ANNOTATION_COLUMNS, ATTACHMENT_COLUMNS, CATEGORY_COLUMNS, HISTORY_COLUMNS, NOTE_COLUMNS,
+    REMINDER_COLUMNS, SERIES_COLUMNS, TEMPLATE_COLUMNS, VERSION_COLUMNS,
 )
 from .sync_identity import new_sync_id, utc_now_ms
 from .link_rewrite import rewrite_internal_links
@@ -22,19 +23,6 @@ LEGACY_ARCHIVE_VERSION = 1
 CORE_MEMO_TABLES = ("notes", "note_attachments", "reminder_series", "reminders", "reminder_history")
 MEMO_TABLES = CORE_MEMO_TABLES + (
     "memo_categories", "sync_tombstones", "memo_annotations", "memo_templates", "memo_versions",
-)
-ANNOTATION_COLUMNS = (
-    "id", "sync_id", "memo_id", "block_id", "start_offset", "end_offset", "quote",
-    "context_before", "context_after", "comment", "location_status", "revision",
-    "created_at_utc", "modified_at_utc", "origin_device_id",
-)
-TEMPLATE_COLUMNS = (
-    "id", "sync_id", "name", "trigger", "sort_order", "payload_version", "payload_json",
-    "revision", "created_at_utc", "modified_at_utc", "origin_device_id",
-)
-VERSION_COLUMNS = (
-    "id", "sync_id", "memo_id", "payload_hash", "payload_json", "kind", "important",
-    "created_at_utc", "origin_device_id",
 )
 MAX_ARCHIVE_ENTRIES = 100_000
 MAX_ARCHIVE_UNCOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024
