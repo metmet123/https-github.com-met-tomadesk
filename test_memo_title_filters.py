@@ -356,6 +356,7 @@ def test_main_panel_refresh_applies_both_title_filters_and_search(tmp_path):
         listing.search.setText("특별")
         assert listing.row_count() == 1
         listing.search.setText("없는 검색어")
+        panel.search_timer.timeout.emit()  # Search is debounced in desktop 0.1.1.
         assert listing.row_count() == 0
         assert listing.filtered_empty_host.isVisible()
     finally:

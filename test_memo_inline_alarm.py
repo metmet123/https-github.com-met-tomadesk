@@ -269,13 +269,30 @@ class SyncTest(unittest.TestCase):
 
     def test_old_database_gets_inline_key_column(self):
         path = Path(self.temp.name) / "notes.db"
+        note_id = self.store.create_note("이전 메모", "원본 내용")
+        due = (datetime.now() + timedelta(days=2)).strftime("%Y%m%d%H%M")
+        self.store.add_reminder(note_id, due, "기존 알림")
         self.store.close()
         import sqlite3
         conn = sqlite3.connect(path)
-        columns = {row[1] for row in conn.execute("PRAGMA table_info(reminders)")}
+        conn.execute("ALTER TABLE reminders DROP COLUMN inline_key")
+        conn.commit()
         conn.close()
-        self.assertIn("inline_key", columns)
         self.store = NoteReminderStore(path, "새 메모")
+        backup_path = self.store.upgrade_backup_path
+        self.assertIsNotNone(backup_path)
+        self.assertTrue(backup_path.is_file())
+        columns = {row[1] for row in self.store.conn.execute("PRAGMA table_info(reminders)")}
+        self.assertIn("inline_key", columns)
+        self.assertEqual(
+            self.store.conn.execute("SELECT content FROM notes WHERE id = ?", (note_id,)).fetchone()[0],
+            "원본 내용",
+        )
+        self.assertEqual(self.store.pending_reminders_for_note(note_id)[0]["memo"], "기존 알림")
+        with sqlite3.connect(backup_path) as backup:
+            old_columns = {row[1] for row in backup.execute("PRAGMA table_info(reminders)")}
+            self.assertNotIn("inline_key", old_columns)
+            self.assertEqual(backup.execute("SELECT content FROM notes WHERE id = ?", (note_id,)).fetchone()[0], "원본 내용")
 
 
 class EditorTest(unittest.TestCase):

@@ -104,10 +104,15 @@ class NoteReminderStore(ReminderStoreMixin, ReminderRecurrenceStoreMixin):
             "memo_templates", "memo_versions",
         }.issubset(tables)
         needs_reminders = "reminders" in tables and self._reminders_need_rebuild()
+        reminder_columns = (
+            {str(row[1]) for row in self.conn.execute("PRAGMA table_info(reminders)")}
+            if "reminders" in tables else set()
+        )
+        needs_inline_alarm = "reminders" in tables and "inline_key" not in reminder_columns
         needs_support = "reminders" in tables and not {"reminder_series", "reminder_history"}.issubset(tables)
         if not (
             needs_schedule or needs_schedule_shape or needs_notes or needs_attachments
-            or needs_reminders or needs_support or needs_sync
+            or needs_reminders or needs_inline_alarm or needs_support or needs_sync
         ):
             return None
         stamp = datetime.now().strftime("%Y%m%d%H%M%S")

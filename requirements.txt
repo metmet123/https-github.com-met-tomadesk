@@ -1,6 +1,7 @@
 PyQt6
 openpyxl
 pywin32
+cryptography>=43
 # Local Windows OCR (no cloud API). All projections use the same tested version.
 winrt-runtime==3.2.1; sys_platform == "win32"
 winrt-Windows.Foundation==3.2.1; sys_platform == "win32"

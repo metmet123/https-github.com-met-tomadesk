@@ -1,5 +1,6 @@
 import json
 import re
+from collections import OrderedDict
 from datetime import datetime
 
 from PyQt6.QtCore import QEvent, QRect, QRectF, QSize, Qt, pyqtSignal
@@ -690,6 +691,7 @@ class MemoListPanel(TitleFilterControls, QWidget):
         search_row.setContentsMargins(0, 0, 0, 0)
         search_row.setSpacing(4)
         self.search = QLineEdit()
+        self.search.setObjectName("memoSearchInput")
         self.search.setPlaceholderText("메모 제목과 내용 검색")
         self.search.setClearButtonEnabled(True)
         self.search.setAccessibleName("알림 메모 검색")
@@ -1314,7 +1316,7 @@ class MemoListPanel(TitleFilterControls, QWidget):
 
     def _resize_table_columns(self) -> None:
         """Fill the current viewport while preserving the column proportions."""
-        if not hasattr(self, "table") or not self.table.isVisible():
+        if self._restoring_expansion or not hasattr(self, "table") or not self.table.isVisible():
             return
         self._sync_folded_columns()
         available = self.table.viewport().width()
@@ -1441,10 +1443,29 @@ class MemoListPanel(TitleFilterControls, QWidget):
         )
 
     def set_rows(self, rows, selected_id: int | None = None) -> None:
+        current = self.table.currentItem()
+        keep_scroll = current is not None and current.data(0, NOTE_ID_ROLE) == selected_id
+        vertical = self.table.verticalScrollBar().value()
+        horizontal = self.table.horizontalScrollBar().value()
+        updates = self.table.updatesEnabled()
+        self.table.setUpdatesEnabled(False)
+        try:
+            self._render_categories = {int(row["id"]): row for row in self.store.categories()} if self.store else {}
+            self._replace_rows(rows, selected_id)
+            if keep_scroll:
+                self.table.verticalScrollBar().setValue(vertical)
+                self.table.horizontalScrollBar().setValue(horizontal)
+        finally:
+            self._render_categories = None
+            self.table.setUpdatesEnabled(updates)
+
+    def _replace_rows(self, rows, selected_id: int | None = None) -> None:
         rows = list(rows)
         live_ids = {int(row["id"]) for row in rows}
-        self._preview_cache = {key: value for key, value in getattr(self, "_preview_cache", {}).items()
-                               if key in live_ids}
+        self._preview_cache = OrderedDict(
+            (key, value) for key, value in getattr(self, "_preview_cache", {}).items()
+            if key in live_ids
+        )
         checked = set(self.checked_ids())
         if not self.searching():
             # 본문에 넣은 페이지는 그 메모의 줄로만 오간다.  목록에는 내놓지
@@ -1611,16 +1632,21 @@ class MemoListPanel(TitleFilterControls, QWidget):
             self._build_children(item, note_id, by_parent, checked, seen)
             item.setData(self.TITLE_COLUMN, CHILD_COUNT_ROLE, item.childCount())
 
-    def _fill_item(self, item: QTreeWidgetItem, row, checked: bool) -> None:
-        note_id = int(row["id"])
-        content = str(row["content"])
-        cache = getattr(self, "_preview_cache", {})
-        cached = cache.get(int(row["id"]))
+    def _preview(self, note_id: int, content: str) -> str:
+        cache = getattr(self, "_preview_cache", OrderedDict())
+        cached = cache.get(note_id)
         if cached is None or cached[0] != content:
             cached = (content, display_plain_text_from_content(content).replace("\n", " ").strip()[:80])
-            cache[int(row["id"])] = cached
+            cache[note_id] = cached
+        cache.move_to_end(note_id)
+        while len(cache) > 512:
+            cache.popitem(last=False)
         self._preview_cache = cache
-        preview = cached[1]
+        return cached[1]
+
+    def _fill_item(self, item: QTreeWidgetItem, row, checked: bool) -> None:
+        note_id = int(row["id"])
+        preview = self._preview(note_id, str(row["content"]))
         # DD3: both live in one column, so they must not look alike —
         # a reminder shows a clock, a D-Day shows a countdown chip.
         parts = []
@@ -1647,7 +1673,10 @@ class MemoListPanel(TitleFilterControls, QWidget):
         item.setCheckState(0, Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
         item.setData(0, PINNED_ROLE, self._pinned(row))
         item.setSizeHint(0, QSize(0, self.ROW_HEIGHT))
-        category = None if row["category_id"] is None or self.store is None else self.store.category(int(row["category_id"]))
+        category_id = row["category_id"]
+        categories = getattr(self, "_render_categories", None)
+        category = (None if category_id is None or self.store is None else
+                    categories.get(int(category_id)) if categories is not None else self.store.category(int(category_id)))
         category_name = str(category["name"]) if category is not None else "미지정"
         category_text = category_name if category is not None else "—"
         for column, value in enumerate(["", title, category_text, list_datetime(row["updated_at"]) ]):
