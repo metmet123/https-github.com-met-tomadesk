@@ -10,8 +10,11 @@ import android.view.*
 import android.widget.*
 import org.json.*
 import com.google.mlkit.vision.barcode.common.Barcode
+import com.google.mlkit.vision.barcode.BarcodeScanning
+import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
+import com.google.mlkit.vision.common.InputImage
 import java.util.UUID
 import java.util.concurrent.Executors
 
@@ -22,6 +25,7 @@ class MainActivity: Activity() {
     private var work=false
     private var selected: JSONObject?=null
     private var pickerActive=false
+    private var qrResultHandler: ((String)->Unit)?=null
     private val executor=Executors.newSingleThreadExecutor()
     private lateinit var root: LinearLayout
     private var documentInput:EditText?=null
@@ -121,26 +125,41 @@ class MainActivity: Activity() {
         val connection=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; visibility=if(state.optString("address").isEmpty())View.VISIBLE else View.GONE }
         val connectionToggle=button("PC 연결 설정") { connection.visibility=if(connection.visibility==View.VISIBLE)View.GONE else View.VISIBLE }
         content.addView(connectionToggle,LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(12) })
-        content.addView(button("PC QR 스캔") {
-            val options=GmsBarcodeScannerOptions.Builder().setBarcodeFormats(Barcode.FORMAT_QR_CODE).build()
-            GmsBarcodeScanning.getClient(this,options).startScan()
-                .addOnSuccessListener { barcode ->
-                    val pairing=try { Pairing.parse(barcode.rawValue ?: "") }
-                    catch(e:IllegalArgumentException) { message(e.message ?: "토마데스크 연결 QR이 아닙니다."); return@addOnSuccessListener }
-                    if(state.optString("address").isNotEmpty() &&
-                        (pairing.address!=state.optString("address") || pairing.fingerprint!=state.optString("pin")) &&
-                        (arr("notes").length()>0 || arr("changes").length()>0)) {
-                        message("다른 PC로 바꾸려면 먼저 현재 메모를 내보내고 앱 데이터를 초기화하세요. 서로 다른 PC의 자료는 자동으로 합치지 않습니다.")
-                        return@addOnSuccessListener
-                    }
+        val acceptQr: (String)->Unit = { raw ->
+            val pairing=try { Pairing.parse(raw) }
+            catch(e:IllegalArgumentException) { message(e.message ?: "토마데스크 연결 QR이 아닙니다."); null }
+            if(pairing!=null) {
+                if(state.optString("address").isNotEmpty() &&
+                    (pairing.address!=state.optString("address") || pairing.fingerprint!=state.optString("pin")) &&
+                    (arr("notes").length()>0 || arr("changes").length()>0)) {
+                    message("다른 PC로 바꾸려면 먼저 현재 메모를 내보내고 앱 데이터를 초기화하세요. 서로 다른 PC의 자료는 자동으로 합치지 않습니다.")
+                } else {
                     AlertDialog.Builder(this).setTitle("PC 연결정보 확인")
-                        .setMessage("본인 PC 화면에서 스캔했는지 확인하세요.\n${pairing.address}\n인증서: ${pairing.fingerprint.take(12)}…")
+                        .setMessage("본인 PC에서 만든 QR인지 확인하세요.\n${pairing.address}\n인증서: ${pairing.fingerprint.take(12)}…")
                         .setPositiveButton("입력") { _,_ ->
                             address.setText(pairing.address); pin.setText(pairing.fingerprint)
                             connection.visibility=View.VISIBLE
                         }.setNegativeButton("취소",null).show()
                 }
+            }
+        }
+        qrResultHandler=acceptQr
+        content.addView(button("PC QR 스캔") {
+            val options=GmsBarcodeScannerOptions.Builder().setBarcodeFormats(Barcode.FORMAT_QR_CODE).build()
+            GmsBarcodeScanning.getClient(this,options).startScan()
+                .addOnSuccessListener { barcode -> acceptQr(barcode.rawValue ?: "") }
                 .addOnFailureListener { message("QR 스캐너를 열지 못했습니다. Google Play 서비스 상태를 확인하거나 주소와 지문을 직접 입력하세요.") }
+        },LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(12) })
+        content.addView(button("갤러리 QR 사진 선택") {
+            pickerActive=true
+            try {
+                startActivityForResult(Intent(Intent.ACTION_GET_CONTENT).apply {
+                    type="image/*"; addCategory(Intent.CATEGORY_OPENABLE)
+                },104)
+            } catch(e:Exception) {
+                pickerActive=false
+                message("사진 선택창을 열지 못했습니다: ${e.message ?: "지원 앱 없음"}")
+            }
         },LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(12) })
         connection.addView(label("처음 한 번, PC의 연결 정보를 입력하세요.",12f).apply { setTextColor(TomaStyle.muted) })
         connection.addView(address); connection.addView(pin); content.addView(connection)
@@ -399,8 +418,27 @@ class MainActivity: Activity() {
         super.onActivityResult(request,result,data)
         if(!pickerActive)return
         pickerActive=false
-        if(result!=RESULT_OK) { if(!unlocked)loginScreen(); return }
+        if(result!=RESULT_OK) { if(!unlocked && request!=104)loginScreen(); return }
         if(request==101) { unlocked=true; home(); return }
+        if(request==104) {
+            val uri=data?.data ?: run { message("QR 사진을 선택하지 못했습니다."); return }
+            executor.execute {
+                try {
+                    val image=InputImage.fromFilePath(this,uri)
+                    val options=BarcodeScannerOptions.Builder().setBarcodeFormats(Barcode.FORMAT_QR_CODE).build()
+                    val scanner=BarcodeScanning.getClient(options)
+                    scanner.process(image)
+                        .addOnSuccessListener { barcodes ->
+                            val raw=barcodes.firstOrNull { it.format==Barcode.FORMAT_QR_CODE && !it.rawValue.isNullOrBlank() }?.rawValue
+                            if(raw==null) message("사진에서 QR 코드를 찾지 못했습니다. QR이 선명하게 보이는 사진을 선택하세요.")
+                            else qrResultHandler?.invoke(raw)
+                        }
+                        .addOnFailureListener { message("QR 사진을 읽지 못했습니다: ${it.message ?: "이미지 오류"}") }
+                        .addOnCompleteListener { scanner.close() }
+                } catch(e:Exception) { runOnUiThread { message("QR 사진을 열지 못했습니다: ${e.message ?: "이미지 오류"}") } }
+            }
+            return
+        }
         // Document picker returns to the same trusted activity; it is not an unlock path.
         if(request==102 || request==103) {
             unlocked=true
