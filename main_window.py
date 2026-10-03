@@ -19,7 +19,9 @@ from action_runner import ActionRunner
 from layout_favorites_panel import WorkspaceSettings
 from layout_workspace import workspace_payload
 from layout_workspace_controller import WorkspaceController
-from alert_notes.database_bundle import export_database_bundle, full_database_schema, import_database_bundle
+from alert_notes.database_bundle import (
+    LEGACY_OPTIONAL_TABLES, export_database_bundle, full_database_schema, import_database_bundle,
+)
 from alert_notes.deadline import (
     deadline_chip_text, deadline_days_left, deadline_title, deadline_urgency,
     set_count_today_as_one,
@@ -4099,11 +4101,12 @@ class MainWindow(QMainWindow):
             notes = databases.get("alert_notes", {})
             if isinstance(notes, dict):
                 missing = {"memo_categories", "memo_annotations", "memo_templates",
-                           "memo_versions", "sync_tombstones"} - set(notes)
+                           "memo_versions", "sync_tombstones", "mobile_receipts",
+                           "mobile_markdown_sources"} - set(notes)
                 if "alert_notes" in databases and missing:
                     missing_memo_warning = (
-                        "이전 백업에는 메모 카테고리·주석·템플릿·버전 또는 동기화 삭제 기록이 "
-                        "포함되지 않았습니다. 누락된 항목은 복원할 수 없으며 현재 기기의 해당 기록은 "
+                        "이전 백업에는 일부 메모·모바일 연동 기록이 포함되지 않았습니다. "
+                        "누락된 항목은 복원할 수 없으며 현재 기기의 해당 기록은 "
                         "비워집니다. 복원 직전 안전 백업에는 현재 기록이 저장됩니다.\n"
                     )
             preview = (
@@ -4120,12 +4123,17 @@ class MainWindow(QMainWindow):
             "현재 단축키 작업·메모·일정·알림·설정을 교체합니다.\n"
             f"{missing_memo_warning}"
             "외부 AI 설정이 포함된 복원은 차단 상태로 적용됩니다. 필요하면 설정에서 다시 허용하세요.\n"
+            "이 PC의 Telegram/Drive 자동 수집도 꺼집니다. 복원 후 기록을 확인하고 다시 켜세요.\n"
             "복원 직전 현재 상태는 안전 백업으로 자동 저장됩니다. 복원할까요?",
         ) != QMessageBox.StandardButton.Yes:
             return
         try:
             safety_path = self.store.backup_dir / f"before_restore_{now_key()}.json"
             self._export_bundle(safety_path)
+            # A restored ledger can be older than downloaded files. Do not
+            # replay them automatically after the app restarts.
+            self.alert_panel.organizer.folder_sync.disable()
+            self.alert_panel.organizer.google_sync.disable()
             import_database_bundle(
                 {
                     "hotkeys": (self.store.conn, full_database_schema(self.store.conn)),
@@ -4133,10 +4141,7 @@ class MainWindow(QMainWindow):
                 },
                 Path(path),
                 legacy_name="hotkeys",
-                optional_missing_tables={"alert_notes": {
-                    "memo_categories", "memo_annotations", "memo_templates", "memo_versions",
-                    "sync_tombstones", "hub_actions", "hub_visible_schedule",
-                }},
+                optional_missing_tables=LEGACY_OPTIONAL_TABLES,
                 reject_unknown_tables=True,
             )
         except Exception as exc:

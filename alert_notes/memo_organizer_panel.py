@@ -1,6 +1,8 @@
 """Offline capture, editable review, and a live view of accepted items."""
 from datetime import date
+from queue import Empty, SimpleQueue
 import sqlite3
+from threading import Thread
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
@@ -12,7 +14,14 @@ from PyQt6.QtWidgets import (
 from .categories import CATEGORIES, schedule_categories
 from .external_ai_policy import ExternalAIPolicy
 from .hub_actions import HubActionStore
+from .hub_folder_dialog import HubFolderDialog
+from .hub_folder_sync import HubFolderSync
+from .hub_google_dialog import HubGoogleDialog
+from .hub_google_drive import DriveAuthorizationRequired
+from .hub_google_sync import HubGoogleSync
 from .hub_snapshot_dialog import HubSnapshotVisibilityDialog
+from .hub_snapshot_sync import HubSnapshotSync
+from .hub_snapshot_sync_dialog import HubSnapshotSyncDialog
 from .memo_organizer import KINDS, validate
 from .memo_organizer_store import DRAFT_KEY, OrganizerStore, DuplicateMemoError
 
@@ -25,6 +34,11 @@ class OrganizerPanel(QWidget):
         self.store = store
         self.repo = OrganizerStore(store)
         self.policy = ExternalAIPolicy(store)
+        self.folder_sync = HubFolderSync(store)
+        self.google_sync = HubGoogleSync(store)
+        self.snapshot_sync = HubSnapshotSync(store)
+        self._drive_results = SimpleQueue()
+        self._drive_thread = None
         self.capture_id = None
         self._loading = False
         self._items = []
@@ -75,6 +89,32 @@ class OrganizerPanel(QWidget):
         self.raw_toggle.setCheckable(True)
         saved_row.addWidget(self.raw_toggle)
         box.addLayout(saved_row)
+        connection_row = QHBoxLayout()
+        connection_row.addWidget(QLabel("Telegram 로컬 수신"))
+        self.folder_status = QLabel("미설정 · 자동 수집 꺼짐")
+        self.folder_status.setWordWrap(True)
+        self.folder_status.setAccessibleName("Telegram 로컬 수신 상태")
+        connection_row.addWidget(self.folder_status, 1)
+        self.folder_settings_button = QPushButton("수신 설정")
+        self.folder_settings_button.clicked.connect(self.configure_folder_sync)
+        connection_row.addWidget(self.folder_settings_button)
+        self.folder_scan_button = QPushButton("지금 확인")
+        self.folder_scan_button.clicked.connect(self.poll_folder_sync)
+        connection_row.addWidget(self.folder_scan_button)
+        box.addLayout(connection_row)
+        drive_row = QHBoxLayout()
+        drive_row.addWidget(QLabel("Google Drive 다운로드"))
+        self.drive_status = QLabel("미설정 · 자동 다운로드 꺼짐")
+        self.drive_status.setWordWrap(True)
+        self.drive_status.setAccessibleName("Google Drive 수신 상태")
+        drive_row.addWidget(self.drive_status, 1)
+        self.drive_settings_button = QPushButton("Drive 설정")
+        self.drive_settings_button.clicked.connect(self.configure_google_sync)
+        drive_row.addWidget(self.drive_settings_button)
+        self.drive_authorize_button = QPushButton("Google 연결")
+        self.drive_authorize_button.clicked.connect(self.authorize_google_sync)
+        drive_row.addWidget(self.drive_authorize_button)
+        box.addLayout(drive_row)
         self.raw = QPlainTextEdit()
         self.raw.setReadOnly(True)
         self.raw.setMaximumHeight(85)
@@ -131,7 +171,13 @@ class OrganizerPanel(QWidget):
         visibility_row = QHBoxLayout()
         visibility_row.addStretch()
         visibility_row.addWidget(self.visibility_button)
+        self.snapshot_sync_button = QPushButton("Snapshot 게시 설정")
+        self.snapshot_sync_button.clicked.connect(self.configure_snapshot_sync)
+        visibility_row.addWidget(self.snapshot_sync_button)
         over.addLayout(visibility_row)
+        self.snapshot_sync_status = QLabel("조회 Snapshot · 자동 게시 꺼짐")
+        self.snapshot_sync_status.setWordWrap(True)
+        over.addWidget(self.snapshot_sync_status)
         split = QSplitter(Qt.Orientation.Vertical)
         self.overview = QTableWidget(0, 6)
         self.overview.setHorizontalHeaderLabels(["완료", "내용", "종류", "날짜·D-day", "분류", "상태"])
@@ -157,6 +203,7 @@ class OrganizerPanel(QWidget):
         self.timer.setInterval(30000)
         self.timer.timeout.connect(self._tick)
         self.timer.start()
+        QTimer.singleShot(0, self._tick)
         self.reload_captures()
         self.refresh_overview()
 
@@ -324,6 +371,11 @@ class OrganizerPanel(QWidget):
         try:
             capture = self.repo.get_capture(self.capture_id)
             external = capture.get("external")
+            if external:
+                try:
+                    self.folder_sync.ensure_replies_started()
+                except (ValueError, OSError) as exc:
+                    self.folder_status.setText(f"회신 기준 오류 · {exc}")
 
             def apply(allow_duplicates=False):
                 if external:
@@ -347,6 +399,8 @@ class OrganizerPanel(QWidget):
             self.reload_captures()
             self.refresh_overview()
             self.changed.emit()
+            if external and count:
+                self.poll_folder_sync()
         except (ValueError, KeyError, sqlite3.Error) as exc:
             self._error(exc)
 
@@ -363,11 +417,16 @@ class OrganizerPanel(QWidget):
             )
             if answer != QMessageBox.StandardButton.Yes:
                 return
+            try:
+                self.folder_sync.ensure_replies_started()
+            except (ValueError, OSError) as exc:
+                self.folder_status.setText(f"회신 기준 오류 · {exc}")
             HubActionStore(self.store).reject(external["action_id"])
             self.status.setText("외부 요청을 거부했습니다. 원문과 영수증은 보존됩니다.")
             self.reload_captures()
             self.refresh_overview()
             self.changed.emit()
+            self.poll_folder_sync()
         except (ValueError, KeyError, sqlite3.Error) as exc:
             self._error(exc)
 
@@ -440,11 +499,169 @@ class OrganizerPanel(QWidget):
         accepted = dialog.exec() == dialog.DialogCode.Accepted
         dialog.deleteLater()
         if accepted:
-            self.status.setText("조회 공개 일정 선택을 저장했습니다. 현재는 외부로 전송하지 않습니다.")
+            self.poll_snapshot_sync()
+            if self.snapshot_sync_status.text() == "조회 Snapshot · 자동 게시 꺼짐":
+                self.status.setText("조회 공개 일정 선택을 저장했습니다. 현재는 외부로 전송하지 않습니다.")
+            else:
+                self.status.setText("조회 공개 일정 선택을 저장했습니다. 게시 상태를 확인해 주세요.")
+
+    def configure_snapshot_sync(self):
+        try:
+            current = self.snapshot_sync.load()
+        except (ValueError, OSError) as exc:
+            self.snapshot_sync_status.setText(f"Snapshot 설정 오류 · {exc}")
+            current = None
+        dialog = HubSnapshotSyncDialog(current, self)
+        accepted = dialog.exec() == dialog.DialogCode.Accepted
+        if accepted:
+            try:
+                self.snapshot_sync.save(dialog.config)
+                self.poll_snapshot_sync()
+            except (ValueError, OSError) as exc:
+                self.snapshot_sync_status.setText(f"Snapshot 설정 저장 오류 · {exc}")
+        dialog.deleteLater()
+
+    def poll_snapshot_sync(self):
+        try:
+            result = self.snapshot_sync.publish_if_due()
+        except (ValueError, OSError, sqlite3.Error) as exc:
+            self.snapshot_sync_status.setText(f"Snapshot 게시 오류 · {exc}")
+            return
+        if result["state"] == "off":
+            self.snapshot_sync_status.setText("조회 Snapshot · 자동 게시 꺼짐")
+            return
+        action = "게시 완료" if result["published"] else "변경 없음"
+        self.snapshot_sync_status.setText(
+            f"조회 Snapshot · {action} · 항목 {result['item_count']}개"
+            f" · 마지막 게시 {result['generated_at_utc']}"
+        )
 
     def _tick(self):
+        self._start_drive_poll()
+        self.poll_folder_sync()
+        self.poll_snapshot_sync()
         if self.isVisible():
             self.refresh_overview()
+
+    def configure_folder_sync(self):
+        try:
+            current = self.folder_sync.load()
+        except (ValueError, OSError) as exc:
+            self.folder_status.setText(f"설정 오류 · {exc} · 다시 설정할 수 있습니다.")
+            current = None
+        dialog = HubFolderDialog(current, self)
+        accepted = dialog.exec() == dialog.DialogCode.Accepted
+        if accepted:
+            try:
+                self.folder_sync.save(dialog.config)
+                self.poll_folder_sync()
+            except (ValueError, OSError) as exc:
+                self.folder_status.setText(f"설정 저장 오류 · {exc}")
+        dialog.deleteLater()
+
+    def poll_folder_sync(self):
+        before = self.store.conn.execute("SELECT COUNT(*) FROM hub_actions").fetchone()[0]
+        try:
+            result = self.folder_sync.scan()
+        except (ValueError, OSError, sqlite3.Error) as exc:
+            imported = self.store.conn.execute("SELECT COUNT(*) FROM hub_actions").fetchone()[0] - before
+            self.folder_status.setText(
+                f"로컬 수신 오류 · {exc}" + (f" · 오류 전 새 입력 {imported}건은 보존됨" if imported else "")
+            )
+            if imported:
+                self.reload_captures()
+                self.changed.emit()
+            return
+        if result["state"] == "off":
+            self.folder_status.setText("미설정 또는 꺼짐 · 자동 수집하지 않음")
+            return
+        self.folder_status.setText(
+            f"로컬 폴더 확인 완료 · 새 입력 {result['new']}건 · 파일 {result['files']}개"
+            f" · 회신 대기 파일 {result['reply_files']}개 생성"
+            f" · {result['checked_at_utc']}"
+        )
+        if result["new"]:
+            self.reload_captures()
+            self.changed.emit()
+
+    def configure_google_sync(self):
+        try:
+            current = self.google_sync.load()
+        except (ValueError, OSError) as exc:
+            self.drive_status.setText(f"Drive 설정 오류 · {exc} · 다시 설정할 수 있습니다.")
+            current = None
+        dialog = HubGoogleDialog(current, self)
+        accepted = dialog.exec() == dialog.DialogCode.Accepted
+        if accepted:
+            try:
+                self.google_sync.save(dialog.config)
+                self._start_drive_poll()
+            except (ValueError, OSError) as exc:
+                self.drive_status.setText(f"Drive 설정 저장 오류 · {exc}")
+        dialog.deleteLater()
+
+    def authorize_google_sync(self):
+        if QMessageBox.question(
+            self, "Google Drive 연결 승인",
+            "Google 계정의 Drive 전체 읽기 권한을 요청합니다. "
+            "TomaDesk는 설정한 폴더의 Telegram 수신 파일만 내려받습니다. "
+            "승인은 Google 브라우저 화면에서 직접 완료해야 합니다. 계속할까요?",
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        self._start_drive_task("authorize")
+
+    def _start_drive_poll(self):
+        try:
+            config = self.google_sync.load()
+        except (ValueError, OSError) as exc:
+            self.drive_status.setText(f"Drive 설정 오류 · {exc}")
+            return
+        if not config or not config["enabled"]:
+            self.drive_status.setText("미설정 또는 꺼짐 · 자동 다운로드하지 않음")
+            return
+        self._start_drive_task("scan")
+
+    def _start_drive_task(self, operation):
+        if self._drive_thread is not None and self._drive_thread.is_alive():
+            return
+        self.drive_status.setText("Google 승인 대기 중" if operation == "authorize" else "Drive 폴더 확인 중")
+
+        def work():
+            try:
+                result = self.google_sync.authorize() if operation == "authorize" else self.google_sync.scan()
+                self._drive_results.put((operation, result, None))
+            except (DriveAuthorizationRequired, ValueError, OSError) as exc:
+                self._drive_results.put((operation, None, str(exc)))
+            except Exception:
+                # Third-party exceptions may include URL/credential details.
+                self._drive_results.put((operation, None, "Drive 요청에 실패했습니다. 계정과 네트워크를 확인해 주세요."))
+
+        self._drive_thread = Thread(target=work, daemon=True, name="TomaDeskDriveInbox")
+        self._drive_thread.start()
+        QTimer.singleShot(250, self._drain_drive_results)
+
+    def _drain_drive_results(self):
+        try:
+            operation, result, error = self._drive_results.get_nowait()
+        except Empty:
+            if self._drive_thread is not None and self._drive_thread.is_alive():
+                QTimer.singleShot(250, self._drain_drive_results)
+            return
+        if error:
+            self.drive_status.setText(f"Drive 오류 · {error}")
+            if operation == "scan":
+                # Earlier files may have been committed before a later Drive
+                # error; consume those safe files without waiting for a timer.
+                self.poll_folder_sync()
+        elif operation == "authorize":
+            self.drive_status.setText("Google 승인 완료 · 수신 폴더 확인 대기")
+            self._start_drive_poll()
+        else:
+            self.drive_status.setText(
+                f"Drive 확인 완료 · 새 다운로드 {result['downloaded']}개 · 조회 파일 {result['listed']}개"
+            )
+            if result["downloaded"]:
+                self.poll_folder_sync()
 
     def showEvent(self, event):
         super().showEvent(event)
