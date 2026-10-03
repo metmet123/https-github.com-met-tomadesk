@@ -38,6 +38,9 @@ env/
 # IDE 임시 설정
 .idea/
 
+# 채팅에서 전달받은 개인 첨부 파일
+.codex-remote-attachments/
+
 # 운영체제 임시 파일
 Thumbs.db
 .DS_Store
