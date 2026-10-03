@@ -8,6 +8,16 @@ from datetime import datetime
 from pathlib import Path
 
 
+LEGACY_OPTIONAL_TABLES = {
+    'hotkeys': {'sqlite_sequence'},
+    'alert_notes': {
+        'memo_categories', 'memo_annotations', 'memo_templates', 'memo_versions',
+        'sync_tombstones', 'hub_actions', 'hub_visible_schedule',
+        'mobile_receipts', 'mobile_markdown_sources', 'sqlite_sequence',
+    },
+}
+
+
 def full_database_schema(conn: sqlite3.Connection) -> dict[str, tuple[str, ...]]:
     """Discover every ordinary application table in FK-safe restore order.
 
@@ -46,6 +56,14 @@ def full_database_schema(conn: sqlite3.Connection) -> dict[str, tuple[str, ...]]
             del dependencies[table]
         for parents in dependencies.values():
             parents.difference_update(ready)
+    # AUTOINCREMENT counters are part of restore fidelity: a deleted highest
+    # row must not cause its ID to be reused after a full restore. SQLite
+    # maintains this one internal table; include it after application rows.
+    sequence = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='sqlite_sequence'"
+    ).fetchone()
+    if sequence:
+        ordered['sqlite_sequence'] = ('name', 'seq')
     return ordered
 
 
@@ -155,13 +173,13 @@ def import_database_bundle(targets: dict, path: Path, legacy_name: str | None = 
                 if had_permission or has_permission:
                     cleaned[table] = [r for r in cleaned[table] if r.get('key') != 'external_ai_allowed']
                     cleaned[table].append({'key': 'external_ai_allowed', 'value': 'false'})
-        plans.append((name, dbpath, table_columns, cleaned))
+        plans.append((name, dbpath, table_columns, cleaned, set(tables)))
     if not plans:
         raise ValueError('이 프로그램에서 복원할 수 있는 데이터베이스가 없습니다.')
     coordinator = sqlite3.connect(plans[0][1].as_uri() + '?mode=rw', uri=True, isolation_level=None)
     try:
         aliases = ['main']
-        for index, (_, dbpath, _, _) in enumerate(plans[1:], 1):
+        for index, (_, dbpath, _, _, _) in enumerate(plans[1:], 1):
             alias = f'restore_{index}'
             coordinator.execute(f'ATTACH DATABASE ? AS {alias}', (dbpath.as_uri() + '?mode=rw',))
             aliases.append(alias)
@@ -172,11 +190,19 @@ def import_database_bundle(targets: dict, path: Path, legacy_name: str | None = 
                 raise ValueError('전체 복원에는 롤백 저널 모드가 필요합니다. 현재 저장 모드에서는 복원을 진행하지 않습니다.')
             coordinator.execute(f'PRAGMA {alias}.synchronous=FULL')
         coordinator.execute('BEGIN IMMEDIATE')
-        for alias, (_, _, columns_by_table, tables) in zip(aliases, plans):
+        for alias, (_, _, columns_by_table, tables, present_tables) in zip(aliases, plans):
             for table in reversed(list(columns_by_table)):
-                coordinator.execute(f'DELETE FROM {alias}.{table}')
+                if table != 'sqlite_sequence':
+                    coordinator.execute(f'DELETE FROM {alias}.{table}')
             for table, columns in columns_by_table.items():
-                _insert_rows(coordinator, table, columns, tables[table], database=alias)
+                if table != 'sqlite_sequence':
+                    _insert_rows(coordinator, table, columns, tables[table], database=alias)
+            # Data inserts update AUTOINCREMENT counters. Replace them only
+            # after all rows are loaded, and only if the backup includes them.
+            if 'sqlite_sequence' in present_tables and 'sqlite_sequence' in columns_by_table:
+                coordinator.execute(f'DELETE FROM {alias}.sqlite_sequence')
+                _insert_rows(coordinator, 'sqlite_sequence', columns_by_table['sqlite_sequence'],
+                             tables['sqlite_sequence'], database=alias)
         for alias in aliases:
             if coordinator.execute(f'PRAGMA {alias}.foreign_key_check').fetchone():
                 raise ValueError('백업의 데이터 참조 관계가 올바르지 않습니다. 복원을 취소했습니다.')

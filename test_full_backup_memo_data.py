@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from hashlib import sha256
 
 import pytest
 
@@ -12,6 +13,8 @@ from alert_notes.sqlite_store import (
     ANNOTATION_COLUMNS, CATEGORY_COLUMNS, NOTE_COLUMNS, SYNC_TOMBSTONE_COLUMNS,
     TEMPLATE_COLUMNS, VERSION_COLUMNS, NoteReminderStore,
 )
+from store import Store
+from tools.audit_full_backup import audit
 
 
 TABLES = (
@@ -189,3 +192,71 @@ def test_unknown_table_in_backup_is_rejected_in_strict_restore(tmp_path):
             )
     finally:
         store.close()
+
+
+def test_fresh_store_restores_mobile_receipts_and_markdown_sources(tmp_path):
+    source = NoteReminderStore(tmp_path / "mobile_source.db")
+    target = NoteReminderStore(tmp_path / "fresh_target.db")
+    try:
+        source.conn.execute(
+            "INSERT INTO mobile_receipts(op_id,payload_hash,result) VALUES(?,?,?)",
+            ("operation-1", "hash-1", '{"sync_id":"memo-1"}'),
+        )
+        source.conn.execute(
+            "INSERT INTO mobile_markdown_sources(sync_id,content_hash,source) VALUES(?,?,?)",
+            ("memo-1", "hash-2", "# 원본 Markdown"),
+        )
+        source.conn.commit()
+        schema = full_database_schema(source.conn)
+        assert {"mobile_receipts", "mobile_markdown_sources"}.issubset(schema)
+        path = export_database_bundle({"alert_notes": (source.conn, schema)}, tmp_path / "mobile.json")
+        assert import_database_bundle(
+            {"alert_notes": (target.conn, full_database_schema(target.conn))}, path,
+            reject_unknown_tables=True,
+        ) == {"alert_notes"}
+        assert target.conn.execute("SELECT result FROM mobile_receipts").fetchone()[0] == '{"sync_id":"memo-1"}'
+        assert target.conn.execute("SELECT source FROM mobile_markdown_sources").fetchone()[0] == "# 원본 Markdown"
+    finally:
+        source.close()
+        target.close()
+
+
+def test_full_restore_preserves_autoincrement_high_water_mark(tmp_path):
+    source = NoteReminderStore(tmp_path / "sequence_source.db")
+    target = NoteReminderStore(tmp_path / "sequence_target.db")
+    try:
+        highest = source.create_note("삭제할 최고 ID")
+        source.conn.execute("DELETE FROM notes WHERE id=?", (highest,))
+        source.conn.commit()
+        assert "sqlite_sequence" in full_database_schema(source.conn)
+        path = export_database_bundle(
+            {"alert_notes": (source.conn, full_database_schema(source.conn))}, tmp_path / "sequence.json",
+        )
+        import_database_bundle(
+            {"alert_notes": (target.conn, full_database_schema(target.conn))}, path,
+            reject_unknown_tables=True,
+        )
+        assert target.create_note("새 메모") > highest
+    finally:
+        source.close()
+        target.close()
+
+
+def test_read_only_audit_uses_temporary_copies_and_keeps_original_bytes(tmp_path):
+    hotkeys_path = tmp_path / "hotkeys.db"
+    notes_path = tmp_path / "notes.db"
+    hotkeys = Store(hotkeys_path, data_dir=tmp_path, backup_dir=tmp_path)
+    notes = NoteReminderStore(notes_path)
+    try:
+        notes.create_note("보존 메모", "본문")
+    finally:
+        hotkeys.close()
+        notes.close()
+    before = {
+        path.name: sha256(path.read_bytes()).hexdigest()
+        for path in (hotkeys_path, notes_path)
+    }
+    summary = audit(hotkeys_path, notes_path)
+    assert summary["alert_notes"]["notes"] == 1
+    assert {path.name: sha256(path.read_bytes()).hexdigest()
+            for path in (hotkeys_path, notes_path)} == before

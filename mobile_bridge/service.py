@@ -11,9 +11,8 @@ from .markdown_codec import to_markdown,from_markdown
 class MobileService:
     def __init__(self, store, busy=lambda: set()):
         self.store=store; self.busy=busy
-        store.conn.execute('CREATE TABLE IF NOT EXISTS mobile_receipts(op_id TEXT PRIMARY KEY,payload_hash TEXT NOT NULL,result TEXT NOT NULL)')
-        store.conn.execute('CREATE TABLE IF NOT EXISTS mobile_markdown_sources(sync_id TEXT PRIMARY KEY, content_hash TEXT NOT NULL, source TEXT NOT NULL)')
-        store.conn.commit()
+        # NoteReminderStore initializes these tables even before the bridge is
+        # opened, so a fresh PC can restore a complete mobile-era backup.
 
     def snapshot(self):
         notes=[]

@@ -127,6 +127,7 @@ class NoteReminderStore(ReminderStoreMixin, ReminderRecurrenceStoreMixin):
             "memo_templates", "memo_versions",
         }.issubset(tables)
         needs_hub_actions = not {"hub_actions", "hub_visible_schedule"}.issubset(tables)
+        needs_mobile_tables = not {"mobile_receipts", "mobile_markdown_sources"}.issubset(tables)
         needs_reminders = "reminders" in tables and self._reminders_need_rebuild()
         reminder_columns = (
             {str(row[1]) for row in self.conn.execute("PRAGMA table_info(reminders)")}
@@ -137,7 +138,7 @@ class NoteReminderStore(ReminderStoreMixin, ReminderRecurrenceStoreMixin):
         if not (
             needs_schedule or needs_schedule_shape or needs_notes or needs_attachments
             or needs_reminders or needs_inline_alarm or needs_support or needs_sync
-            or needs_hub_actions
+            or needs_hub_actions or needs_mobile_tables
         ):
             return None
         stamp = datetime.now().strftime("%Y%m%d%H%M%S%f")
@@ -263,6 +264,12 @@ class NoteReminderStore(ReminderStoreMixin, ReminderRecurrenceStoreMixin):
                 enabled INTEGER NOT NULL DEFAULT 0,
                 created_at_utc TEXT NOT NULL,
                 FOREIGN KEY(schedule_id) REFERENCES schedule_items(id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS mobile_receipts (
+                op_id TEXT PRIMARY KEY, payload_hash TEXT NOT NULL, result TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS mobile_markdown_sources (
+                sync_id TEXT PRIMARY KEY, content_hash TEXT NOT NULL, source TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS reminder_series (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, note_id INTEGER, memo TEXT NOT NULL,
