@@ -97,7 +97,10 @@ class ScheduleUiStage34Test(unittest.TestCase):
                     self.assertLessEqual(button.fontMetrics().horizontalAdvance(button.text()) + 8,
                                          button.width(), button.text())
                 self.assertFalse(p.parse_label.isVisible())
-                self.assertEqual(p.title_edit.toolTip(), p.parse_label.toolTip())
+                expected_tooltip = p.parse_label.toolTip()
+                if p._start < datetime.now():
+                    expected_tooltip += "\n지난 시각입니다. 날짜·시간을 확인해 주세요."
+                self.assertEqual(p.title_edit.toolTip(), expected_tooltip)
                 self.capture(f"{scale}-parsed")
                 before = p.values()
                 for _ in range(3):
