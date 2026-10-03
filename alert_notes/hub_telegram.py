@@ -24,7 +24,8 @@ def text_action(update: object, *, bot_id: int, allowed_user_id: int, allowed_ch
     """Map one paired private text message to a deterministic capture Action."""
     if not all(_positive_id(value) for value in (bot_id, allowed_user_id, allowed_chat_id)):
         raise ValueError("연결된 Telegram 봇·계정 ID가 필요합니다.")
-    if not isinstance(update, dict) or not _positive_id(update.get("update_id")):
+    if (not isinstance(update, dict) or type(update.get("update_id")) is not int
+            or update["update_id"] < 0):
         raise TelegramRejected("invalid_update")
     message = update.get("message")
     if not isinstance(message, dict):
