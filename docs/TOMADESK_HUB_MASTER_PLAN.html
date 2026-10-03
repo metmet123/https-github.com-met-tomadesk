@@ -89,6 +89,7 @@
       </div>
       <div class="callout" style="margin-top:19px"><strong>계약의 핵심</strong> — `action_id`와 출처 이벤트 ID로 중복을 막고, Telegram 전송 시각으로 `내일`을 해석한다. Drive 파일 이동만으로 성공을 판정하지 않는다. DB 처리 영수증은 커밋과 함께 기록하고 Snapshot에는 생성 시각·버전을 넣는다.</div>
       <div class="callout" style="margin-top:19px"><strong>추후 Android 앱 연동 결정</strong> — PC가 꺼져 있거나 연결되지 않아도 메모 작성·수정·열람은 휴대폰의 로컬 저장소에서 계속된다. 미반영 변경은 기기 안에 보존하고, PC에 직접 연결 가능해지면 수동 또는 명시적인 재시도로 동기화한다. 연결 실패를 저장 실패로 표시하거나 임의로 변경을 삭제하지 않는다. 개인 메모 본문·첨부·동기화 대기열을 Telegram·Drive·기타 클라우드 중계에 올리지 않는다. 따라서 PC가 꺼진 동안 PC 반영 및 다른 기기와의 동기화는 불가능하다는 한계를 화면에 분명히 표시한다. PC DB와 모바일 변경이 동시에 달라졌다면 어느 쪽도 묵시적으로 덮어쓰지 않고 충돌 사본/선택 절차로 보존한다. 현재 QR·LAN 직접 연결을 기본 경로로 검증하고, 원격 직접 연결이 필요할 때만 별도 방식을 검토한다. 인증 없는 모바일 브리지 포트를 인터넷에 공개하지 않는다.</div>
+      <div class="callout" style="margin-top:19px"><strong>추후 배포 검토 · 선택형 클라우드 동기화</strong> — 현재 작동하는 QR·LAN 직접 연결은 유지하고 클라우드 동기화를 지금 구현하거나 기본 경로로 바꾸지 않는다. 추후 배포 방향을 결정할 때, 사용자가 직접 연결 또는 클라우드 동기화를 명시적으로 선택할 수 있는 방안을 평가한다. 도입 전에는 계정 연결과 개인 메모·첨부의 클라우드 보관 동의, 저장 공간·운영 비용, PC가 꺼져 있을 때의 대기 및 재개, 양방향 변경 전송, 두 경로를 번갈아 쓸 때의 중복·revision·충돌 사본·첨부 보존을 검증한다. 클라우드 경로는 별도의 데이터 처리 결정이므로 채택 전까지 위의 클라우드 미전송 원칙을 유지한다.</div>
       <div class="callout" style="margin-top:19px"><strong>AI 운영 계층 결정</strong> — ChatGPT·Dot은 허용된 Snapshot의 독자이자 Action 초안 작성자다. Dot은 지속적인 상태 확인·브리핑 제안에 활용하되 PC DB, 동기화 엔진, 필수 인프라를 대체하지 않는다. Dot의 기억이나 분석 결과를 최신 원본으로 취급하지 않고, Android 앱에서 휴대폰에만 저장한 메모를 AI로 보내지 않는다.</div>
     </section>
 
@@ -97,9 +98,9 @@
       <h2>작은 왕복을 완성한 뒤 넓힌다</h2>
       <div class="timeline"><div class="phase"><div class="phase-no">FIRST LOOP · 0–3</div><strong>입력 → 검토 → 반영</strong><p>백업, Action, Telegram 수신, Organizer 승인. Dot 연결 가능성은 비차단 소규모 시험만 한다.</p></div><div class="phase"><div class="phase-no">DAILY USE · 4–5</div><strong>조회 → 완료 → 알림</strong><p>Snapshot을 만들고 오늘 목록과 버튼을 붙인다. 마지막 갱신 시각을 표시한다.</p></div><div class="phase"><div class="phase-no">CONNECTION · 6–8</div><strong>Calendar → AI 계층</strong><p>전용 달력 단방향 표시 후 ChatGPT·Dot 브리핑, AI Action 초안으로 확대한다.</p></div><div class="phase"><div class="phase-no">AFTER USAGE · 9–10</div><strong>모바일앱 → 고급 양방향</strong><p>실제 사용 빈도를 보고 긴 메모·오프라인·충돌 처리에 투자한다.</p></div></div>
       <div class="table-scroll"><table class="roadmap"><thead><tr><th>단계</th><th>개발 결과</th><th>실사용 시작점 / 완료 판정</th><th>상태</th></tr></thead><tbody>
-        <tr><td>0</td><td>실제 DB의 백업·복원 시험, 일정 수정·완료 경로 확인, Telegram 수신 방식 소규모 실험. 별도 비차단 Dot 계정·연결 권한 PoC</td><td>자료 복원 성공. 수신 방식이 중복·누락 없이 확인됨. Dot 사용 불가여도 핵심 단계 진행.</td><td><span class="status warn">착수 전</span></td></tr>
-        <tr><td>1</td><td>Action/Receipt v1, Drive 대기열, PC 영수증, 재시도와 중복 방지</td><td>같은 요청 재전송·PC 재시작에도 적용은 한 번.</td><td><span class="status warn">로컬 계약 구현 · Drive 전</span></td></tr>
-        <tr><td>2</td><td>Telegram 개인 채팅 빠른 입력</td><td>PC가 꺼져 있어도 외부 수신 후 대기. 접수 결과 확인.</td><td><span class="status warn">변환 어댑터 구현 · 수신 전</span></td></tr>
+        <tr><td>0</td><td>실제 DB의 백업·복원 시험, 일정 수정·완료 경로 확인, Telegram 수신 방식 소규모 실험. 별도 비차단 Dot 계정·연결 권한 PoC</td><td>자료 복원 성공. 수신 방식이 중복·누락 없이 확인됨. Dot 사용 불가여도 핵심 단계 진행.</td><td><span class="status warn">현재 설정 DB 복원 감사 완료 · 실제 봇 시험 전</span></td></tr>
+        <tr><td>1</td><td>Action/Receipt v1, Drive 대기열, PC 영수증, 재시도와 중복 방지</td><td>같은 요청 재전송·PC 재시작에도 적용은 한 번.</td><td><span class="status warn">PC Drive 다운로드 코드 구현 · 계정 승인·실시험 전</span></td></tr>
+        <tr><td>2</td><td>Telegram 개인 채팅 빠른 입력</td><td>PC가 꺼져 있어도 외부 수신 후 대기. 접수 결과 확인.</td><td><span class="status warn">수신기 시제품 구현 · 배포·회신 전</span></td></tr>
         <tr><td>3</td><td>Organizer 외부 수집·검토, 일정/할 일/일반 메모 반영, 결과 회신</td><td>휴대폰 문장 한 건이 PC 승인 후 정확히 한 번 반영.</td><td><span class="status warn">로컬 승인 구현 · 결과 회신 전</span></td></tr>
         <tr><td>4</td><td>오늘 일정·미완료 할 일·D-Day의 최소 Snapshot</td><td>비공개 항목 제외, 오래된 Snapshot 표시, 마지막 성공본 유지.</td><td><span class="status warn">공개 선택·로컬 JSON 구현 · 게시 전</span></td></tr>
         <tr><td>5</td><td><code>/today</code>·<code>/task</code>·<code>/dday</code>, 완료 버튼, 필요한 알림</td><td>완료 버튼 연타·PC 오프라인·오래된 버튼에서도 상태가 일치.</td><td><span class="status future">후속</span></td></tr>
@@ -110,6 +111,7 @@
       </tbody></table></div>
       <p class="small muted">1–4단계의 로컬 구현 범위와 아직 검증하지 못한 부분은 <a href="HUB_IMPLEMENTATION_SLICE_2026-10-02.md">Hub 구현·검증 경계</a>에 기록했다. 코드 추가만으로 실사용 완료를 선언하지 않는다.</p>
       <p class="small muted">기존 Android 앱과 모바일 브리지 코드는 이미 있다. 이 표의 9단계는 신규 앱을 처음부터 만들겠다는 뜻이 아니라 실제 기기 사용 결과를 바탕으로 기존 앱의 우선 개선 범위를 고른다는 뜻이다.</p>
+      <p class="small muted">선택형 클라우드 동기화는 9단계의 확정 구현 범위가 아니다. 현재 직접 연결 사용 결과와 추후 배포 요구를 확인한 뒤 별도로 채택 여부·제공 범위·검증 기준을 결정한다.</p>
       <div class="grid2" style="margin-top:20px"><div class="card"><h3>초기 Dot PoC · 핵심 일정 비차단</h3><p>계정에서 Dot을 사용할 수 있는지 확인하고, 연결 권한을 받은 Drive의 가짜 <code>briefing.json</code>과 선택 Calendar를 읽어 본다. 마지막 PC 갱신 시각을 브리핑에 표시하고, 제안과 실제 쓰기 권한이 분리되는지 확인한다. 실제 개인 메모는 올리지 않는다. 사용 불가·권한 부족이면 ChatGPT/예약 작업 경로를 유지한다.</p></div><div class="card"><h3>AI 권한과 역할</h3><p>ChatGPT는 요청 시 분석, Dot은 연결된 허용 자료의 지속 확인·후속 제안, 예약 작업은 정해진 시각의 실행을 맡는다. 모두 Snapshot만 읽고 Action 초안만 제안한다. PC DB 적용·중복·revision·충돌 판정은 TomaDesk가 담당한다. PC 로컬 파일 접근에는 온라인 PC와 열린 ChatGPT 앱이 필요하다.</p></div></div>
     </section>
 
